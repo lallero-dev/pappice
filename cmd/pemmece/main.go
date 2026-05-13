@@ -32,9 +32,6 @@ func main() {
 	smtpPassword := flag.String("smtp-password", envOr("PEMMECE_SMTP_PASSWORD", ""), "SMTP password")
 	smtpFrom := flag.String("smtp-from", envOr("PEMMECE_SMTP_FROM", ""), "sender address for email notifications")
 	smtpTLSMode := flag.String("smtp-tls-mode", envOr("PEMMECE_SMTP_TLS_MODE", "starttls"), "SMTP TLS mode: starttls, tls, or none")
-	var repoRoots stringListFlag
-	repoRoots.Set(envOr("PEMMECE_REPO_ROOTS", ""))
-	flag.Var(&repoRoots, "repo-root", "allowed repository scan root; may be repeated")
 	flag.Parse()
 
 	tracker, err := store.Open(*dbPath)
@@ -81,7 +78,6 @@ func main() {
 		Handler: server.New(tracker, server.Options{
 			AllowInsecureWebhooks: *allowInsecureWebhooks,
 			AllowPrivateWebhooks:  *allowPrivateWebhooks,
-			RepoRoots:             repoRoots.Values(),
 			EmailNotifications:    emailEnabled,
 			PublicURL:             *publicURL,
 		}),
@@ -142,26 +138,4 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
-}
-
-type stringListFlag []string
-
-func (f *stringListFlag) Set(value string) error {
-	for _, item := range strings.FieldsFunc(value, func(r rune) bool {
-		return r == os.PathListSeparator || r == ','
-	}) {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			*f = append(*f, item)
-		}
-	}
-	return nil
-}
-
-func (f *stringListFlag) String() string {
-	return strings.Join(*f, string(os.PathListSeparator))
-}
-
-func (f *stringListFlag) Values() []string {
-	return append([]string(nil), *f...)
 }

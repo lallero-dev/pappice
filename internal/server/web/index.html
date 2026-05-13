@@ -12,12 +12,12 @@
         <span class="brand-mark">P</span>
         <div>
           <strong>Pemmece</strong>
-          <span>issue tracker</span>
+          <span>customer support</span>
         </div>
       </div>
       <nav class="topnav" id="topNav" hidden>
-        <button class="nav-button active" id="issuesTab" type="button">Issues</button>
-        <button class="nav-button" id="projectTab" type="button">Project</button>
+        <button class="nav-button active" id="issuesTab" type="button">Tickets</button>
+        <button class="nav-button" id="projectTab" type="button">Product</button>
         <button class="nav-button" id="adminTab" type="button">Admin</button>
       </nav>
       <div class="topbar-actions">
@@ -25,7 +25,7 @@
         <span class="user-pill" id="userLabel" hidden></span>
         <button class="ghost-button" id="refreshButton" type="button" title="Refresh" hidden>Refresh</button>
         <button class="ghost-button" id="logoutButton" type="button" hidden>Logout</button>
-        <button class="primary-button" id="newIssueButton" type="button" hidden>New Issue</button>
+        <button class="primary-button" id="newIssueButton" type="button" hidden>New Ticket</button>
       </div>
     </header>
 
@@ -68,13 +68,13 @@
     <main class="shell" id="appView" hidden>
       <aside class="sidebar">
         <section class="filter-section project-picker">
-          <label for="projectFilter">Project</label>
+          <label for="projectFilter">Product</label>
           <select id="projectFilter">
-            <option value="">All projects</option>
+            <option value="">All products</option>
           </select>
         </section>
 
-        <section class="summary-grid" aria-label="Issue summary">
+        <section class="summary-grid" aria-label="Ticket summary">
           <button class="metric active" data-filter-status="">
             <span class="metric-value" id="countAll">0</span>
             <span class="metric-label">All</span>
@@ -108,10 +108,10 @@
         </div>
 
         <div class="content-grid">
-          <section class="issue-pane" aria-label="Issues">
+          <section class="issue-pane" aria-label="Tickets">
             <div class="table-head">
               <span>ID</span>
-              <span>Issue</span>
+              <span>Ticket</span>
               <span>Status</span>
               <span>Priority</span>
               <span>Updated</span>
@@ -119,7 +119,7 @@
             <div class="issue-list" id="issueList"></div>
           </section>
 
-          <aside class="detail-pane" id="detailPane" aria-label="Issue details"></aside>
+          <aside class="detail-pane" id="detailPane" aria-label="Ticket details"></aside>
         </div>
       </section>
 
@@ -127,7 +127,7 @@
         <div class="admin-grid">
           <section class="admin-panel">
             <div class="panel-head">
-              <h2>Projects</h2>
+              <h2>Products</h2>
               <button class="ghost-button" id="addProjectButton" type="button">New</button>
             </div>
             <div class="admin-list" id="projectList"></div>
@@ -179,19 +179,7 @@
 
           <section class="admin-panel">
             <div class="panel-head">
-              <h2>Repository</h2>
-              <div class="panel-actions">
-                <button class="ghost-button" id="configureRepoButton" type="button">Configure</button>
-                <button class="ghost-button" id="scanRepoButton" type="button">Scan</button>
-              </div>
-            </div>
-            <div class="repo-status" id="repoStatus"></div>
-            <div class="admin-list" id="commitList"></div>
-          </section>
-
-          <section class="admin-panel">
-            <div class="panel-head">
-              <h2>Project Webhooks</h2>
+              <h2>Product Webhooks</h2>
               <button class="ghost-button" id="addWebhookButton" type="button">New</button>
             </div>
             <div class="admin-list" id="webhookList"></div>
@@ -208,7 +196,7 @@
     </main>
 
     <template id="emptyTemplate">
-      <div class="empty-state">No issues match this view.</div>
+      <div class="empty-state">No tickets match this view.</div>
     </template>
 
     <pm-modal id="modalHost"></pm-modal>

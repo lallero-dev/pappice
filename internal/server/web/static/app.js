@@ -24,8 +24,6 @@ const state = {
   emailNotifications: [],
   deliveries: [],
   tokens: [],
-  commits: [],
-  repo: null,
   user: null,
   csrf: "",
   view: "issues",
@@ -33,7 +31,6 @@ const state = {
   selectedId: null,
   meta: {
     statuses: [],
-    severities: [],
     priorities: [],
     roles: [],
     projectRoles: [],
@@ -86,10 +83,6 @@ const els = {
   addGlobalWebhookButton: document.querySelector("#addGlobalWebhookButton"),
   globalWebhookList: document.querySelector("#globalWebhookList"),
   emailList: document.querySelector("#emailList"),
-  configureRepoButton: document.querySelector("#configureRepoButton"),
-  scanRepoButton: document.querySelector("#scanRepoButton"),
-  repoStatus: document.querySelector("#repoStatus"),
-  commitList: document.querySelector("#commitList"),
   deliveryList: document.querySelector("#deliveryList"),
   modalHost: document.querySelector("#modalHost")
 };
@@ -186,7 +179,6 @@ function showApp() {
 async function loadHealth() {
   const meta = await request("/api/health");
   state.meta.statuses = meta.statuses || [];
-  state.meta.severities = meta.severities || [];
   state.meta.priorities = meta.priorities || [];
   state.meta.roles = meta.roles || [];
   state.meta.projectRoles = meta.project_roles || [];
@@ -222,12 +214,12 @@ async function loadIssues() {
   const countParams = new URLSearchParams();
   if (projectID) countParams.set("project_id", String(projectID));
   const [payload, countsPayload] = await Promise.all([
-    request(`/api/issues?${params.toString()}`),
-    request(`/api/issues?${countParams.toString()}`)
+    request(`/api/tickets?${params.toString()}`),
+    request(`/api/tickets?${countParams.toString()}`)
   ]);
   if (projectID !== (state.selectedProjectId || null)) return;
-  state.issues = payload.issues || [];
-  state.issueCounts = countIssues(countsPayload.issues || []);
+  state.issues = payload.tickets || [];
+  state.issueCounts = countIssues(countsPayload.tickets || []);
   if (state.selectedId && !state.issues.some((issue) => issue.id === state.selectedId)) {
     state.selectedId = state.issues[0]?.id || null;
   }
@@ -244,7 +236,7 @@ async function loadAdmin() {
 
 async function loadProjectAdmin() {
   if (!state.selectedProjectId || !canManageProject()) return;
-  await Promise.all([loadUsers(), loadMembers(), loadRepo(), loadProjectWebhooks(), loadProjectDeliveries()]);
+  await Promise.all([loadUsers(), loadMembers(), loadProjectWebhooks(), loadProjectDeliveries()]);
 }
 
 async function loadUsers() {
@@ -289,16 +281,9 @@ async function loadProjectDeliveries() {
   renderDeliveries();
 }
 
-async function loadRepo() {
-  const payload = await request(`/api/projects/${state.selectedProjectId}/repo`);
-  state.repo = payload.repo;
-  state.commits = payload.commits || [];
-  renderRepo();
-}
-
 function renderProjectSelectors() {
   const options = state.projects.map((project) => ({ value: String(project.id), label: `${project.key} / ${project.name}` }));
-  fillSelect(els.projectFilter, options, state.projects.length === 0 ? "No projects" : "All projects");
+  fillSelect(els.projectFilter, options, state.projects.length === 0 ? "No products" : "All products");
   els.projectFilter.value = state.selectedProjectId ? String(state.selectedProjectId) : "";
 }
 
@@ -340,7 +325,7 @@ function countIssues(issues) {
 function renderIssueList() {
   els.issueList.replaceChildren();
   if (state.projects.length === 0) {
-    els.issueList.append(el("div", { className: "empty-state" }, "No projects yet."));
+    els.issueList.append(el("div", { className: "empty-state" }, "No products yet."));
     return;
   }
   if (state.issues.length === 0) {
@@ -370,10 +355,9 @@ function renderIssueList() {
 
 function issueTitle(issue) {
   const wrap = el("span", { className: "issue-title" });
-  const commitText = issue.commits?.length ? ` / ${issue.commits.length} commit${issue.commits.length === 1 ? "" : "s"}` : "";
   wrap.append(
     el("strong", {}, issue.title),
-    el("span", {}, `${issue.project_key || issue.project || "Project"}${issue.assignee ? ` / ${issue.assignee}` : ""}${commitText}`)
+    el("span", {}, `${issue.project_key || issue.project || "Product"}${issue.assignee ? ` / ${issue.assignee}` : ""}`)
   );
   return wrap;
 }
@@ -382,7 +366,7 @@ function renderDetail() {
   els.detailPane.replaceChildren();
   const issue = selectedIssue();
   if (!issue) {
-    els.detailPane.append(el("div", { className: "empty-state" }, "No issue selected."));
+    els.detailPane.append(el("div", { className: "empty-state" }, "No ticket selected."));
     return;
   }
   const header = el("div", { className: "detail-header" });
@@ -392,7 +376,6 @@ function renderDetail() {
   controls.append(
     selectControl("Status", issue.status, state.meta.statuses, (value) => patchIssue(issue.id, { status: value })),
     selectControl("Priority", issue.priority, state.meta.priorities, (value) => patchIssue(issue.id, { priority: value })),
-    selectControl("Severity", issue.severity, state.meta.severities, (value) => patchIssue(issue.id, { severity: value })),
     textControl("Assignee", issue.assignee || "", (value) => patchIssue(issue.id, { assignee: value }))
   );
   if (!canEditIssue()) {
@@ -405,7 +388,6 @@ function renderDetail() {
     controls,
     el("div", { className: "description" }, issue.description || "No description."),
     tagRow(issue.tags || []),
-    commitBlock(issue.commits || []),
     comments(issue),
     canCommentIssue() ? commentForm(issue) : el("div")
   ];
@@ -418,9 +400,8 @@ function detailMeta(issue) {
   const meta = el("div", { className: "detail-meta" });
   meta.append(
     badge(issue.status, `status-${issue.status}`),
-    badge(issue.severity, `severity-${issue.severity}`),
     el("span", {}, issue.key || `#${issue.id}`),
-    el("span", {}, `Reporter ${issue.reporter || "unknown"}`),
+    el("span", {}, `Requester ${issue.requester || "unknown"}`),
     el("span", {}, `Created ${relativeTime(issue.created_at)}`)
   );
   return meta;
@@ -434,25 +415,6 @@ function requesterBlock(issue) {
     el("span", {}, `${issue.requester_name || "Unknown"}${issue.requester_email ? ` / ${issue.requester_email}` : ""}`),
     badge(issue.source || "staff", "priority-normal")
   );
-  return block;
-}
-
-function commitBlock(commits) {
-  const block = el("div", { className: "commit-block" });
-  block.append(el("h3", {}, "Commits"));
-  if (commits.length === 0) {
-    block.append(el("p", { className: "muted" }, "No linked commits."));
-    return block;
-  }
-  for (const commit of commits) {
-    const item = el("div", { className: "commit-item" });
-    item.append(
-      el("code", {}, commit.short_hash || commit.hash.slice(0, 8)),
-      el("span", {}, commit.subject),
-      el("small", {}, `${commit.author || "unknown"} / ${relativeTime(commit.date)}`)
-    );
-    block.append(item);
-  }
   return block;
 }
 
@@ -580,32 +542,10 @@ function renderEmailNotifications(enabled) {
     const row = el("div", { className: "admin-row" });
     row.append(
       el("div", { className: "admin-row-main" }, `${notification.event} / ${notification.recipient_email}`),
-      badge(notification.status, notification.status === "failed" ? "severity-crash" : "priority-normal"),
+      badge(notification.status, notification.status === "failed" ? "priority-urgent" : "priority-normal"),
       el("span", { className: "muted" }, notification.last_error || relativeTime(notification.created_at))
     );
     els.emailList.append(row);
-  }
-}
-
-function renderRepo() {
-  if (!state.repo) return;
-  const scanned = state.repo.last_scanned_at ? `Last scan ${relativeTime(state.repo.last_scanned_at)}` : "Not scanned";
-  const configured = state.repo.path ? state.repo.path : "No repository configured";
-  els.repoStatus.textContent = state.repo.last_error ? `${configured}. ${scanned}. ${state.repo.last_error}` : `${configured}. ${scanned}`;
-  els.commitList.replaceChildren();
-  const commits = state.commits.slice(0, 30);
-  if (commits.length === 0) {
-    els.commitList.append(el("div", { className: "empty-inline" }, "No linked commits."));
-    return;
-  }
-  for (const commit of commits) {
-    const row = el("div", { className: "admin-row" });
-    row.append(
-      el("code", {}, `#${commit.issue_id} ${commit.short_hash || commit.hash.slice(0, 8)}`),
-      el("div", { className: "admin-row-main" }, commit.subject),
-      el("span", { className: "muted" }, commit.author || "unknown")
-    );
-    els.commitList.append(row);
   }
 }
 
@@ -646,7 +586,7 @@ function comments(issue) {
     item.classList.toggle("internal", comment.visibility === "internal");
     item.append(
       el("strong", {}, `${comment.author} / ${relativeTime(comment.created_at)}`),
-      comment.visibility === "internal" ? badge("internal", "severity-major") : el("span"),
+      comment.visibility === "internal" ? badge("internal", "priority-normal") : el("span"),
       el("p", {}, comment.body)
     );
     list.append(item);
@@ -679,12 +619,12 @@ function commentForm(issue) {
 }
 
 async function patchIssue(id, patch) {
-  await request(`/api/issues/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  await request(`/api/tickets/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
   await loadIssues();
 }
 
 async function addComment(id, comment) {
-  await request(`/api/issues/${id}/comments`, { method: "POST", body: JSON.stringify(comment) });
+  await request(`/api/tickets/${id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   await loadIssues();
 }
 
@@ -726,24 +666,6 @@ async function testWebhook(id) {
   if (canManageProject()) await Promise.all([loadProjectWebhooks(), loadProjectDeliveries()]);
 }
 
-async function scanRepo() {
-  setConnection("Scanning");
-  try {
-    const payload = await request(`/api/projects/${state.selectedProjectId}/repo/scan`, { method: "POST" });
-    state.repo = payload.repo;
-    state.commits = payload.commits || [];
-    renderRepo();
-    await loadIssues();
-    setConnection("Ready");
-  } catch (error) {
-    if (error.payload?.repo) {
-      state.repo = error.payload.repo;
-      renderRepo();
-    }
-    throw error;
-  }
-}
-
 function selectOptions(values) {
   return values.map((value) => ({ value, label: labelize(value) }));
 }
@@ -755,26 +677,24 @@ function openIssueModal() {
     ? state.selectedProjectId
     : creatableProjects[0]?.id;
   if (!projectId) {
-    showError(new Error("Create a project before adding issues"));
+    showError(new Error("Create a product before adding tickets"));
     return;
   }
   els.modalHost.open({
-    title: "New Issue",
+    title: "New Ticket",
     submitText: "Create",
     values: {
       project_id: String(projectId),
-      severity: "minor",
       priority: "normal"
     },
     fields: [
       { name: "title", label: "Title", required: true, maxlength: 160, autocomplete: "off" },
       { name: "description", label: "Description", type: "textarea", rows: 5 },
       { group: [
-        { name: "project_id", label: "Project", type: "select", options: projects, required: true },
+        { name: "project_id", label: "Product", type: "select", options: projects, required: true },
         { name: "assignee", label: "Assignee", autocomplete: "off" }
       ] },
       { group: [
-        { name: "severity", label: "Severity", type: "select", options: selectOptions(state.meta.severities) },
         { name: "priority", label: "Priority", type: "select", options: selectOptions(state.meta.priorities) }
       ] },
       { name: "tags", label: "Tags", autocomplete: "off", placeholder: "ui, regression" }
@@ -786,11 +706,10 @@ function openIssueModal() {
         description: data.description,
         project_id: targetProjectId,
         assignee: data.assignee,
-        severity: data.severity,
         priority: data.priority,
         tags: splitList(data.tags)
       };
-      const created = await request(`/api/projects/${targetProjectId}/issues`, { method: "POST", body: JSON.stringify(issue) });
+      const created = await request(`/api/projects/${targetProjectId}/tickets`, { method: "POST", body: JSON.stringify(issue) });
       state.selectedProjectId = targetProjectId;
       state.selectedId = created.id;
       await loadProjects();
@@ -800,7 +719,7 @@ function openIssueModal() {
 
 function openProjectModal() {
   els.modalHost.open({
-    title: "New Project",
+    title: "New Product",
     submitText: "Create",
     fields: [
       { group: [
@@ -889,7 +808,7 @@ function openMemberModal() {
     .filter((user) => !user.disabled)
     .map((user) => ({ value: String(user.id), label: `${user.display_name || user.username} / ${user.username}` }));
   els.modalHost.open({
-    title: "Add Project Member",
+    title: "Add Product Member",
     submitText: "Save",
     fields: [
       { name: "user_id", label: "User", type: "select", options: users },
@@ -903,14 +822,14 @@ function openMemberModal() {
 
 function openWebhookModal(scope) {
   els.modalHost.open({
-    title: scope === "global" ? "New Global Webhook" : "New Project Webhook",
+    title: scope === "global" ? "New Global Webhook" : "New Product Webhook",
     submitText: "Create",
     fields: [
       { group: [
         { name: "name", label: "Name", required: true, autocomplete: "off" },
         { name: "url", label: "URL", required: true, placeholder: "https://example.test/hook", autocomplete: "off" }
       ] },
-      { name: "events", label: "Events", placeholder: "issue.created, issue.updated, issue.commented" },
+      { name: "events", label: "Events", placeholder: "ticket.created, ticket.updated, ticket.commented" },
       { name: "enabled", label: "Enabled", type: "checkbox", checked: true }
     ],
     onSubmit: async (data) => {
@@ -922,27 +841,6 @@ function openWebhookModal(scope) {
       }
       await request(`/api/projects/${state.selectedProjectId}/webhooks`, { method: "POST", body: JSON.stringify(payload) });
       await loadProjectWebhooks();
-    }
-  });
-}
-
-async function openRepoModal() {
-  if (!state.repo) await loadRepo();
-  els.modalHost.open({
-    title: "Repository Settings",
-    submitText: "Save",
-    values: { path: state.repo?.path || "", scan_limit: state.repo?.scan_limit || 200 },
-    fields: [
-      { name: "path", label: "Repository path", placeholder: "/path/to/repo", autocomplete: "off" },
-      { name: "scan_limit", label: "Scan limit", type: "number", min: 1, max: 1000, step: 1, value: 200 }
-    ],
-    onSubmit: async (data) => {
-      const payload = await request(`/api/projects/${state.selectedProjectId}/repo`, {
-        method: "PATCH",
-        body: JSON.stringify({ path: String(data.path || ""), scan_limit: Number(data.scan_limit || 200) })
-      });
-      state.repo = payload.repo;
-      renderRepo();
     }
   });
 }
@@ -1008,8 +906,6 @@ function bindEvents() {
   els.addMemberButton.addEventListener("click", () => openMemberModal());
   els.addGlobalWebhookButton.addEventListener("click", () => openWebhookModal("global"));
   els.addWebhookButton.addEventListener("click", () => openWebhookModal("project"));
-  els.configureRepoButton.addEventListener("click", () => openRepoModal().catch(showError));
-  els.scanRepoButton.addEventListener("click", () => scanRepo().catch(showError));
 }
 
 function switchView(view) {
@@ -1061,7 +957,7 @@ function canCreateIssue(projectId = state.selectedProjectId) {
   if (!projectId) {
     return state.projects.some((project) => canCreateIssue(project.id));
   }
-  return isAdmin() || ["owner", "developer", "reporter"].includes(projectRole(projectId));
+  return isAdmin() || ["owner", "agent", "customer"].includes(projectRole(projectId));
 }
 
 function canCommentIssue() {
@@ -1070,7 +966,7 @@ function canCommentIssue() {
 
 function canEditIssue() {
   const projectId = selectedIssue()?.project_id || state.selectedProjectId;
-  return Boolean(projectId) && (isAdmin() || ["owner", "developer"].includes(projectRole(projectId)));
+  return Boolean(projectId) && (isAdmin() || ["owner", "agent"].includes(projectRole(projectId)));
 }
 
 function setConnection(text) {

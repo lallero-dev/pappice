@@ -27,8 +27,7 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 
 	issue, err := tracker.CreateIssue(CreateIssue{
 		ProjectID: projects[0].ID,
-		Title:     "Crash on import",
-		Severity:  "crash",
+		Title:     "Cannot import invoice",
 		Priority:  "urgent",
 		Tags:      []string{"import", "Import", "regression"},
 	})
@@ -92,7 +91,7 @@ func TestStoreValidation(t *testing.T) {
 	}
 	projectID := tracker.ListProjects(admin)[0].ID
 
-	_, err = tracker.CreateIssue(CreateIssue{ProjectID: projectID, Severity: "minor", Priority: "normal"})
+	_, err = tracker.CreateIssue(CreateIssue{ProjectID: projectID, Priority: "normal"})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty title error = %v, want ErrValidation", err)
 	}
@@ -162,16 +161,144 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	hook, err := tracker.CreateWebhook(CreateWebhook{
 		Name:    "local",
 		URL:     "http://127.0.0.1/hook",
-		Events:  []string{"issue.created"},
+		Events:  []string{"ticket.created"},
 		Enabled: &enabled,
 	})
 	if err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
 	projectID := tracker.ListProjects(admin)[0].ID
-	hooks := tracker.ListWebhooksForEvent("issue.created", projectID)
+	hooks := tracker.ListWebhooksForEvent("ticket.created", projectID)
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
 		t.Fatalf("event hooks = %#v", hooks)
+	}
+}
+
+func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse", Email: "admin@example.test"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	if _, err := tracker.UpdateUser(admin.ID, UpdateUser{Disabled: boolPtr(true)}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("disable sole admin error = %v, want ErrValidation", err)
+	}
+	user, err := tracker.CreateUser(CreateUser{Username: "Bob", Password: "correct horse", Email: "bob@example.test"})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	updatedUser, err := tracker.UpdateUser(user.ID, UpdateUser{
+		DisplayName: strPtr("Client Bob"),
+		Email:       strPtr("client-bob@example.test"),
+		Role:        strPtr("client"),
+		Password:    strPtr("new password"),
+	})
+	if err != nil {
+		t.Fatalf("update user: %v", err)
+	}
+	if updatedUser.Role != "client" || updatedUser.Email != "client-bob@example.test" {
+		t.Fatalf("updated user = %#v", updatedUser)
+	}
+	users := tracker.ListUsers()
+	if len(users) != 2 {
+		t.Fatalf("users = %#v", users)
+	}
+
+	project, err := tracker.CreateProject(CreateProject{Key: "OPS", Name: "Operations"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	project, err = tracker.UpdateProject(project.ID, UpdateProject{Name: strPtr("Operations Desk")})
+	if err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	if project.Name != "Operations Desk" {
+		t.Fatalf("project = %#v", project)
+	}
+	if _, err := tracker.UpsertProjectMember(project.ID, UpsertProjectMember{UserID: user.ID, Role: "customer"}); err != nil {
+		t.Fatalf("upsert member: %v", err)
+	}
+	if role, ok := tracker.ProjectRole(user.ID, project.ID); !ok || role != "customer" {
+		t.Fatalf("project role = %q %v", role, ok)
+	}
+	if err := tracker.DeleteProjectMember(project.ID, user.ID); err != nil {
+		t.Fatalf("delete member: %v", err)
+	}
+	if _, ok := tracker.ProjectRole(user.ID, project.ID); ok {
+		t.Fatal("project role should be removed")
+	}
+
+	enabled := false
+	hook, err := tracker.CreateWebhook(CreateWebhook{
+		ProjectID: &project.ID,
+		Name:      "project hook",
+		URL:       "https://hooks.example.test/incoming",
+		Events:    []string{"*"},
+		Enabled:   &enabled,
+	})
+	if err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+	hooks := tracker.ListWebhooks(&project.ID)
+	if len(hooks) != 1 || hooks[0].ID != hook.ID {
+		t.Fatalf("project hooks = %#v", hooks)
+	}
+	enabled = true
+	hook, err = tracker.UpdateWebhook(hook.ID, UpdateWebhook{
+		Name:    strPtr("renamed hook"),
+		Enabled: &enabled,
+	})
+	if err != nil {
+		t.Fatalf("update webhook: %v", err)
+	}
+	if hook.Name != "renamed hook" || !hook.Enabled {
+		t.Fatalf("updated hook = %#v", hook)
+	}
+	if err := tracker.RecordDelivery(WebhookDelivery{WebhookID: hook.ID, ProjectID: &project.ID, Event: "ticket.created", StatusCode: 204}); err != nil {
+		t.Fatalf("record delivery: %v", err)
+	}
+	deliveries := tracker.ListDeliveries(10)
+	if len(deliveries) != 1 || deliveries[0].StatusCode != 204 {
+		t.Fatalf("deliveries = %#v", deliveries)
+	}
+
+	issue, err := tracker.CreateIssue(CreateIssue{ProjectID: project.ID, Title: "Numbered support ticket"})
+	if err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	if gotID, ok := tracker.IssueIDByProjectNumber(project.ID, issue.Number); !ok || gotID != issue.ID {
+		t.Fatalf("ticket by project number = %d %v", gotID, ok)
+	}
+
+	queued, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
+		UserID:         user.ID,
+		RecipientEmail: updatedUser.Email,
+		RecipientName:  updatedUser.DisplayName,
+		Event:          "ticket.updated",
+		Subject:        "Updated",
+		BodyText:       "Body",
+	}})
+	if err != nil {
+		t.Fatalf("enqueue email: %v", err)
+	}
+	if err := tracker.MarkEmailFailed(queued[0].ID, errors.New("temporary failure"), 1); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	notifications := tracker.ListEmailNotifications(10)
+	if len(notifications) != 1 || notifications[0].Status != "failed" || notifications[0].LastError != "temporary failure" {
+		t.Fatalf("notifications = %#v", notifications)
+	}
+	if err := tracker.DeleteWebhook(hook.ID); err != nil {
+		t.Fatalf("delete webhook: %v", err)
+	}
+	if err := tracker.DeleteUser(user.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	if err := tracker.DeleteProject(project.ID); err != nil {
+		t.Fatalf("delete project: %v", err)
 	}
 }
 
@@ -223,39 +350,39 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 		t.Fatalf("create admin: %v", err)
 	}
 	projectID := tracker.ListProjects(admin)[0].ID
-	reporter, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse", Email: "bob@example.test"})
+	customer, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse", Email: "bob@example.test"})
 	if err != nil {
-		t.Fatalf("create reporter: %v", err)
+		t.Fatalf("create customer: %v", err)
 	}
 	assignee, err := tracker.CreateUser(CreateUser{Username: "alice", Password: "correct horse", Email: "alice@example.test"})
 	if err != nil {
 		t.Fatalf("create assignee: %v", err)
 	}
-	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: reporter.ID, Role: "reporter"}); err != nil {
-		t.Fatalf("add reporter member: %v", err)
+	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: customer.ID, Role: "customer"}); err != nil {
+		t.Fatalf("add customer member: %v", err)
 	}
-	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: assignee.ID, Role: "developer"}); err != nil {
+	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: assignee.ID, Role: "agent"}); err != nil {
 		t.Fatalf("add assignee member: %v", err)
 	}
 	issue, err := tracker.CreateIssue(CreateIssue{
 		ProjectID: projectID,
 		Title:     "Notify operators",
-		Reporter:  reporter.Username,
+		Reporter:  customer.Username,
 		Assignee:  assignee.Username,
 	})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 
-	createdRecipients := tracker.IssueEmailRecipients("issue.created", issue, reporter)
-	if !hasRecipient(createdRecipients, admin.Email) || hasRecipient(createdRecipients, reporter.Email) {
-		t.Fatalf("created recipients = %#v, want admin only excluding actor reporter", createdRecipients)
+	createdRecipients := tracker.IssueEmailRecipients("ticket.created", issue, customer)
+	if !hasRecipient(createdRecipients, admin.Email) || hasRecipient(createdRecipients, customer.Email) {
+		t.Fatalf("created recipients = %#v, want admin only excluding actor customer", createdRecipients)
 	}
-	commentRecipients := tracker.IssueEmailRecipients("issue.commented", issue, reporter)
-	if !hasRecipient(commentRecipients, assignee.Email) || hasRecipient(commentRecipients, reporter.Email) {
-		t.Fatalf("comment recipients = %#v, want assignee excluding actor reporter", commentRecipients)
+	commentRecipients := tracker.IssueEmailRecipients("ticket.commented", issue, customer)
+	if !hasRecipient(commentRecipients, assignee.Email) || hasRecipient(commentRecipients, customer.Email) {
+		t.Fatalf("comment recipients = %#v, want assignee excluding actor customer", commentRecipients)
 	}
-	assignedRecipients := tracker.IssueEmailRecipients("issue.assigned", issue, admin)
+	assignedRecipients := tracker.IssueEmailRecipients("ticket.assigned", issue, admin)
 	if !hasRecipient(assignedRecipients, assignee.Email) {
 		t.Fatalf("assigned recipients = %#v, want assignee", assignedRecipients)
 	}
@@ -266,7 +393,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 		UserID:         assignee.ID,
 		RecipientEmail: assignee.Email,
 		RecipientName:  assignee.DisplayName,
-		Event:          "issue.assigned",
+		Event:          "ticket.assigned",
 		Subject:        "[PME-1] Assigned",
 		BodyText:       "assigned",
 	}})
@@ -344,4 +471,12 @@ func hasRecipient(recipients []EmailRecipient, email string) bool {
 		}
 	}
 	return false
+}
+
+func strPtr(value string) *string {
+	return &value
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }

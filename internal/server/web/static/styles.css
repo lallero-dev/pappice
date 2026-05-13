@@ -437,12 +437,12 @@ button:focus-visible {
 }
 
 .status-new,
-.status-acknowledged {
+.status-open {
   background: #edf6ff;
   color: var(--blue-dark);
 }
 
-.status-confirmed,
+.status-pending,
 .status-assigned {
   background: #fff4db;
   color: #7a4b00;
@@ -455,23 +455,17 @@ button:focus-visible {
 }
 
 .priority-urgent,
-.priority-high,
-.severity-crash,
-.severity-blocker {
+.priority-high {
   background: #fff1f0;
   color: var(--red);
 }
 
-.priority-normal,
-.severity-major,
-.severity-minor {
+.priority-normal {
   background: #eef2f6;
   color: #3a4a5a;
 }
 
-.priority-low,
-.severity-trivial,
-.severity-feature {
+.priority-low {
   background: #eaf7ef;
   color: var(--green);
 }
@@ -576,40 +570,6 @@ button:focus-visible {
   gap: 8px;
 }
 
-.commit-block {
-  display: grid;
-  gap: 8px;
-}
-
-.commit-block h3 {
-  font-size: 13px;
-  margin: 0;
-}
-
-.commit-item {
-  align-items: center;
-  background: var(--panel-strong);
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 78px minmax(0, 1fr);
-  padding: 8px;
-}
-
-.commit-item span,
-.commit-item small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.commit-item small {
-  color: var(--muted);
-  grid-column: 2;
-}
-
 .muted {
   color: var(--muted);
 }
@@ -706,7 +666,6 @@ button:focus-visible {
   display: none;
 }
 
-.repo-status,
 .empty-inline {
   color: var(--muted);
   font-size: 12px;

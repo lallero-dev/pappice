@@ -134,9 +134,9 @@ class SupportPortal extends HTMLElement {
         <p class="muted">Your registered account email will receive no-reply ticket notifications.</p>
         <form id="ticketForm">
           <label>
-            Project
+            Product
             <select name="project_id" required ${disabled}>
-              ${options || '<option value="">No support projects assigned</option>'}
+              ${options || '<option value="">No support products assigned</option>'}
             </select>
           </label>
           <label>

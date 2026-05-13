@@ -14,12 +14,10 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"pemmece/internal/gitrepo"
 	"pemmece/internal/security"
 	"pemmece/internal/store"
 )
@@ -32,7 +30,6 @@ const sessionCookieName = "pemmece_session"
 type Options struct {
 	AllowInsecureWebhooks bool
 	AllowPrivateWebhooks  bool
-	RepoRoots             []string
 	EmailNotifications    bool
 	PublicURL             string
 }
@@ -91,8 +88,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/support/tickets/", s.handleSupportTicketByToken)
 	s.mux.HandleFunc("/api/projects", s.handleProjects)
 	s.mux.HandleFunc("/api/projects/", s.handleProjectByID)
-	s.mux.HandleFunc("/api/issues", s.handleIssues)
-	s.mux.HandleFunc("/api/issues/", s.handleIssueByID)
+	s.mux.HandleFunc("/api/tickets", s.handleTickets)
+	s.mux.HandleFunc("/api/tickets/", s.handleTicketByID)
 	s.mux.HandleFunc("/api/users", s.handleUsers)
 	s.mux.HandleFunc("/api/users/", s.handleUserByID)
 	s.mux.HandleFunc("/api/tokens", s.handleTokens)
@@ -101,8 +98,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/webhooks/", s.handleWebhookByID)
 	s.mux.HandleFunc("/api/webhook-deliveries", s.handleWebhookDeliveries)
 	s.mux.HandleFunc("/api/email-notifications", s.handleEmailNotifications)
-	s.mux.HandleFunc("/api/repo", s.handleLegacyRepo)
-	s.mux.HandleFunc("/api/repo/scan", s.handleLegacyRepo)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -153,17 +148,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"name":              "pemmece",
-		"started_at":        s.started,
-		"needs_setup":       s.store.SetupRequired(),
-		"statuses":          store.Statuses(),
-		"severities":        store.Severities(),
-		"priorities":        store.Priorities(),
-		"roles":             store.Roles(),
-		"project_roles":     store.ProjectRoles(),
-		"webhook_events":    store.Events(),
-		"repo_scan_enabled": len(s.options.RepoRoots) > 0,
-		"email_enabled":     s.options.EmailNotifications,
+		"name":           "pemmece",
+		"started_at":     s.started,
+		"needs_setup":    s.store.SetupRequired(),
+		"statuses":       store.Statuses(),
+		"priorities":     store.Priorities(),
+		"roles":          store.Roles(),
+		"project_roles":  store.ProjectRoles(),
+		"webhook_events": store.Events(),
+		"email_enabled":  s.options.EmailNotifications,
 	})
 }
 
@@ -298,7 +291,7 @@ func (s *Server) handleSupportTickets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !s.canCreateIssue(auth.User, input.ProjectID) {
-			respondError(w, http.StatusForbidden, "project ticket access is required")
+			respondError(w, http.StatusForbidden, "product ticket access is required")
 			return
 		}
 		requesterEmail := strings.TrimSpace(auth.User.Email)
@@ -311,7 +304,6 @@ func (s *Server) handleSupportTickets(w http.ResponseWriter, r *http.Request) {
 			ProjectID:      input.ProjectID,
 			Title:          input.Title,
 			Description:    input.Description,
-			Severity:       "minor",
 			Priority:       "normal",
 			Reporter:       auth.User.Username,
 			Source:         "portal",
@@ -323,8 +315,8 @@ func (s *Server) handleSupportTickets(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
-		s.emitIssueEvent("issue.created", issue, auth.User)
-		s.enqueueRequesterEmail("issue.created", issue, "Pemmece Support")
+		s.emitIssueEvent("ticket.created", issue, auth.User)
+		s.enqueueRequesterEmail("ticket.created", issue, "Pemmece Support")
 		respondJSON(w, http.StatusCreated, map[string]any{
 			"ticket": publicTicket(issue),
 			"url":    s.ticketURL(issue.CustomerToken),
@@ -380,9 +372,9 @@ func (s *Server) handleSupportTicketByToken(w http.ResponseWriter, r *http.Reque
 			respondStoreError(w, err)
 			return
 		}
-		s.emitIssueEvent("issue.commented", updated, auth.User)
+		s.emitIssueEvent("ticket.commented", updated, auth.User)
 		if !s.isSupportTicketRequester(auth.User, issue) {
-			s.enqueueRequesterEmail("issue.commented", updated, author)
+			s.enqueueRequesterEmail("ticket.commented", updated, author)
 		}
 		publicIssue, err := s.store.GetIssueByCustomerToken(token)
 		if err != nil {
@@ -435,7 +427,7 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || projectID < 1 {
-		respondError(w, http.StatusBadRequest, "invalid project id")
+		respondError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 	if len(parts) == 1 {
@@ -445,10 +437,8 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 	switch parts[1] {
 	case "members":
 		s.handleProjectMembers(w, r, auth, projectID, parts[2:])
-	case "issues":
+	case "tickets":
 		s.handleProjectIssues(w, r, auth, projectID)
-	case "repo":
-		s.handleProjectRepo(w, r, auth, projectID, parts[2:])
 	case "webhooks":
 		s.handleProjectWebhooks(w, r, auth, projectID)
 	case "webhook-deliveries":
@@ -479,7 +469,7 @@ func (s *Server) handleSingleProject(w http.ResponseWriter, r *http.Request, aut
 		respondJSON(w, http.StatusOK, project)
 	case http.MethodPatch:
 		if !s.canManageProject(auth.User, projectID) {
-			respondError(w, http.StatusForbidden, "project owner access is required")
+			respondError(w, http.StatusForbidden, "product owner access is required")
 			return
 		}
 		var patch store.UpdateProject
@@ -509,7 +499,7 @@ func (s *Server) handleSingleProject(w http.ResponseWriter, r *http.Request, aut
 
 func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64, rest []string) {
 	if !s.canManageProject(auth.User, projectID) {
-		respondError(w, http.StatusForbidden, "project owner access is required")
+		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
 	if len(rest) == 0 {
@@ -563,14 +553,13 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
 		respondJSON(w, http.StatusOK, map[string]any{
-			"issues":     issues,
+			"tickets":    issues,
 			"statuses":   store.Statuses(),
-			"severities": store.Severities(),
 			"priorities": store.Priorities(),
 		})
 	case http.MethodPost:
 		if !s.canCreateIssue(auth.User, projectID) {
-			respondError(w, http.StatusForbidden, "project write access is required")
+			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
 		var input store.CreateIssue
@@ -584,14 +573,14 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			respondStoreError(w, err)
 			return
 		}
-		s.emitIssueEvent("issue.created", issue, auth.User)
+		s.emitIssueEvent("ticket.created", issue, auth.User)
 		respondJSON(w, http.StatusCreated, issue)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
-func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
@@ -606,14 +595,14 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 			Status:    query.Get("status"),
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
-		respondJSON(w, http.StatusOK, map[string]any{"issues": issues})
+		respondJSON(w, http.StatusOK, map[string]any{"tickets": issues})
 	case http.MethodPost:
 		var input store.CreateIssue
 		if !decodeJSON(w, r, &input) {
 			return
 		}
 		if !s.canCreateIssue(auth.User, input.ProjectID) {
-			respondError(w, http.StatusForbidden, "project write access is required")
+			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
 		input.Reporter = auth.User.Username
@@ -622,26 +611,26 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
-		s.emitIssueEvent("issue.created", issue, auth.User)
+		s.emitIssueEvent("ticket.created", issue, auth.User)
 		respondJSON(w, http.StatusCreated, issue)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
-func (s *Server) handleIssueByID(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTicketByID(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/issues/"), "/"), "/")
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tickets/"), "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
 	}
 	id, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || id < 1 {
-		respondError(w, http.StatusBadRequest, "invalid issue id")
+		respondError(w, http.StatusBadRequest, "invalid ticket id")
 		return
 	}
 	issue, err := s.store.GetIssue(id)
@@ -662,14 +651,6 @@ func (s *Server) handleIssueByID(w http.ResponseWriter, r *http.Request) {
 		s.handleComments(w, r, auth, issue)
 		return
 	}
-	if len(parts) == 2 && parts[1] == "commits" {
-		if r.Method != http.MethodGet {
-			methodNotAllowed(w, http.MethodGet)
-			return
-		}
-		respondJSON(w, http.StatusOK, map[string]any{"commits": s.store.ListCommitLinks(issue.ID)})
-		return
-	}
 	http.NotFound(w, r)
 }
 
@@ -679,7 +660,7 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 		respondJSON(w, http.StatusOK, issue)
 	case http.MethodPatch:
 		if !s.canEditIssue(auth.User, issue.ProjectID) {
-			respondError(w, http.StatusForbidden, "project developer access is required")
+			respondError(w, http.StatusForbidden, "agent access is required")
 			return
 		}
 		var patch store.UpdateIssue
@@ -691,9 +672,9 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 			respondStoreError(w, err)
 			return
 		}
-		s.emitIssueEvent("issue.updated", updated, auth.User)
+		s.emitIssueEvent("ticket.updated", updated, auth.User)
 		if patch.Assignee != nil && strings.TrimSpace(*patch.Assignee) != "" && !strings.EqualFold(strings.TrimSpace(*patch.Assignee), strings.TrimSpace(issue.Assignee)) {
-			s.emitIssueEvent("issue.assigned", updated, auth.User)
+			s.emitIssueEvent("ticket.assigned", updated, auth.User)
 		}
 		respondJSON(w, http.StatusOK, updated)
 	default:
@@ -707,7 +688,7 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		return
 	}
 	if !s.canCommentIssue(auth.User, issue.ProjectID) {
-		respondError(w, http.StatusForbidden, "project comment access is required")
+		respondError(w, http.StatusForbidden, "product comment access is required")
 		return
 	}
 	var input store.AddComment
@@ -716,7 +697,7 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 	}
 	input.Visibility = defaultString(input.Visibility, "public")
 	if input.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
-		respondError(w, http.StatusForbidden, "project developer access is required for internal notes")
+		respondError(w, http.StatusForbidden, "agent access is required for internal notes")
 		return
 	}
 	input.Author = defaultString(auth.User.DisplayName, auth.User.Username)
@@ -725,9 +706,9 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		respondStoreError(w, err)
 		return
 	}
-	s.emitIssueEvent("issue.commented", updated, auth.User)
 	if input.Visibility == "public" {
-		s.enqueueRequesterEmail("issue.commented", updated, defaultString(auth.User.DisplayName, auth.User.Username))
+		s.emitIssueEvent("ticket.commented", updated, auth.User)
+		s.enqueueRequesterEmail("ticket.commented", updated, defaultString(auth.User.DisplayName, auth.User.Username))
 	}
 	respondJSON(w, http.StatusCreated, updated)
 }
@@ -871,7 +852,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProjectWebhooks(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
 	if !s.canManageProject(auth.User, projectID) {
-		respondError(w, http.StatusForbidden, "project owner access is required")
+		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
 	switch r.Method {
@@ -923,7 +904,7 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if !s.canManageProject(auth.User, *hook.ProjectID) {
-		respondError(w, http.StatusForbidden, "project owner access is required")
+		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
 	if len(parts) == 2 && parts[1] == "test" {
@@ -1002,7 +983,7 @@ func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
 	if !s.canManageProject(auth.User, projectID) {
-		respondError(w, http.StatusForbidden, "project owner access is required")
+		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -1020,120 +1001,6 @@ func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request,
 		filtered = filtered[:50]
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"deliveries": filtered})
-}
-
-func (s *Server) handleProjectRepo(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64, rest []string) {
-	if len(rest) == 1 && rest[0] == "scan" {
-		s.handleProjectRepoScan(w, r, auth, projectID)
-		return
-	}
-	if len(rest) != 0 {
-		http.NotFound(w, r)
-		return
-	}
-	if !s.canReadProject(auth.User, projectID) {
-		respondError(w, http.StatusNotFound, "not found")
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		respondJSON(w, http.StatusOK, map[string]any{
-			"repo":    s.store.RepoConfig(projectID),
-			"commits": s.store.ListProjectCommitLinks(projectID),
-		})
-	case http.MethodPatch:
-		if !s.canManageProject(auth.User, projectID) {
-			respondError(w, http.StatusForbidden, "project owner access is required")
-			return
-		}
-		var input store.RepoConfig
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		if err := s.validateRepoPath(input.Path); err != nil && strings.TrimSpace(input.Path) != "" {
-			respondError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		config, err := s.store.SetRepoConfig(projectID, input)
-		if err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		respondJSON(w, http.StatusOK, map[string]any{"repo": config})
-	default:
-		methodNotAllowed(w, http.MethodGet, http.MethodPatch)
-	}
-}
-
-func (s *Server) handleProjectRepoScan(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
-	if !s.canManageProject(auth.User, projectID) {
-		respondError(w, http.StatusForbidden, "project owner access is required")
-		return
-	}
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w, http.MethodPost)
-		return
-	}
-	project, err := s.store.GetProject(projectID)
-	if err != nil {
-		respondStoreError(w, err)
-		return
-	}
-	config := s.store.RepoConfig(projectID)
-	if strings.TrimSpace(config.Path) == "" {
-		respondError(w, http.StatusBadRequest, "repository path is not configured")
-		return
-	}
-	if err := s.validateRepoPath(config.Path); err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	commits, err := gitrepo.Scan(ctx, config.Path, config.ScanLimit)
-	if err != nil {
-		config, _ = s.store.ReplaceCommitLinks(projectID, config.Path, nil, err.Error())
-		respondJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "repo": config})
-		return
-	}
-	links := make([]store.CommitLink, 0)
-	for _, commit := range commits {
-		for _, ref := range commit.IssueRefs {
-			if ref.ProjectKey != "" && !strings.EqualFold(ref.ProjectKey, project.Key) {
-				continue
-			}
-			issueID, ok := s.store.IssueIDByProjectNumber(projectID, ref.Number)
-			if !ok {
-				continue
-			}
-			links = append(links, store.CommitLink{
-				ProjectID: projectID,
-				IssueID:   issueID,
-				RepoPath:  config.Path,
-				Hash:      commit.Hash,
-				ShortHash: commit.ShortHash,
-				Author:    commit.Author,
-				Email:     commit.Email,
-				Date:      commit.Date,
-				Subject:   commit.Subject,
-			})
-		}
-	}
-	config, err = s.store.ReplaceCommitLinks(projectID, config.Path, links, "")
-	if err != nil {
-		respondStoreError(w, err)
-		return
-	}
-	s.emitRepoEvent("repo.scanned", project, config, len(links), auth.User)
-	respondJSON(w, http.StatusOK, map[string]any{"repo": config, "commits": links})
-}
-
-func (s *Server) handleLegacyRepo(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireStaff(w, r)
-	if !ok {
-		return
-	}
-	respondError(w, http.StatusGone, "repository settings are project-scoped; use /api/projects/{id}/repo")
 }
 
 func (s *Server) issueSession(w http.ResponseWriter, userID int64) (string, bool) {
@@ -1251,15 +1118,15 @@ func (s *Server) canManageProject(user store.User, projectID int64) bool {
 }
 
 func (s *Server) canCreateIssue(user store.User, projectID int64) bool {
-	return s.hasProjectRole(user, projectID, "owner", "developer", "reporter")
+	return s.hasProjectRole(user, projectID, "owner", "agent", "customer")
 }
 
 func (s *Server) canCommentIssue(user store.User, projectID int64) bool {
-	return s.hasProjectRole(user, projectID, "owner", "developer", "reporter")
+	return s.hasProjectRole(user, projectID, "owner", "agent", "customer")
 }
 
 func (s *Server) canEditIssue(user store.User, projectID int64) bool {
-	return s.hasProjectRole(user, projectID, "owner", "developer")
+	return s.hasProjectRole(user, projectID, "owner", "agent")
 }
 
 func (s *Server) canAccessSupportTicket(user store.User, issue store.Issue) bool {
@@ -1298,7 +1165,7 @@ func (s *Server) emitIssueEvent(event string, issue store.Issue, actor store.Use
 		"event":      event,
 		"created_at": time.Now().UTC(),
 		"actor":      store.ToPublicUser(actor),
-		"issue":      issue,
+		"ticket":     issue,
 	}
 	body, _ := json.Marshal(payload)
 	for _, hook := range s.store.ListWebhooksForEvent(event, issue.ProjectID) {
@@ -1354,14 +1221,14 @@ func (s *Server) enqueueRequesterEmail(event string, issue store.Issue, actorNam
 
 func (s *Server) requesterEmailContent(event string, issue store.Issue, actorName string) (string, string, string) {
 	action := issueEventAction(event)
-	if event == "issue.created" {
+	if event == "ticket.created" {
 		action = "Received"
 	}
 	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, action, issue.Title)
 	link := s.ticketURL(issue.CustomerToken)
 	var text strings.Builder
 	fmt.Fprintf(&text, "%s\n\n", subject)
-	if strings.TrimSpace(actorName) != "" && event == "issue.commented" {
+	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
 		fmt.Fprintf(&text, "%s replied to your ticket.\n\n", actorName)
 	}
 	if link != "" {
@@ -1372,7 +1239,7 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 	var htmlBody strings.Builder
 	htmlBody.WriteString("<!doctype html><meta charset=\"utf-8\">")
 	fmt.Fprintf(&htmlBody, "<h1>%s</h1>", html.EscapeString(subject))
-	if strings.TrimSpace(actorName) != "" && event == "issue.commented" {
+	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
 		fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> replied to your ticket.</p>", html.EscapeString(actorName))
 	}
 	if link != "" {
@@ -1398,13 +1265,13 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 	var text strings.Builder
 	fmt.Fprintf(&text, "%s %s %s\n\n", actorName, strings.ToLower(action), issue.Key)
 	fmt.Fprintf(&text, "Title: %s\n", issue.Title)
-	fmt.Fprintf(&text, "Project: %s\n", projectLabel)
-	fmt.Fprintf(&text, "Status: %s\nSeverity: %s\nPriority: %s\n", issue.Status, issue.Severity, issue.Priority)
+	fmt.Fprintf(&text, "Product: %s\n", projectLabel)
+	fmt.Fprintf(&text, "Status: %s\nPriority: %s\n", issue.Status, issue.Priority)
 	if strings.TrimSpace(issue.Assignee) != "" {
 		fmt.Fprintf(&text, "Assignee: %s\n", issue.Assignee)
 	}
 	if strings.TrimSpace(issue.Reporter) != "" {
-		fmt.Fprintf(&text, "Reporter: %s\n", issue.Reporter)
+		fmt.Fprintf(&text, "Requester: %s\n", issue.Reporter)
 	}
 	if link != "" {
 		fmt.Fprintf(&text, "Open: %s\n", link)
@@ -1412,7 +1279,7 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 	if strings.TrimSpace(issue.Description) != "" {
 		fmt.Fprintf(&text, "\n%s\n", issue.Description)
 	}
-	if event == "issue.commented" && len(issue.Comments) > 0 {
+	if event == "ticket.commented" && len(issue.Comments) > 0 {
 		comment := issue.Comments[len(issue.Comments)-1]
 		fmt.Fprintf(&text, "\nLatest comment from %s:\n%s\n", comment.Author, comment.Body)
 	}
@@ -1422,9 +1289,8 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 	fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> %s <strong>%s</strong>.</p>", html.EscapeString(actorName), html.EscapeString(strings.ToLower(action)), html.EscapeString(issue.Key))
 	htmlBody.WriteString("<dl>")
 	fmt.Fprintf(&htmlBody, "<dt>Title</dt><dd>%s</dd>", html.EscapeString(issue.Title))
-	fmt.Fprintf(&htmlBody, "<dt>Project</dt><dd>%s</dd>", html.EscapeString(projectLabel))
+	fmt.Fprintf(&htmlBody, "<dt>Product</dt><dd>%s</dd>", html.EscapeString(projectLabel))
 	fmt.Fprintf(&htmlBody, "<dt>Status</dt><dd>%s</dd>", html.EscapeString(issue.Status))
-	fmt.Fprintf(&htmlBody, "<dt>Severity</dt><dd>%s</dd>", html.EscapeString(issue.Severity))
 	fmt.Fprintf(&htmlBody, "<dt>Priority</dt><dd>%s</dd>", html.EscapeString(issue.Priority))
 	if strings.TrimSpace(issue.Assignee) != "" {
 		fmt.Fprintf(&htmlBody, "<dt>Assignee</dt><dd>%s</dd>", html.EscapeString(issue.Assignee))
@@ -1436,7 +1302,7 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 	if strings.TrimSpace(issue.Description) != "" {
 		fmt.Fprintf(&htmlBody, "<pre>%s</pre>", html.EscapeString(issue.Description))
 	}
-	if event == "issue.commented" && len(issue.Comments) > 0 {
+	if event == "ticket.commented" && len(issue.Comments) > 0 {
 		comment := issue.Comments[len(issue.Comments)-1]
 		fmt.Fprintf(&htmlBody, "<h2>Latest comment from %s</h2><pre>%s</pre>", html.EscapeString(comment.Author), html.EscapeString(comment.Body))
 	}
@@ -1445,29 +1311,14 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 
 func issueEventAction(event string) string {
 	switch event {
-	case "issue.created":
+	case "ticket.created":
 		return "Created"
-	case "issue.commented":
+	case "ticket.commented":
 		return "Commented on"
-	case "issue.assigned":
+	case "ticket.assigned":
 		return "Assigned"
 	default:
 		return "Updated"
-	}
-}
-
-func (s *Server) emitRepoEvent(event string, project store.Project, config store.RepoConfig, commitLinks int, actor store.User) {
-	payload := map[string]any{
-		"event":        event,
-		"created_at":   time.Now().UTC(),
-		"actor":        store.ToPublicUser(actor),
-		"project":      project,
-		"repo":         config,
-		"commit_links": commitLinks,
-	}
-	body, _ := json.Marshal(payload)
-	for _, hook := range s.store.ListWebhooksForEvent(event, project.ID) {
-		go s.deliverWebhook(hook, event, 0, body)
 	}
 }
 
@@ -1549,36 +1400,6 @@ func (s *Server) validateWebhookTarget(raw string) error {
 	return nil
 }
 
-func (s *Server) validateRepoPath(raw string) error {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	if len(s.options.RepoRoots) == 0 {
-		return fmt.Errorf("repository scanning is disabled; configure PEMMECE_REPO_ROOTS or -repo-root")
-	}
-	path, err := filepath.Abs(raw)
-	if err != nil {
-		return fmt.Errorf("invalid repository path")
-	}
-	if evaluated, err := filepath.EvalSymlinks(path); err == nil {
-		path = evaluated
-	}
-	for _, root := range s.options.RepoRoots {
-		rootAbs, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-		if evaluated, err := filepath.EvalSymlinks(rootAbs); err == nil {
-			rootAbs = evaluated
-		}
-		rel, err := filepath.Rel(rootAbs, path)
-		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil
-		}
-	}
-	return fmt.Errorf("repository path is outside the configured scan roots")
-}
-
 func publicWebhooks(hooks []store.Webhook) []store.PublicWebhook {
 	public := make([]store.PublicWebhook, 0, len(hooks))
 	for _, hook := range hooks {
@@ -1596,7 +1417,6 @@ func publicTicket(issue store.Issue) map[string]any {
 		"title":           issue.Title,
 		"description":     issue.Description,
 		"status":          issue.Status,
-		"severity":        issue.Severity,
 		"priority":        issue.Priority,
 		"requester_name":  issue.RequesterName,
 		"requester_email": issue.RequesterEmail,

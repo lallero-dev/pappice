@@ -1,22 +1,19 @@
 # Pemmece
 
-Pemmece is a small Go issue tracker inspired by MantisBT and the local-first
-operational feel of the Syncthing web UI.
+Pemmece is a small self-hosted customer support ticketing system. It is a
+single Go binary with SQLite persistence, embedded web assets, staff tools, and
+a registered-client support portal.
 
-It is still a single binary, but now includes the core pieces needed for a
-usable self-hosted tracker:
+Current focus:
 
-- First-run admin setup, secure login sessions, staff/client roles, project
+- First-run admin setup, secure login sessions, staff/client roles, product
   roles, and API tokens.
-- Mantis-like project issues with statuses, severity, priority, assignees,
-  reporters, tags, comments, and filtering.
-- SQLite-backed local persistence.
-- Embedded web assets served by the Go process.
-- Global and project webhooks with `X-Pemmece-Signature`.
-- SQLite-backed email notification outbox with SMTP delivery.
-- Registered-client support portal for no-reply customer tickets.
-- Per-project Git repository scanning that links commits mentioning `#123` or
-  `{PROJECTKEY}-123` to matching issues.
+- Customer tickets with statuses, priorities, assignees, requesters, tags,
+  public replies, internal notes, and filtering.
+- Registered-client support portal at `/support`.
+- SQLite-backed local persistence for multiuser deployments.
+- Global and product webhooks with `X-Pemmece-Signature`.
+- SQLite-backed no-reply email notification outbox with SMTP delivery.
 
 ## Run
 
@@ -27,9 +24,9 @@ Browser sessions require HTTPS because session cookies are always marked
 go run ./cmd/pemmece -tls-cert ./localhost.pem -tls-key ./localhost-key.pem
 ```
 
-Open https://127.0.0.1:8388 and create the first admin user.
-Admins can create client users, add them to projects as reporters, and those
-clients can submit and follow support tickets at `/support`.
+Open `https://127.0.0.1:8388` and create the first admin user. Admins can create
+client users, add them to products as customers, and those clients can submit and
+follow support tickets at `/support`.
 
 Useful flags:
 
@@ -38,25 +35,24 @@ go run ./cmd/pemmece \
   -addr 0.0.0.0:8388 \
   -db ./pemmece.db \
   -tls-cert ./localhost.pem \
-  -tls-key ./localhost-key.pem \
-  -repo-root /home/me/repos
+  -tls-key ./localhost-key.pem
 ```
 
 The same values can be supplied with `PEMMECE_ADDR`, `PEMMECE_DB`,
-`PEMMECE_TLS_CERT`, `PEMMECE_TLS_KEY`, and `PEMMECE_REPO_ROOTS`.
+`PEMMECE_TLS_CERT`, and `PEMMECE_TLS_KEY`.
 
 Email notifications are enabled when SMTP is configured. The app enqueues email
-jobs durably in SQLite when issue events happen, then a background worker sends
+jobs durably in SQLite when ticket events happen, then a background worker sends
 them with retry/backoff.
 
 ```sh
 go run ./cmd/pemmece \
-  -public-url https://tracker.example.test \
+  -public-url https://support.example.test \
   -smtp-host smtp.example.test \
   -smtp-port 587 \
   -smtp-user pemmece \
   -smtp-password secret \
-  -smtp-from tracker@example.test
+  -smtp-from noreply@example.test
 ```
 
 Equivalent environment variables are `PEMMECE_PUBLIC_URL`,
@@ -76,7 +72,7 @@ mutating requests must include the `X-Pemmece-CSRF` value returned by login or
 `GET /api/session`.
 
 ```sh
-curl -H "Authorization: Bearer pme_..." http://127.0.0.1:8388/api/issues
+curl -H "Authorization: Bearer pme_..." https://127.0.0.1:8388/api/tickets
 ```
 
 Core endpoints:
@@ -98,14 +94,13 @@ Core endpoints:
 - `GET /api/projects/{id}/members`
 - `POST /api/projects/{id}/members`
 - `DELETE /api/projects/{id}/members/{user_id}`
-- `GET /api/projects/{id}/issues`
-- `POST /api/projects/{id}/issues`
-- `GET /api/issues`
-- `POST /api/issues`
-- `GET /api/issues/{id}`
-- `PATCH /api/issues/{id}`
-- `POST /api/issues/{id}/comments`
-- `GET /api/issues/{id}/commits`
+- `GET /api/projects/{id}/tickets`
+- `POST /api/projects/{id}/tickets`
+- `GET /api/tickets`
+- `POST /api/tickets`
+- `GET /api/tickets/{id}`
+- `PATCH /api/tickets/{id}`
+- `POST /api/tickets/{id}/comments`
 - `GET /api/users`
 - `POST /api/users`
 - `PATCH /api/users/{id}`
@@ -121,16 +116,12 @@ Core endpoints:
 - `DELETE /api/webhooks/{id}`
 - `POST /api/webhooks/{id}/test`
 - `GET /api/webhook-deliveries`
-- `GET /api/email-notifications`
 - `GET /api/projects/{id}/webhook-deliveries`
-- `GET /api/projects/{id}/repo`
-- `PATCH /api/projects/{id}/repo`
-- `POST /api/projects/{id}/repo/scan`
+- `GET /api/email-notifications`
 
 Webhook events:
 
-- `issue.created`
-- `issue.updated`
-- `issue.commented`
-- `issue.assigned`
-- `repo.scanned`
+- `ticket.created`
+- `ticket.updated`
+- `ticket.commented`
+- `ticket.assigned`

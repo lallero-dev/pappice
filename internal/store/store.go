@@ -25,29 +25,28 @@ var (
 )
 
 type Issue struct {
-	ID             int64        `json:"id"`
-	ProjectID      int64        `json:"project_id"`
-	ProjectKey     string       `json:"project_key"`
-	Number         int64        `json:"number"`
-	Key            string       `json:"key"`
-	Title          string       `json:"title"`
-	Description    string       `json:"description"`
-	Project        string       `json:"project"`
-	Status         string       `json:"status"`
-	Severity       string       `json:"severity"`
-	Priority       string       `json:"priority"`
-	Assignee       string       `json:"assignee"`
-	Reporter       string       `json:"reporter"`
-	Source         string       `json:"source"`
-	RequesterName  string       `json:"requester_name,omitempty"`
-	RequesterEmail string       `json:"requester_email,omitempty"`
-	CustomerToken  string       `json:"-"`
-	Tags           []string     `json:"tags"`
-	Comments       []Comment    `json:"comments"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
-	ClosedAt       *time.Time   `json:"closed_at,omitempty"`
-	Commits        []CommitLink `json:"commits,omitempty"`
+	ID             int64      `json:"id"`
+	ProjectID      int64      `json:"project_id"`
+	ProjectKey     string     `json:"project_key"`
+	Number         int64      `json:"number"`
+	Key            string     `json:"key"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Project        string     `json:"project"`
+	Status         string     `json:"status"`
+	Severity       string     `json:"-"`
+	Priority       string     `json:"priority"`
+	Assignee       string     `json:"assignee"`
+	Reporter       string     `json:"requester"`
+	Source         string     `json:"source"`
+	RequesterName  string     `json:"requester_name,omitempty"`
+	RequesterEmail string     `json:"requester_email,omitempty"`
+	CustomerToken  string     `json:"-"`
+	Tags           []string   `json:"tags"`
+	Comments       []Comment  `json:"comments"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
 }
 
 type Comment struct {
@@ -63,10 +62,10 @@ type CreateIssue struct {
 	Title          string   `json:"title"`
 	Description    string   `json:"description"`
 	Project        string   `json:"project"`
-	Severity       string   `json:"severity"`
+	Severity       string   `json:"-"`
 	Priority       string   `json:"priority"`
 	Assignee       string   `json:"assignee"`
-	Reporter       string   `json:"reporter"`
+	Reporter       string   `json:"requester"`
 	Source         string   `json:"source"`
 	RequesterName  string   `json:"requester_name"`
 	RequesterEmail string   `json:"requester_email"`
@@ -77,7 +76,7 @@ type UpdateIssue struct {
 	Title       *string   `json:"title"`
 	Description *string   `json:"description"`
 	Status      *string   `json:"status"`
-	Severity    *string   `json:"severity"`
+	Severity    *string   `json:"-"`
 	Priority    *string   `json:"priority"`
 	Assignee    *string   `json:"assignee"`
 	Tags        *[]string `json:"tags"`
@@ -167,17 +166,13 @@ type CreateAPIToken struct {
 }
 
 type Project struct {
-	ID            int64      `json:"id"`
-	Key           string     `json:"key"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description"`
-	Role          string     `json:"role,omitempty"`
-	RepoPath      string     `json:"repo_path,omitempty"`
-	ScanLimit     int        `json:"scan_limit"`
-	LastScannedAt *time.Time `json:"last_scanned_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID          int64     `json:"id"`
+	Key         string    `json:"key"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Role        string    `json:"role,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type CreateProject struct {
@@ -257,7 +252,7 @@ type WebhookDelivery struct {
 	WebhookID  int64     `json:"webhook_id"`
 	ProjectID  *int64    `json:"project_id,omitempty"`
 	Event      string    `json:"event"`
-	IssueID    int64     `json:"issue_id,omitempty"`
+	IssueID    int64     `json:"ticket_id,omitempty"`
 	StatusCode int       `json:"status_code,omitempty"`
 	Error      string    `json:"error,omitempty"`
 	DurationMS int64     `json:"duration_ms"`
@@ -275,7 +270,7 @@ type EmailRecipient struct {
 type EmailNotification struct {
 	ID             int64      `json:"id"`
 	ProjectID      int64      `json:"project_id,omitempty"`
-	IssueID        int64      `json:"issue_id,omitempty"`
+	IssueID        int64      `json:"ticket_id,omitempty"`
 	UserID         int64      `json:"user_id"`
 	RecipientEmail string     `json:"recipient_email"`
 	RecipientName  string     `json:"recipient_name"`
@@ -304,46 +299,24 @@ type CreateEmailNotification struct {
 	BodyHTML       string
 }
 
-type RepoConfig struct {
-	ProjectID     int64      `json:"project_id"`
-	Path          string     `json:"path"`
-	ScanLimit     int        `json:"scan_limit"`
-	LastScannedAt *time.Time `json:"last_scanned_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-}
-
-type CommitLink struct {
-	IssueID   int64     `json:"issue_id"`
-	ProjectID int64     `json:"project_id"`
-	RepoPath  string    `json:"repo_path"`
-	Hash      string    `json:"hash"`
-	ShortHash string    `json:"short_hash"`
-	Author    string    `json:"author"`
-	Email     string    `json:"email"`
-	Date      time.Time `json:"date"`
-	Subject   string    `json:"subject"`
-}
-
 type Store struct {
 	db *sql.DB
 }
 
 var validStatuses = map[string]struct{}{
-	"new":          {},
-	"acknowledged": {},
-	"confirmed":    {},
-	"assigned":     {},
-	"resolved":     {},
-	"closed":       {},
+	"new":      {},
+	"open":     {},
+	"pending":  {},
+	"assigned": {},
+	"resolved": {},
+	"closed":   {},
 }
 
 var validSeverities = map[string]struct{}{
-	"feature": {},
-	"trivial": {},
-	"minor":   {},
-	"major":   {},
-	"crash":   {},
-	"blocker": {},
+	"support":  {},
+	"question": {},
+	"incident": {},
+	"task":     {},
 }
 
 var validPriorities = map[string]struct{}{
@@ -360,10 +333,10 @@ var validGlobalRoles = map[string]struct{}{
 }
 
 var validProjectRoles = map[string]struct{}{
-	"owner":     {},
-	"developer": {},
-	"reporter":  {},
-	"viewer":    {},
+	"owner":    {},
+	"agent":    {},
+	"customer": {},
+	"viewer":   {},
 }
 
 var validIssueSources = map[string]struct{}{
@@ -377,12 +350,11 @@ var validCommentVisibility = map[string]struct{}{
 }
 
 var validEvents = map[string]struct{}{
-	"issue.created":   {},
-	"issue.updated":   {},
-	"issue.commented": {},
-	"issue.assigned":  {},
-	"repo.scanned":    {},
-	"*":               {},
+	"ticket.created":   {},
+	"ticket.updated":   {},
+	"ticket.commented": {},
+	"ticket.assigned":  {},
+	"*":                {},
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,46}[a-z0-9]$`)
@@ -448,6 +420,37 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	if ok, err := s.projectRolesAreTicketing(); err != nil {
+		return err
+	} else if !ok {
+		if err := s.rebuildProjectMembersRoleConstraint(); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE project_members SET role = 'agent' WHERE role = 'developer'`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE project_members SET role = 'customer' WHERE role = 'reporter'`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE issues SET status = 'open' WHERE status IN ('acknowledged', 'confirmed')`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`
+		UPDATE webhooks
+		SET events_json = replace(
+			replace(
+				replace(
+					replace(events_json, 'issue.created', 'ticket.created'),
+					'issue.updated', 'ticket.updated'
+				),
+				'issue.commented', 'ticket.commented'
+			),
+			'issue.assigned', 'ticket.assigned'
+		)
+	`); err != nil {
+		return err
+	}
 	for _, migration := range []struct {
 		table  string
 		column string
@@ -490,7 +493,7 @@ func (s *Store) migrate() error {
 
 func (s *Store) columnExists(table, column string) (bool, error) {
 	switch table {
-	case "users", "issues", "comments":
+	case "users", "issues", "comments", "project_members":
 	default:
 		return false, fmt.Errorf("unsupported table %q", table)
 	}
@@ -550,6 +553,14 @@ func (s *Store) usersRoleAllowsClient() (bool, error) {
 	return !strings.Contains(sqlText, "CHECK") || strings.Contains(sqlText, "'client'") || strings.Contains(sqlText, `"client"`), nil
 }
 
+func (s *Store) projectRolesAreTicketing() (bool, error) {
+	var sqlText string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_members'`).Scan(&sqlText); err != nil {
+		return false, err
+	}
+	return !strings.Contains(sqlText, "CHECK") || strings.Contains(sqlText, "'agent'") || strings.Contains(sqlText, `"agent"`), nil
+}
+
 func (s *Store) rebuildUsersRoleConstraint() error {
 	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
 		return err
@@ -585,6 +596,47 @@ func (s *Store) rebuildUsersRoleConstraint() error {
 		return err
 	}
 	if _, err := tx.Exec(`ALTER TABLE users_new RENAME TO users`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) rebuildProjectMembersRoleConstraint() error {
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer s.db.Exec(`PRAGMA foreign_keys = ON`)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		CREATE TABLE project_members_new (
+			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			role TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (project_id, user_id)
+		)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO project_members_new (project_id, user_id, role, created_at)
+		SELECT project_id, user_id,
+		       CASE role WHEN 'developer' THEN 'agent' WHEN 'reporter' THEN 'customer' ELSE role END,
+		       created_at
+		FROM project_members`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE project_members`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE project_members_new RENAME TO project_members`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id)`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -992,12 +1044,12 @@ func (s *Store) ListProjects(user User) []Project {
 	var err error
 	if user.Role == "admin" {
 		rows, err = s.db.Query(`
-			SELECT id, key, name, description, 'owner', repo_path, scan_limit, last_scanned_at, last_error, created_at, updated_at
+			SELECT id, key, name, description, 'owner', created_at, updated_at
 			FROM projects
 			ORDER BY key`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT p.id, p.key, p.name, p.description, pm.role, p.repo_path, p.scan_limit, p.last_scanned_at, p.last_error, p.created_at, p.updated_at
+			SELECT p.id, p.key, p.name, p.description, pm.role, p.created_at, p.updated_at
 			FROM projects p
 			JOIN project_members pm ON pm.project_id = p.id
 			WHERE pm.user_id = ?
@@ -1022,7 +1074,7 @@ func (s *Store) ListProjects(user User) []Project {
 
 func (s *Store) GetProject(id int64) (Project, error) {
 	row := s.db.QueryRow(`
-		SELECT id, key, name, description, '', repo_path, scan_limit, last_scanned_at, last_error, created_at, updated_at
+		SELECT id, key, name, description, '', created_at, updated_at
 		FROM projects
 		WHERE id = ?`, id)
 	project, err := scanProject(row)
@@ -1071,7 +1123,7 @@ func (s *Store) DeleteProject(id int64) error {
 func (s *Store) ProjectRole(userID, projectID int64) (string, bool) {
 	var role string
 	err := s.db.QueryRow(`SELECT role FROM project_members WHERE user_id = ? AND project_id = ?`, userID, projectID).Scan(&role)
-	return role, err == nil
+	return normalizeProjectRole(role), err == nil
 }
 
 func (s *Store) ListProjectMembers(projectID int64) []ProjectMember {
@@ -1091,6 +1143,7 @@ func (s *Store) ListProjectMembers(projectID int64) []ProjectMember {
 		var member ProjectMember
 		var created string
 		if err := rows.Scan(&member.ProjectID, &member.UserID, &member.Username, &member.DisplayName, &member.Role, &created); err == nil {
+			member.Role = normalizeProjectRole(member.Role)
 			member.CreatedAt = parseTime(created)
 			members = append(members, member)
 		}
@@ -1099,7 +1152,7 @@ func (s *Store) ListProjectMembers(projectID int64) []ProjectMember {
 }
 
 func (s *Store) UpsertProjectMember(projectID int64, input UpsertProjectMember) (ProjectMember, error) {
-	role := strings.TrimSpace(input.Role)
+	role := normalizeProjectRole(input.Role)
 	if !isValid(validProjectRoles, role) {
 		return ProjectMember{}, fmt.Errorf("%w: invalid project role %q", ErrValidation, role)
 	}
@@ -1157,7 +1210,7 @@ func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
 		Title:          strings.TrimSpace(input.Title),
 		Description:    strings.TrimSpace(input.Description),
 		Status:         "new",
-		Severity:       defaultString(input.Severity, "minor"),
+		Severity:       defaultString(input.Severity, "support"),
 		Priority:       defaultString(input.Priority, "normal"),
 		Assignee:       strings.TrimSpace(input.Assignee),
 		Reporter:       strings.TrimSpace(input.Reporter),
@@ -1375,7 +1428,7 @@ func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
 		}
 	}
 	if patch.Severity != nil {
-		severity := defaultString(*patch.Severity, "minor")
+		severity := defaultString(*patch.Severity, "support")
 		if !isValid(validSeverities, severity) {
 			return Issue{}, fmt.Errorf("%w: invalid severity %q", ErrValidation, severity)
 		}
@@ -1678,18 +1731,18 @@ func (s *Store) IssueEmailRecipients(event string, issue Issue, actor User) []Em
 	}
 
 	switch event {
-	case "issue.created":
+	case "ticket.created":
 		for _, recipient := range s.projectOwnerEmailRecipients(issue.ProjectID) {
 			add(recipient)
 		}
-	case "issue.updated", "issue.commented":
+	case "ticket.updated", "ticket.commented":
 		if recipient, ok := s.emailRecipientByUsername(issue.Reporter); ok {
 			add(recipient)
 		}
 		if recipient, ok := s.emailRecipientByUsername(issue.Assignee); ok {
 			add(recipient)
 		}
-	case "issue.assigned":
+	case "ticket.assigned":
 		if recipient, ok := s.emailRecipientByUsername(issue.Assignee); ok {
 			add(recipient)
 		}
@@ -1930,119 +1983,14 @@ func (s *Store) ListEmailNotifications(limit int) []EmailNotification {
 	return notifications
 }
 
-func (s *Store) RepoConfig(projectID int64) RepoConfig {
-	project, err := s.GetProject(projectID)
-	if err != nil {
-		return RepoConfig{ProjectID: projectID, ScanLimit: 200}
-	}
-	return projectRepoConfig(project)
-}
-
-func (s *Store) SetRepoConfig(projectID int64, config RepoConfig) (RepoConfig, error) {
-	path := strings.TrimSpace(config.Path)
-	limit := config.ScanLimit
-	if limit < 1 || limit > 1000 {
-		limit = 200
-	}
-	result, err := s.db.Exec(`UPDATE projects SET repo_path = ?, scan_limit = ?, updated_at = ? WHERE id = ?`,
-		path, limit, formatTime(time.Now().UTC()), projectID,
-	)
-	if err != nil {
-		return RepoConfig{}, err
-	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return RepoConfig{}, ErrNotFound
-	}
-	return s.RepoConfig(projectID), nil
-}
-
-func (s *Store) ReplaceCommitLinks(projectID int64, repoPath string, links []CommitLink, scanErr string) (RepoConfig, error) {
-	now := time.Now().UTC()
-	repoPath = strings.TrimSpace(repoPath)
-	tx, err := s.db.Begin()
-	if err != nil {
-		return RepoConfig{}, err
-	}
-	defer tx.Rollback()
-	if _, err := getProjectTx(tx, projectID); err != nil {
-		return RepoConfig{}, err
-	}
-	if _, err := tx.Exec(`DELETE FROM commit_links WHERE project_id = ? AND repo_path = ?`, projectID, repoPath); err != nil {
-		return RepoConfig{}, err
-	}
-	seen := map[string]struct{}{}
-	for _, link := range links {
-		if link.IssueID < 1 || link.Hash == "" {
-			continue
-		}
-		var count int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM issues WHERE id = ? AND project_id = ?`, link.IssueID, projectID).Scan(&count); err != nil || count == 0 {
-			continue
-		}
-		key := fmt.Sprintf("%d:%s", link.IssueID, link.Hash)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		_, err := tx.Exec(`
-			INSERT INTO commit_links (project_id, issue_id, repo_path, hash, short_hash, author, email, date, subject)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			projectID, link.IssueID, repoPath, link.Hash, link.ShortHash, link.Author, link.Email, formatTime(link.Date), link.Subject,
-		)
-		if err != nil {
-			return RepoConfig{}, err
-		}
-	}
-	if _, err := tx.Exec(
-		`UPDATE projects SET last_scanned_at = ?, last_error = ?, updated_at = ? WHERE id = ?`,
-		formatTime(now), scanErr, formatTime(now), projectID,
-	); err != nil {
-		return RepoConfig{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return RepoConfig{}, err
-	}
-	return s.RepoConfig(projectID), nil
-}
-
 func (s *Store) IssueIDByProjectNumber(projectID, number int64) (int64, bool) {
 	var id int64
 	err := s.db.QueryRow(`SELECT id FROM issues WHERE project_id = ? AND number = ?`, projectID, number).Scan(&id)
 	return id, err == nil
 }
 
-func (s *Store) ListCommitLinks(issueID int64) []CommitLink {
-	rows, err := s.db.Query(`
-		SELECT project_id, issue_id, repo_path, hash, short_hash, author, email, date, subject
-		FROM commit_links
-		WHERE issue_id = ?
-		ORDER BY date DESC`, issueID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	return scanCommitLinks(rows)
-}
-
-func (s *Store) ListProjectCommitLinks(projectID int64) []CommitLink {
-	rows, err := s.db.Query(`
-		SELECT project_id, issue_id, repo_path, hash, short_hash, author, email, date, subject
-		FROM commit_links
-		WHERE project_id = ?
-		ORDER BY date DESC`, projectID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	return scanCommitLinks(rows)
-}
-
 func Statuses() []string {
-	return []string{"new", "acknowledged", "confirmed", "assigned", "resolved", "closed"}
-}
-
-func Severities() []string {
-	return []string{"feature", "trivial", "minor", "major", "crash", "blocker"}
+	return []string{"new", "open", "pending", "assigned", "resolved", "closed"}
 }
 
 func Priorities() []string {
@@ -2054,11 +2002,11 @@ func Roles() []string {
 }
 
 func ProjectRoles() []string {
-	return []string{"owner", "developer", "reporter", "viewer"}
+	return []string{"owner", "agent", "customer", "viewer"}
 }
 
 func Events() []string {
-	return []string{"issue.created", "issue.updated", "issue.commented", "issue.assigned", "repo.scanned"}
+	return []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}
 }
 
 func ToPublicUser(user User) PublicUser {
@@ -2139,7 +2087,7 @@ func createProjectTx(tx *sql.Tx, input CreateProject) (Project, error) {
 	description := strings.TrimSpace(input.Description)
 	now := time.Now().UTC()
 	result, err := tx.Exec(
-		`INSERT INTO projects (key, name, description, scan_limit, created_at, updated_at) VALUES (?, ?, ?, 200, ?, ?)`,
+		`INSERT INTO projects (key, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
 		key, name, description, formatTime(now), formatTime(now),
 	)
 	if err != nil {
@@ -2151,7 +2099,6 @@ func createProjectTx(tx *sql.Tx, input CreateProject) (Project, error) {
 		Key:         key,
 		Name:        name,
 		Description: description,
-		ScanLimit:   200,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil
@@ -2178,7 +2125,7 @@ func getUserTx(tx *sql.Tx, id int64) (User, error) {
 
 func getProjectTx(tx *sql.Tx, id int64) (Project, error) {
 	row := tx.QueryRow(`
-		SELECT id, key, name, description, '', repo_path, scan_limit, last_scanned_at, last_error, created_at, updated_at
+		SELECT id, key, name, description, '', created_at, updated_at
 		FROM projects WHERE id = ?`, id)
 	project, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2303,7 +2250,6 @@ func (s *Store) hydrateIssue(issue *Issue) error {
 	}
 	commentRows.Close()
 
-	issue.Commits = s.ListCommitLinks(issue.ID)
 	return nil
 }
 
@@ -2328,21 +2274,14 @@ func scanUser(rows scanner) (User, error) {
 
 func scanProject(rows scanner) (Project, error) {
 	var project Project
-	var repoPath, lastError, lastScanned sql.NullString
 	var created, updated string
 	if err := rows.Scan(
 		&project.ID, &project.Key, &project.Name, &project.Description, &project.Role,
-		&repoPath, &project.ScanLimit, &lastScanned, &lastError, &created, &updated,
+		&created, &updated,
 	); err != nil {
 		return Project{}, err
 	}
-	if repoPath.Valid {
-		project.RepoPath = repoPath.String
-	}
-	if lastError.Valid {
-		project.LastError = lastError.String
-	}
-	project.LastScannedAt = parseNullTime(lastScanned)
+	project.Role = normalizeProjectRole(project.Role)
 	project.CreatedAt = parseTime(created)
 	project.UpdatedAt = parseTime(updated)
 	return project, nil
@@ -2410,19 +2349,6 @@ func scanWebhook(rows scanner) (Webhook, error) {
 	return hook, nil
 }
 
-func scanCommitLinks(rows *sql.Rows) []CommitLink {
-	var links []CommitLink
-	for rows.Next() {
-		var link CommitLink
-		var date string
-		if err := rows.Scan(&link.ProjectID, &link.IssueID, &link.RepoPath, &link.Hash, &link.ShortHash, &link.Author, &link.Email, &date, &link.Subject); err == nil {
-			link.Date = parseTime(date)
-			links = append(links, link)
-		}
-	}
-	return links
-}
-
 func scanEmailRecipient(rows scanner) (EmailRecipient, error) {
 	var recipient EmailRecipient
 	if err := rows.Scan(&recipient.UserID, &recipient.Username, &recipient.DisplayName, &recipient.Email, &recipient.Role); err != nil {
@@ -2472,16 +2398,6 @@ func scanEmailNotification(rows scanner) (EmailNotification, error) {
 	return notification, nil
 }
 
-func projectRepoConfig(project Project) RepoConfig {
-	return RepoConfig{
-		ProjectID:     project.ID,
-		Path:          project.RepoPath,
-		ScanLimit:     project.ScanLimit,
-		LastScannedAt: project.LastScannedAt,
-		LastError:     project.LastError,
-	}
-}
-
 func normalizeSQLError(err error) error {
 	if err == nil {
 		return nil
@@ -2506,6 +2422,17 @@ func defaultString(value, fallback string) string {
 
 func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
+}
+
+func normalizeProjectRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case "developer":
+		return "agent"
+	case "reporter":
+		return "customer"
+	default:
+		return strings.TrimSpace(role)
+	}
 }
 
 func normalizeEmail(value string) (string, error) {
@@ -2545,7 +2472,7 @@ func normalizeTags(tags []string) []string {
 
 func normalizeEvents(events []string) ([]string, error) {
 	if len(events) == 0 {
-		return []string{"issue.created", "issue.updated", "issue.commented"}, nil
+		return []string{"ticket.created", "ticket.updated", "ticket.commented"}, nil
 	}
 	seen := make(map[string]struct{}, len(events))
 	result := make([]string, 0, len(events))
@@ -2564,7 +2491,7 @@ func normalizeEvents(events []string) ([]string, error) {
 		result = append(result, event)
 	}
 	if len(result) == 0 {
-		return []string{"issue.created", "issue.updated", "issue.commented"}, nil
+		return []string{"ticket.created", "ticket.updated", "ticket.commented"}, nil
 	}
 	return result, nil
 }
@@ -2727,10 +2654,6 @@ CREATE TABLE IF NOT EXISTS projects (
 	key TEXT NOT NULL UNIQUE,
 	name TEXT NOT NULL,
 	description TEXT NOT NULL DEFAULT '',
-	repo_path TEXT,
-	scan_limit INTEGER NOT NULL DEFAULT 200,
-	last_scanned_at TEXT,
-	last_error TEXT,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -2738,7 +2661,7 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE TABLE IF NOT EXISTS project_members (
 	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	role TEXT NOT NULL CHECK (role IN ('owner', 'developer', 'reporter', 'viewer')),
+	role TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	PRIMARY KEY (project_id, user_id)
 );
@@ -2826,24 +2749,9 @@ CREATE TABLE IF NOT EXISTS email_notifications (
 	sent_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS commit_links (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-	repo_path TEXT NOT NULL,
-	hash TEXT NOT NULL,
-	short_hash TEXT NOT NULL,
-	author TEXT NOT NULL,
-	email TEXT NOT NULL,
-	date TEXT NOT NULL,
-	subject TEXT NOT NULL,
-	UNIQUE (project_id, issue_id, hash)
-);
-
 CREATE INDEX IF NOT EXISTS idx_issues_project_updated ON issues(project_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
-CREATE INDEX IF NOT EXISTS idx_commit_links_issue ON commit_links(issue_id);
 CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(project_id);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_pending ON email_notifications(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_issue ON email_notifications(issue_id);
