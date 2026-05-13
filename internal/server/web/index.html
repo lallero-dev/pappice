@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pemmece</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">P</span>
+        <div>
+          <strong>Pemmece</strong>
+          <span>issue tracker</span>
+        </div>
+      </div>
+      <nav class="topnav" id="topNav" hidden>
+        <button class="nav-button active" id="issuesTab" type="button">Issues</button>
+        <button class="nav-button" id="adminTab" type="button">Admin</button>
+      </nav>
+      <div class="topbar-actions">
+        <span class="status-pill" id="connectionState">Starting</span>
+        <span class="user-pill" id="userLabel" hidden></span>
+        <button class="ghost-button" id="refreshButton" type="button" title="Refresh" hidden>Refresh</button>
+        <button class="ghost-button" id="logoutButton" type="button" hidden>Logout</button>
+        <button class="primary-button" id="newIssueButton" type="button" hidden>New Issue</button>
+      </div>
+    </header>
+
+    <section class="auth-wrap" id="authView" hidden>
+      <form class="auth-panel" id="setupForm">
+        <h1>Set Up Pemmece</h1>
+        <label>
+          Username
+          <input name="username" required minlength="3" maxlength="48" autocomplete="username">
+        </label>
+        <label>
+          Display name
+          <input name="display_name" autocomplete="name">
+        </label>
+        <label>
+          Password
+          <input name="password" required minlength="8" type="password" autocomplete="new-password">
+        </label>
+        <button class="primary-button" type="submit">Create Admin</button>
+      </form>
+
+      <form class="auth-panel" id="loginForm">
+        <h1>Sign In</h1>
+        <label>
+          Username
+          <input name="username" required autocomplete="username">
+        </label>
+        <label>
+          Password
+          <input name="password" required type="password" autocomplete="current-password">
+        </label>
+        <button class="primary-button" type="submit">Sign In</button>
+      </form>
+    </section>
+
+    <main class="shell" id="appView" hidden>
+      <aside class="sidebar">
+        <section class="summary-grid" aria-label="Issue summary">
+          <button class="metric active" data-filter-status="">
+            <span class="metric-value" id="countAll">0</span>
+            <span class="metric-label">All</span>
+          </button>
+          <button class="metric" data-filter-status="new">
+            <span class="metric-value" id="countNew">0</span>
+            <span class="metric-label">New</span>
+          </button>
+          <button class="metric" data-filter-status="assigned">
+            <span class="metric-value" id="countAssigned">0</span>
+            <span class="metric-label">Assigned</span>
+          </button>
+          <button class="metric" data-filter-status="resolved">
+            <span class="metric-value" id="countResolved">0</span>
+            <span class="metric-label">Resolved</span>
+          </button>
+        </section>
+
+        <section class="filter-section">
+          <label for="projectFilter">Project</label>
+          <select id="projectFilter">
+            <option value="">All projects</option>
+          </select>
+        </section>
+
+        <section class="filter-section">
+          <label for="assigneeFilter">Assignee</label>
+          <input id="assigneeFilter" type="search" autocomplete="off" placeholder="anyone">
+        </section>
+      </aside>
+
+      <section class="workspace" id="issueView">
+        <div class="toolbar">
+          <div class="search-box">
+            <label for="searchInput">Search</label>
+            <input id="searchInput" type="search" autocomplete="off" placeholder="title, tag, description">
+          </div>
+          <select id="statusFilter" aria-label="Status filter">
+            <option value="">All statuses</option>
+          </select>
+        </div>
+
+        <div class="content-grid">
+          <section class="issue-pane" aria-label="Issues">
+            <div class="table-head">
+              <span>ID</span>
+              <span>Issue</span>
+              <span>Status</span>
+              <span>Priority</span>
+              <span>Updated</span>
+            </div>
+            <div class="issue-list" id="issueList"></div>
+          </section>
+
+          <aside class="detail-pane" id="detailPane" aria-label="Issue details"></aside>
+        </div>
+      </section>
+
+      <section class="admin-view" id="adminView" hidden>
+        <div class="admin-grid">
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>Users</h2>
+            </div>
+            <form class="inline-form" id="userForm">
+              <input name="username" required placeholder="username" autocomplete="off">
+              <input name="display_name" placeholder="display name" autocomplete="off">
+              <input name="password" required minlength="8" type="password" placeholder="password">
+              <select name="role" id="newUserRole"></select>
+              <button class="primary-button" type="submit">Add</button>
+            </form>
+            <div class="admin-list" id="userList"></div>
+          </section>
+
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>API Tokens</h2>
+            </div>
+            <form class="inline-form" id="tokenForm">
+              <input name="name" placeholder="token name" autocomplete="off">
+              <button class="primary-button" type="submit">Create</button>
+            </form>
+            <div class="token-result" id="tokenResult"></div>
+            <div class="admin-list" id="tokenList"></div>
+          </section>
+
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>Webhooks</h2>
+            </div>
+            <form class="stack-form" id="webhookForm">
+              <div class="form-grid">
+                <input name="name" required placeholder="name" autocomplete="off">
+                <input name="url" required placeholder="https://example.test/hook" autocomplete="off">
+              </div>
+              <input name="events" placeholder="issue.created, issue.updated, issue.commented">
+              <label class="check-row">
+                <input name="enabled" type="checkbox" checked>
+                Enabled
+              </label>
+              <button class="primary-button" type="submit">Add Webhook</button>
+            </form>
+            <div class="admin-list" id="webhookList"></div>
+          </section>
+
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>Git Repository</h2>
+            </div>
+            <form class="inline-form" id="repoForm">
+              <input name="path" placeholder="/path/to/repo" autocomplete="off">
+              <input name="scan_limit" type="number" min="1" max="1000" step="1" value="200">
+              <button class="primary-button" type="submit">Save</button>
+              <button class="ghost-button" id="scanRepoButton" type="button">Scan</button>
+            </form>
+            <div class="repo-status" id="repoStatus"></div>
+            <div class="admin-list" id="commitList"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <dialog class="issue-dialog" id="issueDialog">
+      <form id="issueForm" method="dialog">
+        <div class="dialog-head">
+          <h2>New Issue</h2>
+          <button class="icon-button" id="closeDialogButton" type="button" title="Close">x</button>
+        </div>
+        <label>
+          Title
+          <input name="title" required maxlength="160" autocomplete="off">
+        </label>
+        <label>
+          Description
+          <textarea name="description" rows="5"></textarea>
+        </label>
+        <div class="form-grid">
+          <label>
+            Project
+            <input name="project" value="Inbox" autocomplete="off">
+          </label>
+          <label>
+            Assignee
+            <input name="assignee" autocomplete="off">
+          </label>
+          <label>
+            Severity
+            <select name="severity" id="severitySelect"></select>
+          </label>
+          <label>
+            Priority
+            <select name="priority" id="prioritySelect"></select>
+          </label>
+        </div>
+        <label>
+          Tags
+          <input name="tags" autocomplete="off" placeholder="ui, regression">
+        </label>
+        <div class="dialog-actions">
+          <button class="ghost-button" id="cancelIssueButton" type="button">Cancel</button>
+          <button class="primary-button" type="submit">Create</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="emptyTemplate">
+      <div class="empty-state">No issues match this view.</div>
+    </template>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
