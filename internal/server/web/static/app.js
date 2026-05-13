@@ -1,10 +1,27 @@
+import {
+  badge,
+  debounce,
+  defineComponents,
+  el,
+  fillOptions,
+  fillSelect,
+  formObject,
+  labelize,
+  relativeTime,
+  splitList
+} from "./components.js";
+
+defineComponents();
+
 const state = {
   issues: [],
+  issueCounts: { all: 0, new: 0, assigned: 0, resolved: 0 },
   projects: [],
   users: [],
   members: [],
   webhooks: [],
   globalWebhooks: [],
+  emailNotifications: [],
   deliveries: [],
   tokens: [],
   commits: [],
@@ -46,44 +63,35 @@ const els = {
   issueView: document.querySelector("#issueView"),
   adminView: document.querySelector("#adminView"),
   projectView: document.querySelector("#projectView"),
-  issueDialog: document.querySelector("#issueDialog"),
-  issueForm: document.querySelector("#issueForm"),
-  issueProjectSelect: document.querySelector("#issueProjectSelect"),
-  closeDialogButton: document.querySelector("#closeDialogButton"),
-  cancelIssueButton: document.querySelector("#cancelIssueButton"),
   issueList: document.querySelector("#issueList"),
   detailPane: document.querySelector("#detailPane"),
   searchInput: document.querySelector("#searchInput"),
-  statusFilter: document.querySelector("#statusFilter"),
   projectFilter: document.querySelector("#projectFilter"),
   assigneeFilter: document.querySelector("#assigneeFilter"),
-  severitySelect: document.querySelector("#severitySelect"),
-  prioritySelect: document.querySelector("#prioritySelect"),
   countAll: document.querySelector("#countAll"),
   countNew: document.querySelector("#countNew"),
   countAssigned: document.querySelector("#countAssigned"),
   countResolved: document.querySelector("#countResolved"),
-  projectForm: document.querySelector("#projectForm"),
+  addProjectButton: document.querySelector("#addProjectButton"),
   projectList: document.querySelector("#projectList"),
-  userForm: document.querySelector("#userForm"),
-  newUserRole: document.querySelector("#newUserRole"),
+  addUserButton: document.querySelector("#addUserButton"),
   userList: document.querySelector("#userList"),
-  tokenForm: document.querySelector("#tokenForm"),
+  createTokenButton: document.querySelector("#createTokenButton"),
   tokenResult: document.querySelector("#tokenResult"),
   tokenList: document.querySelector("#tokenList"),
-  memberForm: document.querySelector("#memberForm"),
-  memberUserSelect: document.querySelector("#memberUserSelect"),
-  memberRoleSelect: document.querySelector("#memberRoleSelect"),
+  addMemberButton: document.querySelector("#addMemberButton"),
   memberList: document.querySelector("#memberList"),
-  webhookForm: document.querySelector("#webhookForm"),
+  addWebhookButton: document.querySelector("#addWebhookButton"),
   webhookList: document.querySelector("#webhookList"),
-  globalWebhookForm: document.querySelector("#globalWebhookForm"),
+  addGlobalWebhookButton: document.querySelector("#addGlobalWebhookButton"),
   globalWebhookList: document.querySelector("#globalWebhookList"),
-  repoForm: document.querySelector("#repoForm"),
+  emailList: document.querySelector("#emailList"),
+  configureRepoButton: document.querySelector("#configureRepoButton"),
   scanRepoButton: document.querySelector("#scanRepoButton"),
   repoStatus: document.querySelector("#repoStatus"),
   commitList: document.querySelector("#commitList"),
-  deliveryList: document.querySelector("#deliveryList")
+  deliveryList: document.querySelector("#deliveryList"),
+  modalHost: document.querySelector("#modalHost")
 };
 
 async function request(path, options = {}) {
@@ -128,6 +136,10 @@ async function loadSession() {
     return;
   }
   state.user = session.user;
+  if (state.user?.role === "client") {
+    window.location.assign("/support");
+    return;
+  }
   await enterApp();
 }
 
@@ -179,22 +191,13 @@ async function loadHealth() {
   state.meta.roles = meta.roles || [];
   state.meta.projectRoles = meta.project_roles || [];
   state.meta.webhookEvents = meta.webhook_events || [];
-  fillOptions(els.statusFilter, state.meta.statuses, "All statuses");
-  fillOptions(els.severitySelect, state.meta.severities);
-  fillOptions(els.prioritySelect, state.meta.priorities);
-  fillOptions(els.newUserRole, state.meta.roles);
-  fillOptions(els.memberRoleSelect, state.meta.projectRoles);
-  els.newUserRole.value = "user";
-  els.memberRoleSelect.value = "viewer";
-  els.severitySelect.value = "minor";
-  els.prioritySelect.value = "normal";
 }
 
 async function loadProjects() {
   const payload = await request("/api/projects");
   state.projects = payload.projects || [];
-  if (!state.selectedProjectId || !state.projects.some((project) => project.id === state.selectedProjectId)) {
-    state.selectedProjectId = state.projects[0]?.id || null;
+  if (state.selectedProjectId && !state.projects.some((project) => project.id === state.selectedProjectId)) {
+    state.selectedProjectId = null;
   }
   renderProjectSelectors();
   renderProjectList();
@@ -203,8 +206,9 @@ async function loadProjects() {
 }
 
 async function loadIssues() {
-  if (!state.selectedProjectId) {
+  if (state.projects.length === 0) {
     state.issues = [];
+    state.issueCounts = { all: 0, new: 0, assigned: 0, resolved: 0 };
     renderIssuesView();
     return;
   }
@@ -213,8 +217,17 @@ async function loadIssues() {
   for (const [key, value] of Object.entries(state.filters)) {
     if (value) params.set(key, value);
   }
-  const payload = await request(`/api/projects/${state.selectedProjectId}/issues?${params.toString()}`);
+  const projectID = state.selectedProjectId || null;
+  if (projectID) params.set("project_id", String(projectID));
+  const countParams = new URLSearchParams();
+  if (projectID) countParams.set("project_id", String(projectID));
+  const [payload, countsPayload] = await Promise.all([
+    request(`/api/issues?${params.toString()}`),
+    request(`/api/issues?${countParams.toString()}`)
+  ]);
+  if (projectID !== (state.selectedProjectId || null)) return;
   state.issues = payload.issues || [];
+  state.issueCounts = countIssues(countsPayload.issues || []);
   if (state.selectedId && !state.issues.some((issue) => issue.id === state.selectedId)) {
     state.selectedId = state.issues[0]?.id || null;
   }
@@ -226,7 +239,7 @@ async function loadIssues() {
 }
 
 async function loadAdmin() {
-  await Promise.all([loadUsers(), loadGlobalWebhooks()]);
+  await Promise.all([loadUsers(), loadGlobalWebhooks(), loadEmailNotifications()]);
 }
 
 async function loadProjectAdmin() {
@@ -238,7 +251,6 @@ async function loadUsers() {
   const payload = await request("/api/users");
   state.users = payload.users || [];
   renderUsers();
-  renderMemberUsers();
 }
 
 async function loadTokens() {
@@ -265,6 +277,12 @@ async function loadGlobalWebhooks() {
   renderWebhooks(els.globalWebhookList, state.globalWebhooks);
 }
 
+async function loadEmailNotifications() {
+  const payload = await request("/api/email-notifications");
+  state.emailNotifications = payload.notifications || [];
+  renderEmailNotifications(payload.enabled);
+}
+
 async function loadProjectDeliveries() {
   const payload = await request(`/api/projects/${state.selectedProjectId}/webhook-deliveries`);
   state.deliveries = payload.deliveries || [];
@@ -280,10 +298,8 @@ async function loadRepo() {
 
 function renderProjectSelectors() {
   const options = state.projects.map((project) => ({ value: String(project.id), label: `${project.key} / ${project.name}` }));
-  fillSelect(els.projectFilter, options, "No projects");
-  fillSelect(els.issueProjectSelect, options, "No projects");
+  fillSelect(els.projectFilter, options, state.projects.length === 0 ? "No projects" : "All projects");
   els.projectFilter.value = state.selectedProjectId ? String(state.selectedProjectId) : "";
-  els.issueProjectSelect.value = state.selectedProjectId ? String(state.selectedProjectId) : "";
 }
 
 function updateProjectActions() {
@@ -301,12 +317,7 @@ function renderIssuesView() {
 }
 
 function renderCounts() {
-  const counts = { all: state.issues.length, new: 0, assigned: 0, resolved: 0 };
-  for (const issue of state.issues) {
-    if (issue.status === "new") counts.new++;
-    if (issue.status === "assigned") counts.assigned++;
-    if (issue.status === "resolved") counts.resolved++;
-  }
+  const counts = state.issueCounts;
   els.countAll.textContent = counts.all;
   els.countNew.textContent = counts.new;
   els.countAssigned.textContent = counts.assigned;
@@ -316,10 +327,20 @@ function renderCounts() {
   });
 }
 
+function countIssues(issues) {
+  const counts = { all: issues.length, new: 0, assigned: 0, resolved: 0 };
+  for (const issue of issues) {
+    if (issue.status === "new") counts.new++;
+    if (issue.status === "assigned") counts.assigned++;
+    if (issue.status === "resolved") counts.resolved++;
+  }
+  return counts;
+}
+
 function renderIssueList() {
   els.issueList.replaceChildren();
-  if (!state.selectedProjectId) {
-    els.issueList.append(el("div", { className: "empty-state" }, "No project selected."));
+  if (state.projects.length === 0) {
+    els.issueList.append(el("div", { className: "empty-state" }, "No projects yet."));
     return;
   }
   if (state.issues.length === 0) {
@@ -379,7 +400,7 @@ function renderDetail() {
       field.disabled = true;
     });
   }
-  els.detailPane.append(
+  const blocks = [
     header,
     controls,
     el("div", { className: "description" }, issue.description || "No description."),
@@ -387,7 +408,10 @@ function renderDetail() {
     commitBlock(issue.commits || []),
     comments(issue),
     canCommentIssue() ? commentForm(issue) : el("div")
-  );
+  ];
+  const requester = requesterBlock(issue);
+  if (requester) blocks.splice(2, 0, requester);
+  els.detailPane.append(...blocks);
 }
 
 function detailMeta(issue) {
@@ -400,6 +424,17 @@ function detailMeta(issue) {
     el("span", {}, `Created ${relativeTime(issue.created_at)}`)
   );
   return meta;
+}
+
+function requesterBlock(issue) {
+  if (!issue.requester_email && issue.source !== "portal") return null;
+  const block = el("div", { className: "requester-block" });
+  block.append(
+    el("strong", {}, "Requester"),
+    el("span", {}, `${issue.requester_name || "Unknown"}${issue.requester_email ? ` / ${issue.requester_email}` : ""}`),
+    badge(issue.source || "staff", "priority-normal")
+  );
+  return block;
 }
 
 function commitBlock(commits) {
@@ -445,26 +480,20 @@ function renderUsers() {
   els.userList.replaceChildren();
   for (const user of state.users) {
     const row = el("div", { className: "admin-row" });
-    const role = document.createElement("select");
-    fillOptions(role, state.meta.roles);
-    role.value = user.role;
-    role.disabled = user.id === state.user.id;
-    role.addEventListener("change", () => updateUser(user.id, { role: role.value }).catch(showError));
-
-    const disabled = document.createElement("input");
-    disabled.type = "checkbox";
-    disabled.checked = user.disabled;
-    disabled.disabled = user.id === state.user.id;
-    disabled.addEventListener("change", () => updateUser(user.id, { disabled: disabled.checked }).catch(showError));
-
+    const edit = el("button", { className: "ghost-button", type: "button" }, "Edit");
+    edit.addEventListener("click", () => openUserModal(user));
     const remove = el("button", { className: "ghost-button", type: "button" }, "Delete");
     remove.disabled = user.id === state.user.id;
     remove.addEventListener("click", () => deleteUser(user.id).catch(showError));
+    const label = user.email
+      ? `${user.display_name || user.username} / ${user.username} / ${user.email}`
+      : `${user.display_name || user.username} / ${user.username}`;
 
     row.append(
-      el("div", { className: "admin-row-main" }, `${user.display_name || user.username} / ${user.username}`),
-      role,
-      labelWrap("Disabled", disabled),
+      el("div", { className: "admin-row-main" }, label),
+      badge(user.role, "priority-normal"),
+      el("span", { className: user.disabled ? "muted" : "status-ok" }, user.disabled ? "Disabled" : "Active"),
+      edit,
       remove
     );
     els.userList.append(row);
@@ -484,14 +513,6 @@ function renderTokens() {
     );
     els.tokenList.append(row);
   }
-}
-
-function renderMemberUsers() {
-  if (!els.memberUserSelect) return;
-  const options = state.users
-    .filter((user) => !user.disabled)
-    .map((user) => ({ value: String(user.id), label: `${user.display_name || user.username} / ${user.username}` }));
-  fillSelect(els.memberUserSelect, options, "Select user");
 }
 
 function renderMembers() {
@@ -545,12 +566,32 @@ function renderDeliveries() {
   }
 }
 
+function renderEmailNotifications(enabled) {
+  els.emailList.replaceChildren();
+  if (!enabled && state.emailNotifications.length === 0) {
+    els.emailList.append(el("div", { className: "empty-inline" }, "Email is not configured."));
+    return;
+  }
+  if (state.emailNotifications.length === 0) {
+    els.emailList.append(el("div", { className: "empty-inline" }, "No email notifications."));
+    return;
+  }
+  for (const notification of state.emailNotifications) {
+    const row = el("div", { className: "admin-row" });
+    row.append(
+      el("div", { className: "admin-row-main" }, `${notification.event} / ${notification.recipient_email}`),
+      badge(notification.status, notification.status === "failed" ? "severity-crash" : "priority-normal"),
+      el("span", { className: "muted" }, notification.last_error || relativeTime(notification.created_at))
+    );
+    els.emailList.append(row);
+  }
+}
+
 function renderRepo() {
   if (!state.repo) return;
-  els.repoForm.elements.path.value = state.repo.path || "";
-  els.repoForm.elements.scan_limit.value = state.repo.scan_limit || 200;
   const scanned = state.repo.last_scanned_at ? `Last scan ${relativeTime(state.repo.last_scanned_at)}` : "Not scanned";
-  els.repoStatus.textContent = state.repo.last_error ? `${scanned}. ${state.repo.last_error}` : scanned;
+  const configured = state.repo.path ? state.repo.path : "No repository configured";
+  els.repoStatus.textContent = state.repo.last_error ? `${configured}. ${scanned}. ${state.repo.last_error}` : `${configured}. ${scanned}`;
   els.commitList.replaceChildren();
   const commits = state.commits.slice(0, 30);
   if (commits.length === 0) {
@@ -602,7 +643,12 @@ function comments(issue) {
   const list = el("div", { className: "comment-list" });
   for (const comment of issue.comments || []) {
     const item = el("div", { className: "comment" });
-    item.append(el("strong", {}, `${comment.author} / ${relativeTime(comment.created_at)}`), el("p", {}, comment.body));
+    item.classList.toggle("internal", comment.visibility === "internal");
+    item.append(
+      el("strong", {}, `${comment.author} / ${relativeTime(comment.created_at)}`),
+      comment.visibility === "internal" ? badge("internal", "severity-major") : el("span"),
+      el("p", {}, comment.body)
+    );
     list.append(item);
   }
   return list;
@@ -614,12 +660,20 @@ function commentForm(issue) {
   body.name = "body";
   body.rows = 3;
   body.placeholder = "comment";
+  const visibility = document.createElement("select");
+  visibility.name = "visibility";
+  visibility.append(new Option("Public reply", "public"), new Option("Internal note", "internal"));
+  if (!canEditIssue()) {
+    visibility.value = "public";
+    visibility.disabled = true;
+  }
   const submit = el("button", { className: "ghost-button", type: "submit" }, "Add Comment");
-  form.append(body, submit);
+  form.append(body, visibility, submit);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    await addComment(issue.id, { body: body.value });
+    await addComment(issue.id, { body: body.value, visibility: visibility.value || "public" });
     form.reset();
+    visibility.value = "public";
   });
   return form;
 }
@@ -690,6 +744,209 @@ async function scanRepo() {
   }
 }
 
+function selectOptions(values) {
+  return values.map((value) => ({ value, label: labelize(value) }));
+}
+
+function openIssueModal() {
+  const creatableProjects = state.projects.filter((project) => canCreateIssue(project.id));
+  const projects = creatableProjects.map((project) => ({ value: String(project.id), label: `${project.key} / ${project.name}` }));
+  const projectId = state.selectedProjectId && creatableProjects.some((project) => project.id === state.selectedProjectId)
+    ? state.selectedProjectId
+    : creatableProjects[0]?.id;
+  if (!projectId) {
+    showError(new Error("Create a project before adding issues"));
+    return;
+  }
+  els.modalHost.open({
+    title: "New Issue",
+    submitText: "Create",
+    values: {
+      project_id: String(projectId),
+      severity: "minor",
+      priority: "normal"
+    },
+    fields: [
+      { name: "title", label: "Title", required: true, maxlength: 160, autocomplete: "off" },
+      { name: "description", label: "Description", type: "textarea", rows: 5 },
+      { group: [
+        { name: "project_id", label: "Project", type: "select", options: projects, required: true },
+        { name: "assignee", label: "Assignee", autocomplete: "off" }
+      ] },
+      { group: [
+        { name: "severity", label: "Severity", type: "select", options: selectOptions(state.meta.severities) },
+        { name: "priority", label: "Priority", type: "select", options: selectOptions(state.meta.priorities) }
+      ] },
+      { name: "tags", label: "Tags", autocomplete: "off", placeholder: "ui, regression" }
+    ],
+    onSubmit: async (data) => {
+      const targetProjectId = Number(data.project_id || projectId);
+      const issue = {
+        title: data.title,
+        description: data.description,
+        project_id: targetProjectId,
+        assignee: data.assignee,
+        severity: data.severity,
+        priority: data.priority,
+        tags: splitList(data.tags)
+      };
+      const created = await request(`/api/projects/${targetProjectId}/issues`, { method: "POST", body: JSON.stringify(issue) });
+      state.selectedProjectId = targetProjectId;
+      state.selectedId = created.id;
+      await loadProjects();
+    }
+  });
+}
+
+function openProjectModal() {
+  els.modalHost.open({
+    title: "New Project",
+    submitText: "Create",
+    fields: [
+      { group: [
+        { name: "key", label: "Key", required: true, maxlength: 16, placeholder: "OPS", autocomplete: "off" },
+        { name: "name", label: "Name", required: true, placeholder: "Operations", autocomplete: "off" }
+      ] },
+      { name: "description", label: "Description", type: "textarea", rows: 3 }
+    ],
+    onSubmit: async (data) => {
+      await request("/api/projects", { method: "POST", body: JSON.stringify(data) });
+      await loadProjects();
+    }
+  });
+}
+
+function openUserModal(user = null) {
+  const editing = Boolean(user);
+  const values = editing ? {
+    display_name: user.display_name || "",
+    email: user.email || "",
+    role: user.role,
+    disabled: Boolean(user.disabled)
+  } : { role: "user" };
+  const fields = editing ? [
+    { group: [
+      { name: "display_name", label: "Display name", autocomplete: "off" },
+      { name: "email", label: "Email", type: "email", autocomplete: "email" }
+    ] },
+    { group: [
+      { name: "password", label: "New password", type: "password", minlength: 8, autocomplete: "new-password" },
+      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), disabled: user.id === state.user.id }
+    ] },
+    { name: "disabled", label: "Disabled", type: "checkbox", disabled: user.id === state.user.id }
+  ] : [
+    { group: [
+      { name: "username", label: "Username", required: true, maxlength: 48, autocomplete: "off" },
+      { name: "display_name", label: "Display name", autocomplete: "off" }
+    ] },
+    { name: "email", label: "Email", type: "email", autocomplete: "email" },
+    { group: [
+      { name: "password", label: "Password", type: "password", required: true, minlength: 8 },
+      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "user" }
+    ] }
+  ];
+
+  els.modalHost.open({
+    title: editing ? `Edit ${user.username}` : "New User",
+    submitText: editing ? "Save" : "Create",
+    values,
+    fields,
+    onSubmit: async (data) => {
+      if (!editing) {
+        await request("/api/users", { method: "POST", body: JSON.stringify(data) });
+        await loadUsers();
+        return;
+      }
+      const patch = {
+        display_name: data.display_name || "",
+        email: data.email || ""
+      };
+      if (data.password) patch.password = data.password;
+      if (user.id !== state.user.id) {
+        patch.role = data.role;
+        patch.disabled = Boolean(data.disabled);
+      }
+      await updateUser(user.id, patch);
+    }
+  });
+}
+
+function openTokenModal() {
+  els.modalHost.open({
+    title: "Create API Token",
+    submitText: "Create",
+    fields: [{ name: "name", label: "Name", placeholder: "CLI", autocomplete: "off" }],
+    onSubmit: async (data) => {
+      const payload = await request("/api/tokens", { method: "POST", body: JSON.stringify(data) });
+      els.tokenResult.textContent = payload.value;
+      await loadTokens();
+    }
+  });
+}
+
+function openMemberModal() {
+  const users = state.users
+    .filter((user) => !user.disabled)
+    .map((user) => ({ value: String(user.id), label: `${user.display_name || user.username} / ${user.username}` }));
+  els.modalHost.open({
+    title: "Add Project Member",
+    submitText: "Save",
+    fields: [
+      { name: "user_id", label: "User", type: "select", options: users },
+      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.projectRoles), value: "viewer" }
+    ],
+    onSubmit: async (data) => {
+      await upsertMember({ user_id: Number(data.user_id), role: data.role });
+    }
+  });
+}
+
+function openWebhookModal(scope) {
+  els.modalHost.open({
+    title: scope === "global" ? "New Global Webhook" : "New Project Webhook",
+    submitText: "Create",
+    fields: [
+      { group: [
+        { name: "name", label: "Name", required: true, autocomplete: "off" },
+        { name: "url", label: "URL", required: true, placeholder: "https://example.test/hook", autocomplete: "off" }
+      ] },
+      { name: "events", label: "Events", placeholder: "issue.created, issue.updated, issue.commented" },
+      { name: "enabled", label: "Enabled", type: "checkbox", checked: true }
+    ],
+    onSubmit: async (data) => {
+      const payload = { ...data, events: splitList(data.events), enabled: Boolean(data.enabled) };
+      if (scope === "global") {
+        await request("/api/webhooks", { method: "POST", body: JSON.stringify(payload) });
+        await loadGlobalWebhooks();
+        return;
+      }
+      await request(`/api/projects/${state.selectedProjectId}/webhooks`, { method: "POST", body: JSON.stringify(payload) });
+      await loadProjectWebhooks();
+    }
+  });
+}
+
+async function openRepoModal() {
+  if (!state.repo) await loadRepo();
+  els.modalHost.open({
+    title: "Repository Settings",
+    submitText: "Save",
+    values: { path: state.repo?.path || "", scan_limit: state.repo?.scan_limit || 200 },
+    fields: [
+      { name: "path", label: "Repository path", placeholder: "/path/to/repo", autocomplete: "off" },
+      { name: "scan_limit", label: "Scan limit", type: "number", min: 1, max: 1000, step: 1, value: 200 }
+    ],
+    onSubmit: async (data) => {
+      const payload = await request(`/api/projects/${state.selectedProjectId}/repo`, {
+        method: "PATCH",
+        body: JSON.stringify({ path: String(data.path || ""), scan_limit: Number(data.scan_limit || 200) })
+      });
+      state.repo = payload.repo;
+      renderRepo();
+    }
+  });
+}
+
 function bindEvents() {
   els.setupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -718,9 +975,8 @@ function bindEvents() {
   els.projectTab.addEventListener("click", () => switchView("project"));
   els.adminTab.addEventListener("click", () => switchView("admin"));
   els.refreshButton.addEventListener("click", () => refreshCurrent().catch(showError));
-  els.newIssueButton.addEventListener("click", () => els.issueDialog.showModal());
-  els.closeDialogButton.addEventListener("click", () => els.issueDialog.close());
-  els.cancelIssueButton.addEventListener("click", () => els.issueDialog.close());
+  els.newIssueButton.addEventListener("click", () => openIssueModal());
+  els.modalHost.addEventListener("pm-modal-error", (event) => showError(event.detail));
 
   els.projectFilter.addEventListener("change", async () => {
     state.selectedProjectId = Number(els.projectFilter.value) || null;
@@ -731,37 +987,10 @@ function bindEvents() {
     if (canManageProject()) await loadProjectAdmin();
   });
 
-  els.issueForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.issueForm);
-    const projectId = Number(form.get("project_id") || state.selectedProjectId);
-    const issue = {
-      title: form.get("title"),
-      description: form.get("description"),
-      project_id: projectId,
-      assignee: form.get("assignee"),
-      severity: form.get("severity"),
-      priority: form.get("priority"),
-      tags: splitList(form.get("tags"))
-    };
-    const created = await request(`/api/projects/${projectId}/issues`, { method: "POST", body: JSON.stringify(issue) });
-    state.selectedProjectId = projectId;
-    state.selectedId = created.id;
-    els.issueForm.reset();
-    els.severitySelect.value = "minor";
-    els.prioritySelect.value = "normal";
-    els.issueDialog.close();
-    await loadProjects();
-  });
-
   els.searchInput.addEventListener("input", debounce(() => {
     state.filters.q = els.searchInput.value.trim();
     loadIssues().catch(showError);
   }, 180));
-  els.statusFilter.addEventListener("change", () => {
-    state.filters.status = els.statusFilter.value;
-    loadIssues().catch(showError);
-  });
   els.assigneeFilter.addEventListener("input", debounce(() => {
     state.filters.assignee = els.assigneeFilter.value.trim();
     loadIssues().catch(showError);
@@ -769,72 +998,17 @@ function bindEvents() {
   document.querySelectorAll("[data-filter-status]").forEach((button) => {
     button.addEventListener("click", () => {
       state.filters.status = button.dataset.filterStatus;
-      els.statusFilter.value = state.filters.status;
       loadIssues().catch(showError);
     });
   });
 
-  els.projectForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.projectForm);
-    await request("/api/projects", { method: "POST", body: JSON.stringify(formObject(form)) });
-    els.projectForm.reset();
-    await loadProjects();
-  });
-
-  els.userForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.userForm);
-    await request("/api/users", { method: "POST", body: JSON.stringify(formObject(form)) });
-    els.userForm.reset();
-    els.newUserRole.value = "user";
-    await loadUsers();
-  });
-
-  els.tokenForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.tokenForm);
-    const payload = await request("/api/tokens", { method: "POST", body: JSON.stringify(formObject(form)) });
-    els.tokenResult.textContent = payload.value;
-    els.tokenForm.reset();
-    await loadTokens();
-  });
-
-  els.memberForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.memberForm);
-    await upsertMember({ user_id: Number(form.get("user_id")), role: form.get("role") });
-    els.memberRoleSelect.value = "viewer";
-  });
-
-  els.globalWebhookForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.globalWebhookForm);
-    await request("/api/webhooks", { method: "POST", body: JSON.stringify(webhookPayload(form)) });
-    els.globalWebhookForm.reset();
-    els.globalWebhookForm.elements.enabled.checked = true;
-    await loadGlobalWebhooks();
-  });
-
-  els.webhookForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.webhookForm);
-    await request(`/api/projects/${state.selectedProjectId}/webhooks`, { method: "POST", body: JSON.stringify(webhookPayload(form)) });
-    els.webhookForm.reset();
-    els.webhookForm.elements.enabled.checked = true;
-    await loadProjectWebhooks();
-  });
-
-  els.repoForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(els.repoForm);
-    const payload = await request(`/api/projects/${state.selectedProjectId}/repo`, {
-      method: "PATCH",
-      body: JSON.stringify({ path: String(form.get("path") || ""), scan_limit: Number(form.get("scan_limit") || 200) })
-    });
-    state.repo = payload.repo;
-    renderRepo();
-  });
+  els.addProjectButton.addEventListener("click", () => openProjectModal());
+  els.addUserButton.addEventListener("click", () => openUserModal());
+  els.createTokenButton.addEventListener("click", () => openTokenModal());
+  els.addMemberButton.addEventListener("click", () => openMemberModal());
+  els.addGlobalWebhookButton.addEventListener("click", () => openWebhookModal("global"));
+  els.addWebhookButton.addEventListener("click", () => openWebhookModal("project"));
+  els.configureRepoButton.addEventListener("click", () => openRepoModal().catch(showError));
   els.scanRepoButton.addEventListener("click", () => scanRepo().catch(showError));
 }
 
@@ -863,8 +1037,8 @@ async function refreshCurrent() {
   await loadProjects();
 }
 
-function currentProject() {
-  return state.projects.find((project) => project.id === state.selectedProjectId) || null;
+function currentProject(projectId = state.selectedProjectId) {
+  return state.projects.find((project) => project.id === projectId) || null;
 }
 
 function selectedIssue() {
@@ -875,58 +1049,28 @@ function isAdmin() {
   return state.user?.role === "admin";
 }
 
-function projectRole() {
-  return currentProject()?.role || "";
+function projectRole(projectId = state.selectedProjectId) {
+  return currentProject(projectId)?.role || "";
 }
 
-function canManageProject() {
-  return isAdmin() || projectRole() === "owner";
+function canManageProject(projectId = state.selectedProjectId) {
+  return Boolean(projectId) && (isAdmin() || projectRole(projectId) === "owner");
 }
 
-function canCreateIssue() {
-  return isAdmin() || ["owner", "developer", "reporter"].includes(projectRole());
+function canCreateIssue(projectId = state.selectedProjectId) {
+  if (!projectId) {
+    return state.projects.some((project) => canCreateIssue(project.id));
+  }
+  return isAdmin() || ["owner", "developer", "reporter"].includes(projectRole(projectId));
 }
 
 function canCommentIssue() {
-  return canCreateIssue();
+  return canCreateIssue(selectedIssue()?.project_id);
 }
 
 function canEditIssue() {
-  return isAdmin() || ["owner", "developer"].includes(projectRole());
-}
-
-function fillOptions(select, values, emptyLabel) {
-  select.replaceChildren();
-  if (emptyLabel) select.append(new Option(emptyLabel, ""));
-  for (const value of values) select.append(new Option(labelize(value), value));
-}
-
-function fillSelect(select, options, emptyLabel) {
-  select.replaceChildren();
-  if (emptyLabel) select.append(new Option(emptyLabel, ""));
-  for (const option of options) select.append(new Option(option.label, option.value));
-}
-
-function badge(value, className) {
-  return el("span", { className: `badge ${className}` }, labelize(value));
-}
-
-function labelize(value) {
-  return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function relativeTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return "now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d`;
-  return date.toLocaleDateString();
+  const projectId = selectedIssue()?.project_id || state.selectedProjectId;
+  return Boolean(projectId) && (isAdmin() || ["owner", "developer"].includes(projectRole(projectId)));
 }
 
 function setConnection(text) {
@@ -937,48 +1081,6 @@ function showError(error) {
   setConnection("Error");
   console.error(error);
   if (error.status === 401) showAuth("login");
-}
-
-function debounce(fn, wait) {
-  let timeout = 0;
-  return (...args) => {
-    window.clearTimeout(timeout);
-    timeout = window.setTimeout(() => fn(...args), wait);
-  };
-}
-
-function formObject(form) {
-  return Object.fromEntries(form.entries());
-}
-
-function webhookPayload(form) {
-  return {
-    name: form.get("name"),
-    url: form.get("url"),
-    events: splitList(form.get("events")),
-    enabled: form.get("enabled") === "on"
-  };
-}
-
-function splitList(value) {
-  return String(value || "").split(/[,\s]+/).map((item) => item.trim()).filter(Boolean);
-}
-
-function labelWrap(text, input) {
-  const label = el("label", { className: "check-row" }, text);
-  label.prepend(input);
-  return label;
-}
-
-function el(tag, props = {}, text) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (key === "className") node.className = value;
-    else if (key === "type") node.type = value;
-    else node.setAttribute(key, value);
-  }
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 boot().catch(showError);

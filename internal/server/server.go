@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"net"
@@ -23,7 +24,7 @@ import (
 	"pemmece/internal/store"
 )
 
-//go:embed web/index.html web/static/*
+//go:embed web/index.html web/support.html web/static/*
 var assets embed.FS
 
 const sessionCookieName = "pemmece_session"
@@ -32,6 +33,8 @@ type Options struct {
 	AllowInsecureWebhooks bool
 	AllowPrivateWebhooks  bool
 	RepoRoots             []string
+	EmailNotifications    bool
+	PublicURL             string
 }
 
 type Server struct {
@@ -73,6 +76,8 @@ func (s *Server) routes() {
 	}
 
 	s.mux.HandleFunc("/", s.handleIndex)
+	s.mux.HandleFunc("/support", s.handleSupportIndex)
+	s.mux.HandleFunc("/support/", s.handleSupportIndex)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles))))
 
 	s.mux.HandleFunc("/api/health", s.handleHealth)
@@ -81,6 +86,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/setup", s.handleSetup)
 	s.mux.HandleFunc("/api/login", s.handleLogin)
 	s.mux.HandleFunc("/api/logout", s.handleLogout)
+	s.mux.HandleFunc("/api/support/projects", s.handleSupportProjects)
+	s.mux.HandleFunc("/api/support/tickets", s.handleSupportTickets)
+	s.mux.HandleFunc("/api/support/tickets/", s.handleSupportTicketByToken)
 	s.mux.HandleFunc("/api/projects", s.handleProjects)
 	s.mux.HandleFunc("/api/projects/", s.handleProjectByID)
 	s.mux.HandleFunc("/api/issues", s.handleIssues)
@@ -92,6 +100,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/webhooks", s.handleWebhooks)
 	s.mux.HandleFunc("/api/webhooks/", s.handleWebhookByID)
 	s.mux.HandleFunc("/api/webhook-deliveries", s.handleWebhookDeliveries)
+	s.mux.HandleFunc("/api/email-notifications", s.handleEmailNotifications)
 	s.mux.HandleFunc("/api/repo", s.handleLegacyRepo)
 	s.mux.HandleFunc("/api/repo/scan", s.handleLegacyRepo)
 }
@@ -117,6 +126,27 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
+func (s *Server) handleSupportIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/support" && !strings.HasPrefix(r.URL.Path, "/support/tickets/") {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if r.Method == http.MethodHead {
+		return
+	}
+	content, err := assets.ReadFile("web/support.html")
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "support asset not found")
+		return
+	}
+	_, _ = w.Write(content)
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
@@ -133,6 +163,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"project_roles":     store.ProjectRoles(),
 		"webhook_events":    store.Events(),
 		"repo_scan_enabled": len(s.options.RepoRoots) > 0,
+		"email_enabled":     s.options.EmailNotifications,
 	})
 }
 
@@ -232,8 +263,140 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSupportProjects(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	projects := s.store.ListProjects(auth.User)
+	writable := make([]store.Project, 0, len(projects))
+	for _, project := range projects {
+		if s.canCreateIssue(auth.User, project.ID) {
+			writable = append(writable, project)
+		}
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"projects": writable})
+}
+
+func (s *Server) handleSupportTickets(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodPost:
+		var input struct {
+			ProjectID   int64  `json:"project_id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		}
+		if !decodeJSON(w, r, &input) {
+			return
+		}
+		if !s.canCreateIssue(auth.User, input.ProjectID) {
+			respondError(w, http.StatusForbidden, "project ticket access is required")
+			return
+		}
+		requesterEmail := strings.TrimSpace(auth.User.Email)
+		if requesterEmail == "" {
+			respondError(w, http.StatusBadRequest, "your account needs an email address before you can open support tickets")
+			return
+		}
+		requesterName := defaultString(auth.User.DisplayName, auth.User.Username)
+		issue, err := s.store.CreateIssue(store.CreateIssue{
+			ProjectID:      input.ProjectID,
+			Title:          input.Title,
+			Description:    input.Description,
+			Severity:       "minor",
+			Priority:       "normal",
+			Reporter:       auth.User.Username,
+			Source:         "portal",
+			RequesterName:  requesterName,
+			RequesterEmail: requesterEmail,
+			Tags:           []string{"support"},
+		})
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		s.emitIssueEvent("issue.created", issue, auth.User)
+		s.enqueueRequesterEmail("issue.created", issue, "Pemmece Support")
+		respondJSON(w, http.StatusCreated, map[string]any{
+			"ticket": publicTicket(issue),
+			"url":    s.ticketURL(issue.CustomerToken),
+		})
+	default:
+		methodNotAllowed(w, http.MethodPost)
+	}
+}
+
+func (s *Server) handleSupportTicketByToken(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/support/tickets/"), "/")
+	if rest == "" {
+		http.NotFound(w, r)
+		return
+	}
+	parts := strings.Split(rest, "/")
+	token := parts[0]
+	issue, err := s.store.GetIssueByCustomerToken(token)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	if !s.canAccessSupportTicket(auth.User, issue) {
+		respondError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ticket": publicTicket(issue)})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "comments" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+		var input struct {
+			Body string `json:"body"`
+		}
+		if !decodeJSON(w, r, &input) {
+			return
+		}
+		author := defaultString(auth.User.DisplayName, auth.User.Username)
+		updated, err := s.store.AddComment(issue.ID, store.AddComment{Author: author, Body: input.Body, Visibility: "public"})
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		s.emitIssueEvent("issue.commented", updated, auth.User)
+		if !s.isSupportTicketRequester(auth.User, issue) {
+			s.enqueueRequesterEmail("issue.commented", updated, author)
+		}
+		publicIssue, err := s.store.GetIssueByCustomerToken(token)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		respondJSON(w, http.StatusCreated, map[string]any{"ticket": publicTicket(publicIssue)})
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -261,7 +424,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -429,7 +592,7 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 }
 
 func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -467,7 +630,7 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleIssueByID(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -529,6 +692,9 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 			return
 		}
 		s.emitIssueEvent("issue.updated", updated, auth.User)
+		if patch.Assignee != nil && strings.TrimSpace(*patch.Assignee) != "" && !strings.EqualFold(strings.TrimSpace(*patch.Assignee), strings.TrimSpace(issue.Assignee)) {
+			s.emitIssueEvent("issue.assigned", updated, auth.User)
+		}
 		respondJSON(w, http.StatusOK, updated)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch)
@@ -548,6 +714,11 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	input.Visibility = defaultString(input.Visibility, "public")
+	if input.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
+		respondError(w, http.StatusForbidden, "project developer access is required for internal notes")
+		return
+	}
 	input.Author = defaultString(auth.User.DisplayName, auth.User.Username)
 	updated, err := s.store.AddComment(issue.ID, input)
 	if err != nil {
@@ -555,11 +726,14 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		return
 	}
 	s.emitIssueEvent("issue.commented", updated, auth.User)
+	if input.Visibility == "public" {
+		s.enqueueRequesterEmail("issue.commented", updated, defaultString(auth.User.DisplayName, auth.User.Username))
+	}
 	respondJSON(w, http.StatusCreated, updated)
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -624,7 +798,7 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -648,7 +822,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -724,7 +898,7 @@ func (s *Server) handleProjectWebhooks(w http.ResponseWriter, r *http.Request, a
 }
 
 func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
+	auth, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -809,6 +983,21 @@ func (s *Server) handleWebhookDeliveries(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"deliveries": s.store.ListDeliveries(50)})
+}
+
+func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"notifications": s.store.ListEmailNotifications(50),
+		"enabled":       s.options.EmailNotifications,
+	})
 }
 
 func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
@@ -940,7 +1129,7 @@ func (s *Server) handleProjectRepoScan(w http.ResponseWriter, r *http.Request, a
 }
 
 func (s *Server) handleLegacyRepo(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireAuth(w, r)
+	_, ok := s.requireStaff(w, r)
 	if !ok {
 		return
 	}
@@ -1012,6 +1201,18 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) (authConte
 	return auth, true
 }
 
+func (s *Server) requireStaff(w http.ResponseWriter, r *http.Request) (authContext, bool) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return authContext{}, false
+	}
+	if !isStaff(auth.User) {
+		respondError(w, http.StatusForbidden, "staff access is required")
+		return authContext{}, false
+	}
+	return auth, true
+}
+
 func (s *Server) requireHTTPS(w http.ResponseWriter, r *http.Request) bool {
 	if r.TLS != nil {
 		return true
@@ -1061,6 +1262,21 @@ func (s *Server) canEditIssue(user store.User, projectID int64) bool {
 	return s.hasProjectRole(user, projectID, "owner", "developer")
 }
 
+func (s *Server) canAccessSupportTicket(user store.User, issue store.Issue) bool {
+	if isAdmin(user) || s.canEditIssue(user, issue.ProjectID) {
+		return true
+	}
+	return s.isSupportTicketRequester(user, issue)
+}
+
+func (s *Server) isSupportTicketRequester(user store.User, issue store.Issue) bool {
+	email := strings.TrimSpace(user.Email)
+	if email != "" && strings.EqualFold(email, strings.TrimSpace(issue.RequesterEmail)) {
+		return true
+	}
+	return issue.Source == "portal" && strings.EqualFold(strings.TrimSpace(issue.Reporter), strings.TrimSpace(user.Username))
+}
+
 func (s *Server) hasProjectRole(user store.User, projectID int64, allowed ...string) bool {
 	if isAdmin(user) {
 		return true
@@ -1087,6 +1303,156 @@ func (s *Server) emitIssueEvent(event string, issue store.Issue, actor store.Use
 	body, _ := json.Marshal(payload)
 	for _, hook := range s.store.ListWebhooksForEvent(event, issue.ProjectID) {
 		go s.deliverWebhook(hook, event, issue.ID, body)
+	}
+	s.enqueueIssueEmails(event, issue, actor)
+}
+
+func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store.User) {
+	if !s.options.EmailNotifications {
+		return
+	}
+	recipients := s.store.IssueEmailRecipients(event, issue, actor)
+	if len(recipients) == 0 {
+		return
+	}
+	project, _ := s.store.GetProject(issue.ProjectID)
+	subject, textBody, htmlBody := s.issueEmailContent(event, project, issue, actor)
+	inputs := make([]store.CreateEmailNotification, 0, len(recipients))
+	for _, recipient := range recipients {
+		inputs = append(inputs, store.CreateEmailNotification{
+			ProjectID:      issue.ProjectID,
+			IssueID:        issue.ID,
+			UserID:         recipient.UserID,
+			RecipientEmail: recipient.Email,
+			RecipientName:  defaultString(recipient.DisplayName, recipient.Username),
+			Event:          event,
+			Subject:        subject,
+			BodyText:       textBody,
+			BodyHTML:       htmlBody,
+		})
+	}
+	_, _ = s.store.EnqueueEmailNotifications(inputs)
+}
+
+func (s *Server) enqueueRequesterEmail(event string, issue store.Issue, actorName string) {
+	if !s.options.EmailNotifications || strings.TrimSpace(issue.RequesterEmail) == "" || strings.TrimSpace(issue.CustomerToken) == "" {
+		return
+	}
+	subject, textBody, htmlBody := s.requesterEmailContent(event, issue, actorName)
+	_, _ = s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
+		ProjectID:      issue.ProjectID,
+		IssueID:        issue.ID,
+		UserID:         0,
+		RecipientEmail: issue.RequesterEmail,
+		RecipientName:  defaultString(issue.RequesterName, issue.RequesterEmail),
+		Event:          event,
+		Subject:        subject,
+		BodyText:       textBody,
+		BodyHTML:       htmlBody,
+	}})
+}
+
+func (s *Server) requesterEmailContent(event string, issue store.Issue, actorName string) (string, string, string) {
+	action := issueEventAction(event)
+	if event == "issue.created" {
+		action = "Received"
+	}
+	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, action, issue.Title)
+	link := s.ticketURL(issue.CustomerToken)
+	var text strings.Builder
+	fmt.Fprintf(&text, "%s\n\n", subject)
+	if strings.TrimSpace(actorName) != "" && event == "issue.commented" {
+		fmt.Fprintf(&text, "%s replied to your ticket.\n\n", actorName)
+	}
+	if link != "" {
+		fmt.Fprintf(&text, "Open your ticket to respond:\n%s\n\n", link)
+	}
+	text.WriteString("Replies to this email are not read. Please use the ticket link above.\n")
+
+	var htmlBody strings.Builder
+	htmlBody.WriteString("<!doctype html><meta charset=\"utf-8\">")
+	fmt.Fprintf(&htmlBody, "<h1>%s</h1>", html.EscapeString(subject))
+	if strings.TrimSpace(actorName) != "" && event == "issue.commented" {
+		fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> replied to your ticket.</p>", html.EscapeString(actorName))
+	}
+	if link != "" {
+		fmt.Fprintf(&htmlBody, "<p><a href=\"%s\">Open your ticket to respond</a></p>", html.EscapeString(link))
+	}
+	htmlBody.WriteString("<p>Replies to this email are not read. Please use the ticket link.</p>")
+	return subject, strings.TrimSpace(text.String()), htmlBody.String()
+}
+
+func (s *Server) issueEmailContent(event string, project store.Project, issue store.Issue, actor store.User) (string, string, string) {
+	actorName := defaultString(actor.DisplayName, actor.Username)
+	action := issueEventAction(event)
+	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, action, issue.Title)
+	projectLabel := issue.ProjectKey
+	if project.Name != "" {
+		projectLabel = fmt.Sprintf("%s / %s", project.Key, project.Name)
+	}
+	link := strings.TrimRight(s.options.PublicURL, "/")
+	if link != "" {
+		link += "/"
+	}
+
+	var text strings.Builder
+	fmt.Fprintf(&text, "%s %s %s\n\n", actorName, strings.ToLower(action), issue.Key)
+	fmt.Fprintf(&text, "Title: %s\n", issue.Title)
+	fmt.Fprintf(&text, "Project: %s\n", projectLabel)
+	fmt.Fprintf(&text, "Status: %s\nSeverity: %s\nPriority: %s\n", issue.Status, issue.Severity, issue.Priority)
+	if strings.TrimSpace(issue.Assignee) != "" {
+		fmt.Fprintf(&text, "Assignee: %s\n", issue.Assignee)
+	}
+	if strings.TrimSpace(issue.Reporter) != "" {
+		fmt.Fprintf(&text, "Reporter: %s\n", issue.Reporter)
+	}
+	if link != "" {
+		fmt.Fprintf(&text, "Open: %s\n", link)
+	}
+	if strings.TrimSpace(issue.Description) != "" {
+		fmt.Fprintf(&text, "\n%s\n", issue.Description)
+	}
+	if event == "issue.commented" && len(issue.Comments) > 0 {
+		comment := issue.Comments[len(issue.Comments)-1]
+		fmt.Fprintf(&text, "\nLatest comment from %s:\n%s\n", comment.Author, comment.Body)
+	}
+
+	var htmlBody strings.Builder
+	htmlBody.WriteString("<!doctype html><meta charset=\"utf-8\">")
+	fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> %s <strong>%s</strong>.</p>", html.EscapeString(actorName), html.EscapeString(strings.ToLower(action)), html.EscapeString(issue.Key))
+	htmlBody.WriteString("<dl>")
+	fmt.Fprintf(&htmlBody, "<dt>Title</dt><dd>%s</dd>", html.EscapeString(issue.Title))
+	fmt.Fprintf(&htmlBody, "<dt>Project</dt><dd>%s</dd>", html.EscapeString(projectLabel))
+	fmt.Fprintf(&htmlBody, "<dt>Status</dt><dd>%s</dd>", html.EscapeString(issue.Status))
+	fmt.Fprintf(&htmlBody, "<dt>Severity</dt><dd>%s</dd>", html.EscapeString(issue.Severity))
+	fmt.Fprintf(&htmlBody, "<dt>Priority</dt><dd>%s</dd>", html.EscapeString(issue.Priority))
+	if strings.TrimSpace(issue.Assignee) != "" {
+		fmt.Fprintf(&htmlBody, "<dt>Assignee</dt><dd>%s</dd>", html.EscapeString(issue.Assignee))
+	}
+	htmlBody.WriteString("</dl>")
+	if link != "" {
+		fmt.Fprintf(&htmlBody, "<p><a href=\"%s\">Open in Pemmece</a></p>", html.EscapeString(link))
+	}
+	if strings.TrimSpace(issue.Description) != "" {
+		fmt.Fprintf(&htmlBody, "<pre>%s</pre>", html.EscapeString(issue.Description))
+	}
+	if event == "issue.commented" && len(issue.Comments) > 0 {
+		comment := issue.Comments[len(issue.Comments)-1]
+		fmt.Fprintf(&htmlBody, "<h2>Latest comment from %s</h2><pre>%s</pre>", html.EscapeString(comment.Author), html.EscapeString(comment.Body))
+	}
+	return subject, strings.TrimSpace(text.String()), htmlBody.String()
+}
+
+func issueEventAction(event string) string {
+	switch event {
+	case "issue.created":
+		return "Created"
+	case "issue.commented":
+		return "Commented on"
+	case "issue.assigned":
+		return "Assigned"
+	default:
+		return "Updated"
 	}
 }
 
@@ -1221,6 +1587,37 @@ func publicWebhooks(hooks []store.Webhook) []store.PublicWebhook {
 	return public
 }
 
+func publicTicket(issue store.Issue) map[string]any {
+	return map[string]any{
+		"id":              issue.ID,
+		"key":             issue.Key,
+		"project_id":      issue.ProjectID,
+		"project_key":     issue.ProjectKey,
+		"title":           issue.Title,
+		"description":     issue.Description,
+		"status":          issue.Status,
+		"severity":        issue.Severity,
+		"priority":        issue.Priority,
+		"requester_name":  issue.RequesterName,
+		"requester_email": issue.RequesterEmail,
+		"comments":        issue.Comments,
+		"created_at":      issue.CreatedAt,
+		"updated_at":      issue.UpdatedAt,
+	}
+}
+
+func (s *Server) ticketURL(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	base := strings.TrimRight(s.options.PublicURL, "/")
+	if base == "" {
+		return "/support/tickets/" + token
+	}
+	return base + "/support/tickets/" + token
+}
+
 func nullableUser(user store.User, ok bool) any {
 	if !ok {
 		return nil
@@ -1237,6 +1634,10 @@ func nullableString(value string, ok bool) any {
 
 func isAdmin(user store.User) bool {
 	return user.Role == "admin"
+}
+
+func isStaff(user store.User) bool {
+	return user.Role == "admin" || user.Role == "user"
 }
 
 func isUnsafeMethod(method string) bool {

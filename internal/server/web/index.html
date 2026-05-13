@@ -41,6 +41,10 @@
           <input name="display_name" autocomplete="name">
         </label>
         <label>
+          Email
+          <input name="email" type="email" autocomplete="email">
+        </label>
+        <label>
           Password
           <input name="password" required minlength="8" type="password" autocomplete="new-password">
         </label>
@@ -63,6 +67,13 @@
 
     <main class="shell" id="appView" hidden>
       <aside class="sidebar">
+        <section class="filter-section project-picker">
+          <label for="projectFilter">Project</label>
+          <select id="projectFilter">
+            <option value="">All projects</option>
+          </select>
+        </section>
+
         <section class="summary-grid" aria-label="Issue summary">
           <button class="metric active" data-filter-status="">
             <span class="metric-value" id="countAll">0</span>
@@ -83,13 +94,6 @@
         </section>
 
         <section class="filter-section">
-          <label for="projectFilter">Project</label>
-          <select id="projectFilter">
-            <option value="">No projects</option>
-          </select>
-        </section>
-
-        <section class="filter-section">
           <label for="assigneeFilter">Assignee</label>
           <input id="assigneeFilter" type="search" autocomplete="off" placeholder="anyone">
         </section>
@@ -101,9 +105,6 @@
             <label for="searchInput">Search</label>
             <input id="searchInput" type="search" autocomplete="off" placeholder="title, tag, description">
           </div>
-          <select id="statusFilter" aria-label="Status filter">
-            <option value="">All statuses</option>
-          </select>
         </div>
 
         <div class="content-grid">
@@ -127,37 +128,24 @@
           <section class="admin-panel">
             <div class="panel-head">
               <h2>Projects</h2>
+              <button class="ghost-button" id="addProjectButton" type="button">New</button>
             </div>
-            <form class="inline-form" id="projectForm">
-              <input name="key" required maxlength="16" placeholder="KEY" autocomplete="off">
-              <input name="name" required placeholder="project name" autocomplete="off">
-              <button class="primary-button" type="submit">Add</button>
-            </form>
             <div class="admin-list" id="projectList"></div>
           </section>
 
           <section class="admin-panel">
             <div class="panel-head">
               <h2>Users</h2>
+              <button class="ghost-button" id="addUserButton" type="button">New</button>
             </div>
-            <form class="inline-form" id="userForm">
-              <input name="username" required placeholder="username" autocomplete="off">
-              <input name="display_name" placeholder="display name" autocomplete="off">
-              <input name="password" required minlength="8" type="password" placeholder="password">
-              <select name="role" id="newUserRole"></select>
-              <button class="primary-button" type="submit">Add</button>
-            </form>
             <div class="admin-list" id="userList"></div>
           </section>
 
           <section class="admin-panel">
             <div class="panel-head">
               <h2>API Tokens</h2>
+              <button class="ghost-button" id="createTokenButton" type="button">Create</button>
             </div>
-            <form class="inline-form" id="tokenForm">
-              <input name="name" placeholder="token name" autocomplete="off">
-              <button class="primary-button" type="submit">Create</button>
-            </form>
             <div class="token-result" id="tokenResult"></div>
             <div class="admin-list" id="tokenList"></div>
           </section>
@@ -165,20 +153,16 @@
           <section class="admin-panel">
             <div class="panel-head">
               <h2>Global Webhooks</h2>
+              <button class="ghost-button" id="addGlobalWebhookButton" type="button">New</button>
             </div>
-            <form class="stack-form" id="globalWebhookForm">
-              <div class="form-grid">
-                <input name="name" required placeholder="name" autocomplete="off">
-                <input name="url" required placeholder="https://example.test/hook" autocomplete="off">
-              </div>
-              <input name="events" placeholder="issue.created, issue.updated, issue.commented">
-              <label class="check-row">
-                <input name="enabled" type="checkbox" checked>
-                Enabled
-              </label>
-              <button class="primary-button" type="submit">Add Webhook</button>
-            </form>
             <div class="admin-list" id="globalWebhookList"></div>
+          </section>
+
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>Email Outbox</h2>
+            </div>
+            <div class="admin-list" id="emailList"></div>
           </section>
         </div>
       </section>
@@ -188,25 +172,19 @@
           <section class="admin-panel">
             <div class="panel-head">
               <h2>Members</h2>
+              <button class="ghost-button" id="addMemberButton" type="button">Add</button>
             </div>
-            <form class="inline-form" id="memberForm">
-              <select name="user_id" id="memberUserSelect"></select>
-              <select name="role" id="memberRoleSelect"></select>
-              <button class="primary-button" type="submit">Add</button>
-            </form>
             <div class="admin-list" id="memberList"></div>
           </section>
 
           <section class="admin-panel">
             <div class="panel-head">
               <h2>Repository</h2>
+              <div class="panel-actions">
+                <button class="ghost-button" id="configureRepoButton" type="button">Configure</button>
+                <button class="ghost-button" id="scanRepoButton" type="button">Scan</button>
+              </div>
             </div>
-            <form class="inline-form" id="repoForm">
-              <input name="path" placeholder="/path/to/repo" autocomplete="off">
-              <input name="scan_limit" type="number" min="1" max="1000" step="1" value="200">
-              <button class="primary-button" type="submit">Save</button>
-              <button class="ghost-button" id="scanRepoButton" type="button">Scan</button>
-            </form>
             <div class="repo-status" id="repoStatus"></div>
             <div class="admin-list" id="commitList"></div>
           </section>
@@ -214,19 +192,8 @@
           <section class="admin-panel">
             <div class="panel-head">
               <h2>Project Webhooks</h2>
+              <button class="ghost-button" id="addWebhookButton" type="button">New</button>
             </div>
-            <form class="stack-form" id="webhookForm">
-              <div class="form-grid">
-                <input name="name" required placeholder="name" autocomplete="off">
-                <input name="url" required placeholder="https://example.test/hook" autocomplete="off">
-              </div>
-              <input name="events" placeholder="issue.created, issue.updated, issue.commented">
-              <label class="check-row">
-                <input name="enabled" type="checkbox" checked>
-                Enabled
-              </label>
-              <button class="primary-button" type="submit">Add Webhook</button>
-            </form>
             <div class="admin-list" id="webhookList"></div>
           </section>
 
@@ -240,53 +207,12 @@
       </section>
     </main>
 
-    <dialog class="issue-dialog" id="issueDialog">
-      <form id="issueForm" method="dialog">
-        <div class="dialog-head">
-          <h2>New Issue</h2>
-          <button class="icon-button" id="closeDialogButton" type="button" title="Close">x</button>
-        </div>
-        <label>
-          Title
-          <input name="title" required maxlength="160" autocomplete="off">
-        </label>
-        <label>
-          Description
-          <textarea name="description" rows="5"></textarea>
-        </label>
-        <div class="form-grid">
-          <label>
-            Project
-            <select name="project_id" id="issueProjectSelect"></select>
-          </label>
-          <label>
-            Assignee
-            <input name="assignee" autocomplete="off">
-          </label>
-          <label>
-            Severity
-            <select name="severity" id="severitySelect"></select>
-          </label>
-          <label>
-            Priority
-            <select name="priority" id="prioritySelect"></select>
-          </label>
-        </div>
-        <label>
-          Tags
-          <input name="tags" autocomplete="off" placeholder="ui, regression">
-        </label>
-        <div class="dialog-actions">
-          <button class="ghost-button" id="cancelIssueButton" type="button">Cancel</button>
-          <button class="primary-button" type="submit">Create</button>
-        </div>
-      </form>
-    </dialog>
-
     <template id="emptyTemplate">
       <div class="empty-state">No issues match this view.</div>
     </template>
 
-    <script src="/static/app.js"></script>
+    <pm-modal id="modalHost"></pm-modal>
+
+    <script type="module" src="/static/app.js"></script>
   </body>
 </html>

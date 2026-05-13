@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"pemmece/internal/store"
@@ -195,6 +196,101 @@ func TestWebhookGuardrails(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 	if targetHits != 1 {
 		t.Fatalf("target hits = %d, want 1", targetHits)
+	}
+}
+
+func TestRegisteredSupportTicketFlow(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer tracker.Close()
+
+	server := httptest.NewTLSServer(New(tracker))
+	defer server.Close()
+	client := server.Client()
+	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	setupResp, setupBody := doJSON(t, client, http.MethodPost, server.URL+"/api/setup", map[string]any{
+		"username": "admin",
+		"password": "correct horse",
+	}, nil, "", "")
+	requireStatus(t, setupResp, setupBody, http.StatusCreated)
+	adminCookie := setupResp.Cookies()[0]
+	adminCSRF := decodeString(t, setupBody, "csrf_token")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/support/projects", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusUnauthorized)
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
+		"username":     "customer",
+		"display_name": "Customer",
+		"email":        "customer@example.test",
+		"password":     "correct horse",
+		"role":         "client",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	customerID := decodeInt64(t, body, "id")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/projects/"+itoa(projectID)+"/members", map[string]any{
+		"user_id": customerID,
+		"role":    "reporter",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+
+	loginResp, loginBody := doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
+		"username": "customer",
+		"password": "correct horse",
+	}, nil, "", "")
+	requireStatus(t, loginResp, loginBody, http.StatusOK)
+	customerCookie := loginResp.Cookies()[0]
+	customerCSRF := decodeString(t, loginBody, "csrf_token")
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusForbidden)
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/projects", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID = decodeFirstProjectID(t, body)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/support/tickets", map[string]any{
+		"project_id":  projectID,
+		"title":       "Need help",
+		"description": "Something is wrong",
+	}, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	var created struct {
+		URL    string `json:"url"`
+		Ticket struct {
+			Key            string `json:"key"`
+			Title          string `json:"title"`
+			RequesterEmail string `json:"requester_email"`
+		} `json:"ticket"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode created ticket: %v", err)
+	}
+	if created.URL == "" || created.Ticket.Key == "" || created.Ticket.RequesterEmail != "customer@example.test" {
+		t.Fatalf("created ticket = %#v", created)
+	}
+	token := created.URL[strings.LastIndex(created.URL, "/")+1:]
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/tickets/"+token, nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusUnauthorized)
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/tickets/"+token, nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/support/tickets/"+token+"/comments", map[string]any{
+		"body": "Adding more detail",
+	}, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	if !bytes.Contains(body, []byte("Adding more detail")) {
+		t.Fatalf("ticket comment missing from body=%s", body)
 	}
 }
 

@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"pemmece/internal/notify"
 	"pemmece/internal/server"
 	"pemmece/internal/store"
 )
@@ -22,6 +24,14 @@ func main() {
 	tlsKey := flag.String("tls-key", envOr("PEMMECE_TLS_KEY", ""), "TLS private key path")
 	allowInsecureWebhooks := flag.Bool("allow-insecure-webhooks", envBool("PEMMECE_ALLOW_INSECURE_WEBHOOKS"), "allow http webhook URLs")
 	allowPrivateWebhooks := flag.Bool("allow-private-webhooks", envBool("PEMMECE_ALLOW_PRIVATE_WEBHOOKS"), "allow private/link-local webhook targets")
+	publicURL := flag.String("public-url", envOr("PEMMECE_PUBLIC_URL", ""), "public base URL used in email notifications")
+	emailNotifications := flag.Bool("email-notifications", envBool("PEMMECE_EMAIL_NOTIFICATIONS"), "enable email notification enqueueing and delivery")
+	smtpHost := flag.String("smtp-host", envOr("PEMMECE_SMTP_HOST", ""), "SMTP host for email notifications")
+	smtpPort := flag.Int("smtp-port", envInt("PEMMECE_SMTP_PORT", 0), "SMTP port for email notifications")
+	smtpUser := flag.String("smtp-user", envOr("PEMMECE_SMTP_USER", ""), "SMTP username")
+	smtpPassword := flag.String("smtp-password", envOr("PEMMECE_SMTP_PASSWORD", ""), "SMTP password")
+	smtpFrom := flag.String("smtp-from", envOr("PEMMECE_SMTP_FROM", ""), "sender address for email notifications")
+	smtpTLSMode := flag.String("smtp-tls-mode", envOr("PEMMECE_SMTP_TLS_MODE", "starttls"), "SMTP TLS mode: starttls, tls, or none")
 	var repoRoots stringListFlag
 	repoRoots.Set(envOr("PEMMECE_REPO_ROOTS", ""))
 	flag.Var(&repoRoots, "repo-root", "allowed repository scan root; may be repeated")
@@ -33,9 +43,48 @@ func main() {
 	}
 	defer tracker.Close()
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	smtpConfig := notify.SMTPConfig{
+		Host:     *smtpHost,
+		Port:     *smtpPort,
+		Username: *smtpUser,
+		Password: *smtpPassword,
+		From:     *smtpFrom,
+		TLSMode:  *smtpTLSMode,
+	}
+	emailEnabled := *emailNotifications || smtpConfig.Enabled()
+	var mailer notify.Mailer
+	if emailEnabled {
+		var err error
+		mailer, err = notify.NewSMTPMailer(smtpConfig)
+		if err != nil {
+			log.Fatalf("configure email notifications: %v", err)
+		}
+		worker := notify.Worker{
+			Store:       tracker,
+			Mailer:      mailer,
+			From:        smtpConfig.From,
+			Interval:    5 * time.Second,
+			LeaseFor:    time.Minute,
+			BatchSize:   10,
+			MaxAttempts: 5,
+			Logger:      log.Default(),
+		}
+		go worker.Run(ctx)
+		log.Printf("email notifications enabled via SMTP host %s", smtpConfig.Host)
+	}
+
 	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           server.New(tracker, server.Options{AllowInsecureWebhooks: *allowInsecureWebhooks, AllowPrivateWebhooks: *allowPrivateWebhooks, RepoRoots: repoRoots.Values()}),
+		Addr: *addr,
+		Handler: server.New(tracker, server.Options{
+			AllowInsecureWebhooks: *allowInsecureWebhooks,
+			AllowPrivateWebhooks:  *allowPrivateWebhooks,
+			RepoRoots:             repoRoots.Values(),
+			EmailNotifications:    emailEnabled,
+			PublicURL:             *publicURL,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -54,12 +103,9 @@ func main() {
 		errs <- srv.ListenAndServe()
 	}()
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-
 	select {
-	case sig := <-signals:
-		log.Printf("received %s, shutting down", sig)
+	case <-ctx.Done():
+		log.Printf("shutdown requested")
 	case err := <-errs:
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("serve: %v", err)
@@ -84,6 +130,18 @@ func envOr(key, fallback string) string {
 func envBool(key string) bool {
 	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
 	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 type stringListFlag []string

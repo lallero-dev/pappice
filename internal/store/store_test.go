@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
@@ -210,4 +211,137 @@ func TestProjectMembershipFiltersIssues(t *testing.T) {
 	if len(projects) != 1 || projects[0].ID != visibleProject.ID {
 		t.Fatalf("visible projects = %#v", projects)
 	}
+}
+
+func TestEmailRecipientsAndOutbox(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse", Email: "admin@example.test"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	projectID := tracker.ListProjects(admin)[0].ID
+	reporter, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse", Email: "bob@example.test"})
+	if err != nil {
+		t.Fatalf("create reporter: %v", err)
+	}
+	assignee, err := tracker.CreateUser(CreateUser{Username: "alice", Password: "correct horse", Email: "alice@example.test"})
+	if err != nil {
+		t.Fatalf("create assignee: %v", err)
+	}
+	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: reporter.ID, Role: "reporter"}); err != nil {
+		t.Fatalf("add reporter member: %v", err)
+	}
+	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: assignee.ID, Role: "developer"}); err != nil {
+		t.Fatalf("add assignee member: %v", err)
+	}
+	issue, err := tracker.CreateIssue(CreateIssue{
+		ProjectID: projectID,
+		Title:     "Notify operators",
+		Reporter:  reporter.Username,
+		Assignee:  assignee.Username,
+	})
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	createdRecipients := tracker.IssueEmailRecipients("issue.created", issue, reporter)
+	if !hasRecipient(createdRecipients, admin.Email) || hasRecipient(createdRecipients, reporter.Email) {
+		t.Fatalf("created recipients = %#v, want admin only excluding actor reporter", createdRecipients)
+	}
+	commentRecipients := tracker.IssueEmailRecipients("issue.commented", issue, reporter)
+	if !hasRecipient(commentRecipients, assignee.Email) || hasRecipient(commentRecipients, reporter.Email) {
+		t.Fatalf("comment recipients = %#v, want assignee excluding actor reporter", commentRecipients)
+	}
+	assignedRecipients := tracker.IssueEmailRecipients("issue.assigned", issue, admin)
+	if !hasRecipient(assignedRecipients, assignee.Email) {
+		t.Fatalf("assigned recipients = %#v, want assignee", assignedRecipients)
+	}
+
+	queued, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
+		ProjectID:      issue.ProjectID,
+		IssueID:        issue.ID,
+		UserID:         assignee.ID,
+		RecipientEmail: assignee.Email,
+		RecipientName:  assignee.DisplayName,
+		Event:          "issue.assigned",
+		Subject:        "[PME-1] Assigned",
+		BodyText:       "assigned",
+	}})
+	if err != nil {
+		t.Fatalf("enqueue email: %v", err)
+	}
+	if len(queued) != 1 || queued[0].Status != "pending" {
+		t.Fatalf("queued = %#v", queued)
+	}
+	claimed, err := tracker.ClaimEmailNotifications(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim email: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].ID != queued[0].ID || claimed[0].Status != "sending" {
+		t.Fatalf("claimed = %#v", claimed)
+	}
+	if err := tracker.MarkEmailSent(claimed[0].ID); err != nil {
+		t.Fatalf("mark sent: %v", err)
+	}
+	sent, err := tracker.GetEmailNotification(claimed[0].ID)
+	if err != nil {
+		t.Fatalf("get sent email: %v", err)
+	}
+	if sent.Status != "sent" || sent.SentAt == nil {
+		t.Fatalf("sent = %#v", sent)
+	}
+}
+
+func TestPortalTicketTokenAndPublicComments(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse", Email: "admin@example.test"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	projectID := tracker.ListProjects(admin)[0].ID
+	ticket, err := tracker.CreateIssue(CreateIssue{
+		ProjectID:      projectID,
+		Title:          "Cannot sign in",
+		Description:    "Login fails",
+		Source:         "portal",
+		RequesterName:  "Customer",
+		RequesterEmail: "Customer@Example.Test",
+	})
+	if err != nil {
+		t.Fatalf("create portal ticket: %v", err)
+	}
+	if ticket.Source != "portal" || ticket.CustomerToken == "" || ticket.RequesterEmail != "customer@example.test" {
+		t.Fatalf("ticket fields = %#v", ticket)
+	}
+	if _, err := tracker.AddComment(ticket.ID, AddComment{Author: "Admin", Body: "Internal diagnosis", Visibility: "internal"}); err != nil {
+		t.Fatalf("add internal note: %v", err)
+	}
+	if _, err := tracker.AddComment(ticket.ID, AddComment{Author: "Admin", Body: "Public reply", Visibility: "public"}); err != nil {
+		t.Fatalf("add public reply: %v", err)
+	}
+	publicTicket, err := tracker.GetIssueByCustomerToken(ticket.CustomerToken)
+	if err != nil {
+		t.Fatalf("get ticket by token: %v", err)
+	}
+	if len(publicTicket.Comments) != 1 || publicTicket.Comments[0].Body != "Public reply" {
+		t.Fatalf("public comments = %#v", publicTicket.Comments)
+	}
+	if _, err := tracker.GetIssueByCustomerToken("missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing token error = %v, want ErrNotFound", err)
+	}
+}
+
+func hasRecipient(recipients []EmailRecipient, email string) bool {
+	for _, recipient := range recipients {
+		if recipient.Email == email {
+			return true
+		}
+	}
+	return false
 }

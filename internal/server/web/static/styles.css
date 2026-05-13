@@ -141,8 +141,7 @@ button {
 }
 
 .primary-button,
-.ghost-button,
-.icon-button {
+.ghost-button {
   border: 1px solid transparent;
   border-radius: 6px;
   min-height: 34px;
@@ -178,22 +177,6 @@ button {
   background: #3c5366;
 }
 
-.icon-button {
-  align-items: center;
-  background: transparent;
-  color: var(--muted);
-  display: inline-flex;
-  font-weight: 700;
-  justify-content: center;
-  padding: 0;
-  width: 34px;
-}
-
-.icon-button:hover {
-  background: var(--panel-strong);
-  color: var(--text);
-}
-
 .auth-wrap {
   align-items: center;
   display: grid;
@@ -221,10 +204,10 @@ button {
 
 .shell {
   display: grid;
-  gap: 14px;
-  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 10px;
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: calc(100vh - 60px);
-  padding: 14px;
+  padding: 10px;
 }
 
 .sidebar,
@@ -239,8 +222,8 @@ button {
 .sidebar {
   align-self: start;
   display: grid;
-  gap: 16px;
-  padding: 14px;
+  gap: 12px;
+  padding: 12px;
 }
 
 .summary-grid {
@@ -256,8 +239,8 @@ button {
   color: var(--text);
   display: grid;
   gap: 2px;
-  min-height: 72px;
-  padding: 10px;
+  min-height: 58px;
+  padding: 8px;
   text-align: left;
 }
 
@@ -267,7 +250,7 @@ button {
 }
 
 .metric-value {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 750;
 }
 
@@ -279,6 +262,27 @@ button {
 .filter-section {
   display: grid;
   gap: 6px;
+}
+
+.project-picker {
+  background: #f8fbff;
+  border: 1px solid #9ec4e5;
+  border-radius: 8px;
+  box-shadow: inset 3px 0 0 var(--blue);
+  gap: 8px;
+  padding: 10px;
+}
+
+.project-picker label {
+  color: #17324d;
+  font-size: 13px;
+}
+
+.project-picker select {
+  border-color: #8ab9df;
+  font-size: 15px;
+  font-weight: 650;
+  min-height: 40px;
 }
 
 label,
@@ -327,9 +331,9 @@ button:focus-visible {
   border-bottom: 1px solid var(--border-soft);
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(240px, 440px) 180px;
-  justify-content: space-between;
-  padding: 12px;
+  grid-template-columns: minmax(240px, 520px);
+  justify-content: start;
+  padding: 10px 12px;
 }
 
 .search-box {
@@ -339,10 +343,10 @@ button:focus-visible {
 
 .content-grid {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: minmax(0, 1fr) 380px;
   min-height: 0;
-  padding: 12px;
+  padding: 10px;
 }
 
 .issue-pane,
@@ -382,8 +386,8 @@ button:focus-visible {
   border: 0;
   border-bottom: 1px solid var(--border-soft);
   color: var(--text);
-  min-height: 68px;
-  padding: 10px 12px;
+  min-height: 58px;
+  padding: 8px 12px;
   text-align: left;
   width: 100%;
 }
@@ -474,9 +478,9 @@ button:focus-visible {
 
 .detail-pane {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   overflow: auto;
-  padding: 14px;
+  padding: 12px;
 }
 
 .detail-header {
@@ -498,8 +502,7 @@ button:focus-visible {
   font-size: 12px;
 }
 
-.detail-controls,
-.form-grid {
+.detail-controls {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -512,6 +515,17 @@ button:focus-visible {
   min-height: 90px;
   padding: 10px;
   white-space: pre-wrap;
+}
+
+.requester-block {
+  align-items: center;
+  background: #f8fbff;
+  border: 1px solid #c4d9ec;
+  border-radius: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
 }
 
 .tag-row,
@@ -540,10 +554,16 @@ button:focus-visible {
   padding: 9px;
 }
 
+.comment.internal {
+  background: #fff8e8;
+  border-color: #e6c777;
+}
+
 .comment strong {
-  display: block;
+  display: inline-block;
   font-size: 12px;
   margin-bottom: 4px;
+  margin-right: 8px;
 }
 
 .comment p {
@@ -609,48 +629,10 @@ button:focus-visible {
   text-align: center;
 }
 
-.issue-dialog {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  max-width: min(680px, calc(100vw - 28px));
-  padding: 0;
-  width: 680px;
-}
-
-.issue-dialog::backdrop {
-  background: rgb(18 31 45 / 48%);
-}
-
-.issue-dialog form {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-}
-
-.dialog-head,
-.dialog-actions {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-
-.dialog-head h2 {
-  font-size: 18px;
-  margin: 0;
-}
-
-.dialog-actions {
-  border-top: 1px solid var(--border-soft);
-  gap: 8px;
-  justify-content: flex-end;
-  padding-top: 12px;
-}
-
 .admin-grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .admin-panel {
@@ -658,15 +640,19 @@ button:focus-visible {
   border: 1px solid var(--border);
   border-radius: 8px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  padding: 14px;
+  padding: 12px;
 }
 
 .panel-head {
   align-items: center;
+  border-bottom: 1px solid var(--border-soft);
   display: flex;
+  gap: 8px;
   justify-content: space-between;
+  padding-bottom: 8px;
 }
 
 .panel-head h2 {
@@ -674,25 +660,16 @@ button:focus-visible {
   margin: 0;
 }
 
-.inline-form,
-.stack-form {
-  display: grid;
-  gap: 8px;
-}
-
-.inline-form {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.inline-form .primary-button,
-.inline-form .ghost-button {
-  min-width: 0;
+.panel-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
 }
 
 .admin-list {
   display: grid;
-  gap: 8px;
-  max-height: 360px;
+  gap: 6px;
+  max-height: min(360px, calc(100vh - 260px));
   overflow: auto;
 }
 
@@ -702,10 +679,10 @@ button:focus-visible {
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  min-height: 44px;
-  padding: 8px;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
+  min-height: 40px;
+  padding: 7px;
 }
 
 .admin-row-main {
@@ -713,19 +690,6 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.check-row {
-  align-items: center;
-  color: var(--text);
-  display: inline-flex;
-  gap: 7px;
-  min-height: 34px;
-}
-
-.check-row input {
-  min-height: 0;
-  width: auto;
 }
 
 .token-result {
@@ -783,9 +747,7 @@ button:focus-visible {
   }
 
   .toolbar,
-  .detail-controls,
-  .form-grid,
-  .inline-form {
+  .detail-controls {
     grid-template-columns: 1fr;
   }
 

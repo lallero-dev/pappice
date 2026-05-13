@@ -6,12 +6,15 @@ operational feel of the Syncthing web UI.
 It is still a single binary, but now includes the core pieces needed for a
 usable self-hosted tracker:
 
-- First-run admin setup, secure login sessions, project roles, and API tokens.
+- First-run admin setup, secure login sessions, staff/client roles, project
+  roles, and API tokens.
 - Mantis-like project issues with statuses, severity, priority, assignees,
   reporters, tags, comments, and filtering.
 - SQLite-backed local persistence.
 - Embedded web assets served by the Go process.
 - Global and project webhooks with `X-Pemmece-Signature`.
+- SQLite-backed email notification outbox with SMTP delivery.
+- Registered-client support portal for no-reply customer tickets.
 - Per-project Git repository scanning that links commits mentioning `#123` or
   `{PROJECTKEY}-123` to matching issues.
 
@@ -25,6 +28,8 @@ go run ./cmd/pemmece -tls-cert ./localhost.pem -tls-key ./localhost-key.pem
 ```
 
 Open https://127.0.0.1:8388 and create the first admin user.
+Admins can create client users, add them to projects as reporters, and those
+clients can submit and follow support tickets at `/support`.
 
 Useful flags:
 
@@ -39,6 +44,25 @@ go run ./cmd/pemmece \
 
 The same values can be supplied with `PEMMECE_ADDR`, `PEMMECE_DB`,
 `PEMMECE_TLS_CERT`, `PEMMECE_TLS_KEY`, and `PEMMECE_REPO_ROOTS`.
+
+Email notifications are enabled when SMTP is configured. The app enqueues email
+jobs durably in SQLite when issue events happen, then a background worker sends
+them with retry/backoff.
+
+```sh
+go run ./cmd/pemmece \
+  -public-url https://tracker.example.test \
+  -smtp-host smtp.example.test \
+  -smtp-port 587 \
+  -smtp-user pemmece \
+  -smtp-password secret \
+  -smtp-from tracker@example.test
+```
+
+Equivalent environment variables are `PEMMECE_PUBLIC_URL`,
+`PEMMECE_EMAIL_NOTIFICATIONS`, `PEMMECE_SMTP_HOST`, `PEMMECE_SMTP_PORT`,
+`PEMMECE_SMTP_USER`, `PEMMECE_SMTP_PASSWORD`, `PEMMECE_SMTP_FROM`, and
+`PEMMECE_SMTP_TLS_MODE` (`starttls`, `tls`, or `none`).
 
 Webhook delivery defaults are conservative: webhook URLs must be HTTPS and must
 not resolve to private, loopback, or link-local addresses. Development-only
@@ -62,6 +86,10 @@ Core endpoints:
 - `POST /api/setup`
 - `POST /api/login`
 - `POST /api/logout`
+- `GET /api/support/projects`
+- `POST /api/support/tickets`
+- `GET /api/support/tickets/{token}`
+- `POST /api/support/tickets/{token}/comments`
 - `GET /api/projects`
 - `POST /api/projects`
 - `GET /api/projects/{id}`
@@ -93,6 +121,7 @@ Core endpoints:
 - `DELETE /api/webhooks/{id}`
 - `POST /api/webhooks/{id}/test`
 - `GET /api/webhook-deliveries`
+- `GET /api/email-notifications`
 - `GET /api/projects/{id}/webhook-deliveries`
 - `GET /api/projects/{id}/repo`
 - `PATCH /api/projects/{id}/repo`
@@ -103,4 +132,5 @@ Webhook events:
 - `issue.created`
 - `issue.updated`
 - `issue.commented`
+- `issue.assigned`
 - `repo.scanned`

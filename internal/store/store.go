@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,44 +25,52 @@ var (
 )
 
 type Issue struct {
-	ID          int64        `json:"id"`
-	ProjectID   int64        `json:"project_id"`
-	ProjectKey  string       `json:"project_key"`
-	Number      int64        `json:"number"`
-	Key         string       `json:"key"`
-	Title       string       `json:"title"`
-	Description string       `json:"description"`
-	Project     string       `json:"project"`
-	Status      string       `json:"status"`
-	Severity    string       `json:"severity"`
-	Priority    string       `json:"priority"`
-	Assignee    string       `json:"assignee"`
-	Reporter    string       `json:"reporter"`
-	Tags        []string     `json:"tags"`
-	Comments    []Comment    `json:"comments"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	ClosedAt    *time.Time   `json:"closed_at,omitempty"`
-	Commits     []CommitLink `json:"commits,omitempty"`
+	ID             int64        `json:"id"`
+	ProjectID      int64        `json:"project_id"`
+	ProjectKey     string       `json:"project_key"`
+	Number         int64        `json:"number"`
+	Key            string       `json:"key"`
+	Title          string       `json:"title"`
+	Description    string       `json:"description"`
+	Project        string       `json:"project"`
+	Status         string       `json:"status"`
+	Severity       string       `json:"severity"`
+	Priority       string       `json:"priority"`
+	Assignee       string       `json:"assignee"`
+	Reporter       string       `json:"reporter"`
+	Source         string       `json:"source"`
+	RequesterName  string       `json:"requester_name,omitempty"`
+	RequesterEmail string       `json:"requester_email,omitempty"`
+	CustomerToken  string       `json:"-"`
+	Tags           []string     `json:"tags"`
+	Comments       []Comment    `json:"comments"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	ClosedAt       *time.Time   `json:"closed_at,omitempty"`
+	Commits        []CommitLink `json:"commits,omitempty"`
 }
 
 type Comment struct {
-	ID        int64     `json:"id"`
-	Author    string    `json:"author"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         int64     `json:"id"`
+	Author     string    `json:"author"`
+	Body       string    `json:"body"`
+	Visibility string    `json:"visibility"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type CreateIssue struct {
-	ProjectID   int64    `json:"project_id"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Project     string   `json:"project"`
-	Severity    string   `json:"severity"`
-	Priority    string   `json:"priority"`
-	Assignee    string   `json:"assignee"`
-	Reporter    string   `json:"reporter"`
-	Tags        []string `json:"tags"`
+	ProjectID      int64    `json:"project_id"`
+	Title          string   `json:"title"`
+	Description    string   `json:"description"`
+	Project        string   `json:"project"`
+	Severity       string   `json:"severity"`
+	Priority       string   `json:"priority"`
+	Assignee       string   `json:"assignee"`
+	Reporter       string   `json:"reporter"`
+	Source         string   `json:"source"`
+	RequesterName  string   `json:"requester_name"`
+	RequesterEmail string   `json:"requester_email"`
+	Tags           []string `json:"tags"`
 }
 
 type UpdateIssue struct {
@@ -75,8 +84,9 @@ type UpdateIssue struct {
 }
 
 type AddComment struct {
-	Author string `json:"author"`
-	Body   string `json:"body"`
+	Author     string `json:"author"`
+	Body       string `json:"body"`
+	Visibility string `json:"visibility"`
 }
 
 type Filter struct {
@@ -90,6 +100,7 @@ type User struct {
 	ID           int64     `json:"id"`
 	Username     string    `json:"username"`
 	DisplayName  string    `json:"display_name"`
+	Email        string    `json:"email"`
 	Role         string    `json:"role"`
 	PasswordHash string    `json:"password_hash,omitempty"`
 	Disabled     bool      `json:"disabled"`
@@ -101,6 +112,7 @@ type PublicUser struct {
 	ID          int64     `json:"id"`
 	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name"`
+	Email       string    `json:"email"`
 	Role        string    `json:"role"`
 	Disabled    bool      `json:"disabled"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -110,12 +122,14 @@ type PublicUser struct {
 type CreateUser struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
 	Password    string `json:"password"`
 	Role        string `json:"role"`
 }
 
 type UpdateUser struct {
 	DisplayName *string `json:"display_name"`
+	Email       *string `json:"email"`
 	Password    *string `json:"password"`
 	Role        *string `json:"role"`
 	Disabled    *bool   `json:"disabled"`
@@ -250,6 +264,46 @@ type WebhookDelivery struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type EmailRecipient struct {
+	UserID      int64  `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Role        string `json:"role"`
+}
+
+type EmailNotification struct {
+	ID             int64      `json:"id"`
+	ProjectID      int64      `json:"project_id,omitempty"`
+	IssueID        int64      `json:"issue_id,omitempty"`
+	UserID         int64      `json:"user_id"`
+	RecipientEmail string     `json:"recipient_email"`
+	RecipientName  string     `json:"recipient_name"`
+	Event          string     `json:"event"`
+	Subject        string     `json:"subject"`
+	BodyText       string     `json:"body_text,omitempty"`
+	BodyHTML       string     `json:"body_html,omitempty"`
+	Status         string     `json:"status"`
+	Attempts       int        `json:"attempts"`
+	NextAttemptAt  time.Time  `json:"next_attempt_at"`
+	LockedUntil    *time.Time `json:"locked_until,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	SentAt         *time.Time `json:"sent_at,omitempty"`
+}
+
+type CreateEmailNotification struct {
+	ProjectID      int64
+	IssueID        int64
+	UserID         int64
+	RecipientEmail string
+	RecipientName  string
+	Event          string
+	Subject        string
+	BodyText       string
+	BodyHTML       string
+}
+
 type RepoConfig struct {
 	ProjectID     int64      `json:"project_id"`
 	Path          string     `json:"path"`
@@ -300,8 +354,9 @@ var validPriorities = map[string]struct{}{
 }
 
 var validGlobalRoles = map[string]struct{}{
-	"admin": {},
-	"user":  {},
+	"admin":  {},
+	"user":   {},
+	"client": {},
 }
 
 var validProjectRoles = map[string]struct{}{
@@ -311,10 +366,21 @@ var validProjectRoles = map[string]struct{}{
 	"viewer":    {},
 }
 
+var validIssueSources = map[string]struct{}{
+	"staff":  {},
+	"portal": {},
+}
+
+var validCommentVisibility = map[string]struct{}{
+	"public":   {},
+	"internal": {},
+}
+
 var validEvents = map[string]struct{}{
 	"issue.created":   {},
 	"issue.updated":   {},
 	"issue.commented": {},
+	"issue.assigned":  {},
 	"repo.scanned":    {},
 	"*":               {},
 }
@@ -361,6 +427,200 @@ func (s *Store) init() error {
 		return err
 	}
 	_, err := s.db.Exec(schemaSQL)
+	if err != nil {
+		return err
+	}
+	return s.migrate()
+}
+
+func (s *Store) migrate() error {
+	if ok, err := s.columnExists("users", "email"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN email TEXT`); err != nil {
+			return err
+		}
+	}
+	if ok, err := s.usersRoleAllowsClient(); err != nil {
+		return err
+	} else if !ok {
+		if err := s.rebuildUsersRoleConstraint(); err != nil {
+			return err
+		}
+	}
+	for _, migration := range []struct {
+		table  string
+		column string
+		sql    string
+	}{
+		{"issues", "source", `ALTER TABLE issues ADD COLUMN source TEXT NOT NULL DEFAULT 'staff'`},
+		{"issues", "requester_name", `ALTER TABLE issues ADD COLUMN requester_name TEXT NOT NULL DEFAULT ''`},
+		{"issues", "requester_email", `ALTER TABLE issues ADD COLUMN requester_email TEXT NOT NULL DEFAULT ''`},
+		{"issues", "customer_token", `ALTER TABLE issues ADD COLUMN customer_token TEXT`},
+		{"comments", "visibility", `ALTER TABLE comments ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`},
+	} {
+		ok, err := s.columnExists(migration.table, migration.column)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if _, err := s.db.Exec(migration.sql); err != nil {
+				return err
+			}
+		}
+	}
+	if notNull, err := s.columnNotNull("email_notifications", "user_id"); err != nil {
+		return err
+	} else if notNull {
+		if err := s.rebuildEmailNotifications(); err != nil {
+			return err
+		}
+	}
+	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL AND email <> ''`)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_customer_token ON issues(customer_token) WHERE customer_token IS NOT NULL AND customer_token <> '';
+		CREATE INDEX IF NOT EXISTS idx_issues_requester_email ON issues(requester_email);
+		CREATE INDEX IF NOT EXISTS idx_comments_visibility ON comments(issue_id, visibility);
+	`)
+	return err
+}
+
+func (s *Store) columnExists(table, column string) (bool, error) {
+	switch table {
+	case "users", "issues", "comments":
+	default:
+		return false, fmt.Errorf("unsupported table %q", table)
+	}
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(name, column) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func (s *Store) columnNotNull(table, column string) (bool, error) {
+	switch table {
+	case "email_notifications":
+	default:
+		return false, fmt.Errorf("unsupported table %q", table)
+	}
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(name, column) {
+			return notNull != 0, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func (s *Store) usersRoleAllowsClient() (bool, error) {
+	var sqlText string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).Scan(&sqlText); err != nil {
+		return false, err
+	}
+	return !strings.Contains(sqlText, "CHECK") || strings.Contains(sqlText, "'client'") || strings.Contains(sqlText, `"client"`), nil
+}
+
+func (s *Store) rebuildUsersRoleConstraint() error {
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer s.db.Exec(`PRAGMA foreign_keys = ON`)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
+		CREATE TABLE users_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL UNIQUE,
+			display_name TEXT NOT NULL,
+			email TEXT,
+			role TEXT NOT NULL,
+			password_hash TEXT NOT NULL,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO users_new (id, username, display_name, email, role, password_hash, disabled, created_at, updated_at)
+		SELECT id, username, display_name, email, role, password_hash, disabled, created_at, updated_at
+		FROM users`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE users`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE users_new RENAME TO users`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) rebuildEmailNotifications() error {
+	_, err := s.db.Exec(`
+		ALTER TABLE email_notifications RENAME TO email_notifications_old;
+		CREATE TABLE email_notifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+			issue_id INTEGER REFERENCES issues(id) ON DELETE CASCADE,
+			user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			recipient_email TEXT NOT NULL,
+			recipient_name TEXT NOT NULL,
+			event TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			body_text TEXT NOT NULL,
+			body_html TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')) DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at TEXT NOT NULL,
+			locked_until TEXT,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			sent_at TEXT
+		);
+		INSERT INTO email_notifications (
+			id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+			status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
+		)
+		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
+		FROM email_notifications_old;
+		DROP TABLE email_notifications_old;
+	`)
 	return err
 }
 
@@ -425,7 +685,7 @@ func (s *Store) CreateUser(input CreateUser) (User, error) {
 }
 
 func (s *Store) ListUsers() []User {
-	rows, err := s.db.Query(`SELECT id, username, display_name, role, disabled, created_at, updated_at FROM users ORDER BY username`)
+	rows, err := s.db.Query(`SELECT id, username, display_name, email, role, disabled, created_at, updated_at FROM users ORDER BY username`)
 	if err != nil {
 		return nil
 	}
@@ -458,6 +718,13 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	if patch.DisplayName != nil {
 		user.DisplayName = defaultString(*patch.DisplayName, user.Username)
 	}
+	if patch.Email != nil {
+		email, err := normalizeEmail(*patch.Email)
+		if err != nil {
+			return User{}, err
+		}
+		user.Email = email
+	}
 	if patch.Password != nil {
 		hash, err := security.HashPassword(*patch.Password)
 		if err != nil {
@@ -478,10 +745,10 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	user.UpdatedAt = time.Now().UTC()
 
 	if _, err := tx.Exec(
-		`UPDATE users SET display_name = ?, role = ?, password_hash = ?, disabled = ?, updated_at = ? WHERE id = ?`,
-		user.DisplayName, user.Role, user.PasswordHash, boolInt(user.Disabled), formatTime(user.UpdatedAt), user.ID,
+		`UPDATE users SET display_name = ?, email = ?, role = ?, password_hash = ?, disabled = ?, updated_at = ? WHERE id = ?`,
+		user.DisplayName, nullEmptyString(user.Email), user.Role, user.PasswordHash, boolInt(user.Disabled), formatTime(user.UpdatedAt), user.ID,
 	); err != nil {
-		return User{}, err
+		return User{}, normalizeSQLError(err)
 	}
 	if (oldRole == "admin" || !oldDisabled) && !hasActiveAdminTx(tx) {
 		return User{}, fmt.Errorf("%w: at least one active admin is required", ErrValidation)
@@ -557,7 +824,7 @@ func (s *Store) UserBySession(token string) (User, string, bool) {
 	hash := security.HashToken(token)
 	now := formatTime(time.Now().UTC())
 	row := s.db.QueryRow(`
-		SELECT u.id, u.username, u.display_name, u.role, u.disabled, u.created_at, u.updated_at, s.csrf_token
+		SELECT u.id, u.username, u.display_name, u.email, u.role, u.disabled, u.created_at, u.updated_at, s.csrf_token
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = ? AND s.expires_at > ?`,
@@ -565,10 +832,12 @@ func (s *Store) UserBySession(token string) (User, string, bool) {
 	)
 	var user User
 	var disabled int
+	var email sql.NullString
 	var created, updated, csrf string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &disabled, &created, &updated, &csrf); err != nil {
+	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &disabled, &created, &updated, &csrf); err != nil {
 		return User{}, "", false
 	}
+	user.Email = nullString(email)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -653,7 +922,7 @@ func (s *Store) DeleteAPIToken(userID, tokenID int64) error {
 func (s *Store) UserByAPIToken(token string) (User, bool) {
 	hash := security.HashToken(token)
 	row := s.db.QueryRow(`
-		SELECT u.id, u.username, u.display_name, u.role, u.disabled, u.created_at, u.updated_at, t.id, t.last_used_at
+		SELECT u.id, u.username, u.display_name, u.email, u.role, u.disabled, u.created_at, u.updated_at, t.id, t.last_used_at
 		FROM api_tokens t
 		JOIN users u ON u.id = t.user_id
 		WHERE t.token_hash = ?`,
@@ -662,11 +931,13 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 	var user User
 	var tokenID int64
 	var disabled int
+	var email sql.NullString
 	var created, updated string
 	var last sql.NullString
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &disabled, &created, &updated, &tokenID, &last); err != nil {
+	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &disabled, &created, &updated, &tokenID, &last); err != nil {
 		return User{}, false
 	}
+	user.Email = nullString(email)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -682,16 +953,18 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 }
 
 func (s *Store) GetUser(id int64) (User, error) {
-	row := s.db.QueryRow(`SELECT id, username, display_name, role, password_hash, disabled, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, username, display_name, email, role, password_hash, disabled, created_at, updated_at FROM users WHERE id = ?`, id)
 	var user User
 	var disabled int
+	var email sql.NullString
 	var created, updated string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.PasswordHash, &disabled, &created, &updated); err != nil {
+	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
+	user.Email = nullString(email)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -871,18 +1144,47 @@ func (s *Store) DeleteProjectMember(projectID, userID int64) error {
 
 func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
 	now := time.Now().UTC()
+	source := defaultString(input.Source, "staff")
+	if !isValid(validIssueSources, source) {
+		return Issue{}, fmt.Errorf("%w: invalid issue source %q", ErrValidation, source)
+	}
+	requesterEmail, err := normalizeEmail(input.RequesterEmail)
+	if err != nil {
+		return Issue{}, err
+	}
 	issue := Issue{
-		ProjectID:   input.ProjectID,
-		Title:       strings.TrimSpace(input.Title),
-		Description: strings.TrimSpace(input.Description),
-		Status:      "new",
-		Severity:    defaultString(input.Severity, "minor"),
-		Priority:    defaultString(input.Priority, "normal"),
-		Assignee:    strings.TrimSpace(input.Assignee),
-		Reporter:    strings.TrimSpace(input.Reporter),
-		Tags:        normalizeTags(input.Tags),
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ProjectID:      input.ProjectID,
+		Title:          strings.TrimSpace(input.Title),
+		Description:    strings.TrimSpace(input.Description),
+		Status:         "new",
+		Severity:       defaultString(input.Severity, "minor"),
+		Priority:       defaultString(input.Priority, "normal"),
+		Assignee:       strings.TrimSpace(input.Assignee),
+		Reporter:       strings.TrimSpace(input.Reporter),
+		Source:         source,
+		RequesterName:  strings.TrimSpace(input.RequesterName),
+		RequesterEmail: requesterEmail,
+		Tags:           normalizeTags(input.Tags),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if issue.Source == "portal" {
+		if issue.RequesterEmail == "" {
+			return Issue{}, fmt.Errorf("%w: requester email is required", ErrValidation)
+		}
+		if issue.RequesterName == "" {
+			issue.RequesterName = issue.RequesterEmail
+		}
+		if issue.Reporter == "" {
+			issue.Reporter = issue.RequesterEmail
+		}
+	}
+	if issue.RequesterEmail != "" {
+		token, err := security.RandomToken()
+		if err != nil {
+			return Issue{}, err
+		}
+		issue.CustomerToken = token
 	}
 	if issue.ProjectID < 1 {
 		return Issue{}, fmt.Errorf("%w: project_id is required", ErrValidation)
@@ -909,10 +1211,14 @@ func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
 		return Issue{}, err
 	}
 	result, err := tx.Exec(`
-		INSERT INTO issues (project_id, number, title, description, status, severity, priority, assignee, reporter, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO issues (
+			project_id, number, title, description, status, severity, priority, assignee, reporter,
+			source, requester_name, requester_email, customer_token, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		issue.ProjectID, issue.Number, issue.Title, issue.Description, issue.Status, issue.Severity, issue.Priority,
-		issue.Assignee, issue.Reporter, formatTime(issue.CreatedAt), formatTime(issue.UpdatedAt),
+		issue.Assignee, issue.Reporter, issue.Source, issue.RequesterName, issue.RequesterEmail,
+		nullEmptyString(issue.CustomerToken), formatTime(issue.CreatedAt), formatTime(issue.UpdatedAt),
 	)
 	if err != nil {
 		return Issue{}, err
@@ -961,16 +1267,17 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 	if filter.Query != "" {
 		conditions = append(conditions, `(
 			lower(i.title) LIKE ? OR lower(i.description) LIKE ? OR lower(p.key) LIKE ? OR lower(p.name) LIKE ? OR
-			lower(i.assignee) LIKE ? OR lower(i.reporter) LIKE ? OR
+			lower(i.assignee) LIKE ? OR lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ? OR
 			EXISTS (SELECT 1 FROM issue_tags it WHERE it.issue_id = i.id AND lower(it.tag) LIKE ?)
 		)`)
 		q := "%" + filter.Query + "%"
-		args = append(args, q, q, q, q, q, q, q)
+		args = append(args, q, q, q, q, q, q, q, q, q)
 	}
 
 	query := `
 		SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
-		       i.assignee, i.reporter, i.created_at, i.updated_at, i.closed_at
+		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
+		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
 		JOIN projects p ON p.id = i.project_id
 		WHERE ` + strings.Join(conditions, " AND ") + `
@@ -998,7 +1305,8 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 func (s *Store) GetIssue(id int64) (Issue, error) {
 	row := s.db.QueryRow(`
 		SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
-		       i.assignee, i.reporter, i.created_at, i.updated_at, i.closed_at
+		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
+		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
 		JOIN projects p ON p.id = i.project_id
 		WHERE i.id = ?`, id)
@@ -1010,6 +1318,32 @@ func (s *Store) GetIssue(id int64) (Issue, error) {
 		return Issue{}, err
 	}
 	return issue, s.hydrateIssue(&issue)
+}
+
+func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return Issue{}, ErrNotFound
+	}
+	row := s.db.QueryRow(`
+		SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
+		       i.created_at, i.updated_at, i.closed_at
+		FROM issues i
+		JOIN projects p ON p.id = i.project_id
+		WHERE i.customer_token = ?`, token)
+	issue, err := scanIssue(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Issue{}, ErrNotFound
+	}
+	if err != nil {
+		return Issue{}, err
+	}
+	if err := s.hydrateIssue(&issue); err != nil {
+		return Issue{}, err
+	}
+	issue.Comments = publicComments(issue.Comments)
+	return issue, nil
 }
 
 func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
@@ -1094,11 +1428,15 @@ func (s *Store) AddComment(id int64, input AddComment) (Issue, error) {
 		return Issue{}, fmt.Errorf("%w: comment body is required", ErrValidation)
 	}
 	author := defaultString(input.Author, "anonymous")
+	visibility := defaultString(input.Visibility, "public")
+	if !isValid(validCommentVisibility, visibility) {
+		return Issue{}, fmt.Errorf("%w: invalid comment visibility %q", ErrValidation, visibility)
+	}
 	now := time.Now().UTC()
 
 	result, err := s.db.Exec(
-		`INSERT INTO comments (issue_id, author, body, created_at) VALUES (?, ?, ?, ?)`,
-		id, author, body, formatTime(now),
+		`INSERT INTO comments (issue_id, author, body, visibility, created_at) VALUES (?, ?, ?, ?, ?)`,
+		id, author, body, visibility, formatTime(now),
 	)
 	if err != nil {
 		return Issue{}, normalizeSQLError(err)
@@ -1330,6 +1668,268 @@ func (s *Store) ListDeliveries(limit int) []WebhookDelivery {
 	return deliveries
 }
 
+func (s *Store) IssueEmailRecipients(event string, issue Issue, actor User) []EmailRecipient {
+	recipients := make(map[int64]EmailRecipient)
+	add := func(recipient EmailRecipient) {
+		if recipient.UserID == 0 || recipient.UserID == actor.ID || strings.TrimSpace(recipient.Email) == "" {
+			return
+		}
+		recipients[recipient.UserID] = recipient
+	}
+
+	switch event {
+	case "issue.created":
+		for _, recipient := range s.projectOwnerEmailRecipients(issue.ProjectID) {
+			add(recipient)
+		}
+	case "issue.updated", "issue.commented":
+		if recipient, ok := s.emailRecipientByUsername(issue.Reporter); ok {
+			add(recipient)
+		}
+		if recipient, ok := s.emailRecipientByUsername(issue.Assignee); ok {
+			add(recipient)
+		}
+	case "issue.assigned":
+		if recipient, ok := s.emailRecipientByUsername(issue.Assignee); ok {
+			add(recipient)
+		}
+	}
+
+	result := make([]EmailRecipient, 0, len(recipients))
+	for _, recipient := range recipients {
+		result = append(result, recipient)
+	}
+	return result
+}
+
+func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]EmailNotification, error) {
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	created := make([]EmailNotification, 0, len(inputs))
+	for _, input := range inputs {
+		email, err := normalizeEmail(input.RecipientEmail)
+		if err != nil {
+			return nil, err
+		}
+		subject := strings.TrimSpace(input.Subject)
+		bodyText := strings.TrimSpace(input.BodyText)
+		if email == "" || subject == "" || bodyText == "" {
+			return nil, fmt.Errorf("%w: email, subject, and body are required", ErrValidation)
+		}
+		notification := EmailNotification{
+			ProjectID:      input.ProjectID,
+			IssueID:        input.IssueID,
+			UserID:         input.UserID,
+			RecipientEmail: email,
+			RecipientName:  strings.TrimSpace(input.RecipientName),
+			Event:          strings.TrimSpace(input.Event),
+			Subject:        subject,
+			BodyText:       bodyText,
+			BodyHTML:       strings.TrimSpace(input.BodyHTML),
+			Status:         "pending",
+			NextAttemptAt:  now,
+			CreatedAt:      now,
+		}
+		if notification.RecipientName == "" {
+			notification.RecipientName = email
+		}
+		if notification.Event == "" {
+			return nil, fmt.Errorf("%w: event is required", ErrValidation)
+		}
+		if !isValid(validEvents, notification.Event) {
+			return nil, fmt.Errorf("%w: invalid notification event %q", ErrValidation, notification.Event)
+		}
+		result, err := tx.Exec(`
+			INSERT INTO email_notifications (
+				project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+				status, attempts, next_attempt_at, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+			nullZero(notification.ProjectID), nullZero(notification.IssueID), nullZero(notification.UserID), notification.RecipientEmail,
+			notification.RecipientName, notification.Event, notification.Subject, notification.BodyText, notification.BodyHTML,
+			formatTime(notification.NextAttemptAt), formatTime(notification.CreatedAt),
+		)
+		if err != nil {
+			return nil, normalizeSQLError(err)
+		}
+		notification.ID, _ = result.LastInsertId()
+		created = append(created, notification)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func (s *Store) ClaimEmailNotifications(limit int, leaseFor time.Duration) ([]EmailNotification, error) {
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+	if leaseFor <= 0 {
+		leaseFor = time.Minute
+	}
+	now := time.Now().UTC()
+	nowText := formatTime(now)
+	lockedUntil := formatTime(now.Add(leaseFor))
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`
+		SELECT id
+		FROM email_notifications
+		WHERE (status = 'pending' AND next_attempt_at <= ?)
+		   OR (status = 'sending' AND locked_until IS NOT NULL AND locked_until <= ?)
+		ORDER BY created_at
+		LIMIT ?`, nowText, nowText, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	claimed := make([]EmailNotification, 0, len(ids))
+	for _, id := range ids {
+		result, err := tx.Exec(`
+			UPDATE email_notifications
+			SET status = 'sending', locked_until = ?
+			WHERE id = ?
+			  AND ((status = 'pending' AND next_attempt_at <= ?)
+			    OR (status = 'sending' AND locked_until IS NOT NULL AND locked_until <= ?))`,
+			lockedUntil, id, nowText, nowText,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if changed, _ := result.RowsAffected(); changed == 0 {
+			continue
+		}
+		notification, err := getEmailNotificationTx(tx, id)
+		if err != nil {
+			return nil, err
+		}
+		claimed = append(claimed, notification)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return claimed, nil
+}
+
+func (s *Store) MarkEmailSent(id int64) error {
+	now := time.Now().UTC()
+	result, err := s.db.Exec(`
+		UPDATE email_notifications
+		SET status = 'sent', sent_at = ?, locked_until = NULL, last_error = ''
+		WHERE id = ?`,
+		formatTime(now), id,
+	)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) MarkEmailFailed(id int64, sendErr error, maxAttempts int) error {
+	if maxAttempts < 1 {
+		maxAttempts = 5
+	}
+	notification, err := s.GetEmailNotification(id)
+	if err != nil {
+		return err
+	}
+	attempts := notification.Attempts + 1
+	status := "pending"
+	delay := emailRetryDelay(attempts)
+	nextAttempt := time.Now().UTC().Add(delay)
+	if attempts >= maxAttempts {
+		status = "failed"
+		nextAttempt = time.Now().UTC()
+	}
+	message := "send failed"
+	if sendErr != nil {
+		message = sendErr.Error()
+	}
+	if len(message) > 1000 {
+		message = message[:1000]
+	}
+	result, err := s.db.Exec(`
+		UPDATE email_notifications
+		SET status = ?, attempts = ?, next_attempt_at = ?, locked_until = NULL, last_error = ?
+		WHERE id = ?`,
+		status, attempts, formatTime(nextAttempt), message, id,
+	)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetEmailNotification(id int64) (EmailNotification, error) {
+	row := s.db.QueryRow(`
+		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
+		FROM email_notifications
+		WHERE id = ?`, id)
+	notification, err := scanEmailNotification(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return EmailNotification{}, ErrNotFound
+	}
+	return notification, err
+}
+
+func (s *Store) ListEmailNotifications(limit int) []EmailNotification {
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
+		FROM email_notifications
+		ORDER BY created_at DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	notifications := make([]EmailNotification, 0)
+	for rows.Next() {
+		notification, err := scanEmailNotification(rows)
+		if err == nil {
+			notifications = append(notifications, notification)
+		}
+	}
+	return notifications
+}
+
 func (s *Store) RepoConfig(projectID int64) RepoConfig {
 	project, err := s.GetProject(projectID)
 	if err != nil {
@@ -1450,7 +2050,7 @@ func Priorities() []string {
 }
 
 func Roles() []string {
-	return []string{"admin", "user"}
+	return []string{"admin", "user", "client"}
 }
 
 func ProjectRoles() []string {
@@ -1458,7 +2058,7 @@ func ProjectRoles() []string {
 }
 
 func Events() []string {
-	return []string{"issue.created", "issue.updated", "issue.commented", "repo.scanned"}
+	return []string{"issue.created", "issue.updated", "issue.commented", "issue.assigned", "repo.scanned"}
 }
 
 func ToPublicUser(user User) PublicUser {
@@ -1466,6 +2066,7 @@ func ToPublicUser(user User) PublicUser {
 		ID:          user.ID,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
+		Email:       user.Email,
 		Role:        user.Role,
 		Disabled:    user.Disabled,
 		CreatedAt:   user.CreatedAt,
@@ -1499,14 +2100,19 @@ func createUserTx(tx *sql.Tx, input CreateUser) (User, error) {
 	if !isValid(validGlobalRoles, role) {
 		return User{}, fmt.Errorf("%w: invalid role %q", ErrValidation, role)
 	}
+	email, err := normalizeEmail(input.Email)
+	if err != nil {
+		return User{}, err
+	}
 	hash, err := security.HashPassword(input.Password)
 	if err != nil {
 		return User{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	now := time.Now().UTC()
+	displayName := defaultString(input.DisplayName, username)
 	result, err := tx.Exec(
-		`INSERT INTO users (username, display_name, role, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		username, defaultString(input.DisplayName, username), role, hash, formatTime(now), formatTime(now),
+		`INSERT INTO users (username, display_name, email, role, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		username, displayName, nullEmptyString(email), role, hash, formatTime(now), formatTime(now),
 	)
 	if err != nil {
 		return User{}, normalizeSQLError(err)
@@ -1515,7 +2121,8 @@ func createUserTx(tx *sql.Tx, input CreateUser) (User, error) {
 	return User{
 		ID:           id,
 		Username:     username,
-		DisplayName:  defaultString(input.DisplayName, username),
+		DisplayName:  displayName,
+		Email:        email,
 		Role:         role,
 		PasswordHash: hash,
 		CreatedAt:    now,
@@ -1551,16 +2158,18 @@ func createProjectTx(tx *sql.Tx, input CreateProject) (Project, error) {
 }
 
 func getUserTx(tx *sql.Tx, id int64) (User, error) {
-	row := tx.QueryRow(`SELECT id, username, display_name, role, password_hash, disabled, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := tx.QueryRow(`SELECT id, username, display_name, email, role, password_hash, disabled, created_at, updated_at FROM users WHERE id = ?`, id)
 	var user User
 	var disabled int
+	var email sql.NullString
 	var created, updated string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.PasswordHash, &disabled, &created, &updated); err != nil {
+	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
+	user.Email = nullString(email)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -1599,16 +2208,18 @@ func replaceTagsTx(tx *sql.Tx, issueID int64, tags []string) error {
 }
 
 func (s *Store) userByUsername(username string, includeHash bool) (User, error) {
-	row := s.db.QueryRow(`SELECT id, username, display_name, role, password_hash, disabled, created_at, updated_at FROM users WHERE username = ?`, username)
+	row := s.db.QueryRow(`SELECT id, username, display_name, email, role, password_hash, disabled, created_at, updated_at FROM users WHERE username = ?`, username)
 	var user User
 	var disabled int
+	var email sql.NullString
 	var created, updated string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &user.PasswordHash, &disabled, &created, &updated); err != nil {
+	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
+	user.Email = nullString(email)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -1616,6 +2227,47 @@ func (s *Store) userByUsername(username string, includeHash bool) (User, error) 
 		user.PasswordHash = ""
 	}
 	return user, nil
+}
+
+func (s *Store) projectOwnerEmailRecipients(projectID int64) []EmailRecipient {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.role
+		FROM users u
+		LEFT JOIN project_members pm ON pm.user_id = u.id AND pm.project_id = ?
+		WHERE u.disabled = 0
+		  AND u.email IS NOT NULL
+		  AND trim(u.email) <> ''
+		  AND (u.role = 'admin' OR pm.role = 'owner')
+		ORDER BY u.username`, projectID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	recipients := make([]EmailRecipient, 0)
+	for rows.Next() {
+		recipient, err := scanEmailRecipient(rows)
+		if err == nil {
+			recipients = append(recipients, recipient)
+		}
+	}
+	return recipients
+}
+
+func (s *Store) emailRecipientByUsername(username string) (EmailRecipient, bool) {
+	username = normalizeUsername(username)
+	if username == "" {
+		return EmailRecipient{}, false
+	}
+	row := s.db.QueryRow(`
+		SELECT id, username, display_name, email, role
+		FROM users
+		WHERE username = ?
+		  AND disabled = 0
+		  AND email IS NOT NULL
+		  AND trim(email) <> ''`, username)
+	recipient, err := scanEmailRecipient(row)
+	return recipient, err == nil
 }
 
 func (s *Store) hydrateIssue(issue *Issue) error {
@@ -1634,14 +2286,17 @@ func (s *Store) hydrateIssue(issue *Issue) error {
 	}
 	tagRows.Close()
 
-	commentRows, err := s.db.Query(`SELECT id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
+	commentRows, err := s.db.Query(`SELECT id, author, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
 	if err != nil {
 		return err
 	}
 	for commentRows.Next() {
 		var comment Comment
 		var created string
-		if err := commentRows.Scan(&comment.ID, &comment.Author, &comment.Body, &created); err == nil {
+		if err := commentRows.Scan(&comment.ID, &comment.Author, &comment.Body, &comment.Visibility, &created); err == nil {
+			if comment.Visibility == "" {
+				comment.Visibility = "public"
+			}
 			comment.CreatedAt = parseTime(created)
 			issue.Comments = append(issue.Comments, comment)
 		}
@@ -1659,10 +2314,12 @@ type scanner interface {
 func scanUser(rows scanner) (User, error) {
 	var user User
 	var disabled int
+	var email sql.NullString
 	var created, updated string
-	if err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &user.Role, &disabled, &created, &updated); err != nil {
+	if err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &disabled, &created, &updated); err != nil {
 		return User{}, err
 	}
+	user.Email = nullString(email)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -1693,15 +2350,19 @@ func scanProject(rows scanner) (Project, error) {
 
 func scanIssue(rows scanner) (Issue, error) {
 	var issue Issue
-	var closed sql.NullString
+	var closed, customerToken sql.NullString
 	var created, updated string
 	if err := rows.Scan(
 		&issue.ID, &issue.ProjectID, &issue.ProjectKey, &issue.Number, &issue.Title, &issue.Description,
 		&issue.Status, &issue.Severity, &issue.Priority, &issue.Assignee, &issue.Reporter,
-		&created, &updated, &closed,
+		&issue.Source, &issue.RequesterName, &issue.RequesterEmail, &customerToken, &created, &updated, &closed,
 	); err != nil {
 		return Issue{}, err
 	}
+	if issue.Source == "" {
+		issue.Source = "staff"
+	}
+	issue.CustomerToken = nullString(customerToken)
 	issue.CreatedAt = parseTime(created)
 	issue.UpdatedAt = parseTime(updated)
 	issue.ClosedAt = parseNullTime(closed)
@@ -1762,6 +2423,55 @@ func scanCommitLinks(rows *sql.Rows) []CommitLink {
 	return links
 }
 
+func scanEmailRecipient(rows scanner) (EmailRecipient, error) {
+	var recipient EmailRecipient
+	if err := rows.Scan(&recipient.UserID, &recipient.Username, &recipient.DisplayName, &recipient.Email, &recipient.Role); err != nil {
+		return EmailRecipient{}, err
+	}
+	return recipient, nil
+}
+
+func getEmailNotificationTx(tx *sql.Tx, id int64) (EmailNotification, error) {
+	row := tx.QueryRow(`
+		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
+		FROM email_notifications
+		WHERE id = ?`, id)
+	notification, err := scanEmailNotification(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return EmailNotification{}, ErrNotFound
+	}
+	return notification, err
+}
+
+func scanEmailNotification(rows scanner) (EmailNotification, error) {
+	var notification EmailNotification
+	var projectID, issueID, userID sql.NullInt64
+	var nextAttempt, created string
+	var lockedUntil, sentAt sql.NullString
+	if err := rows.Scan(
+		&notification.ID, &projectID, &issueID, &userID, &notification.RecipientEmail,
+		&notification.RecipientName, &notification.Event, &notification.Subject, &notification.BodyText, &notification.BodyHTML,
+		&notification.Status, &notification.Attempts, &nextAttempt, &lockedUntil, &notification.LastError, &created, &sentAt,
+	); err != nil {
+		return EmailNotification{}, err
+	}
+	if projectID.Valid {
+		notification.ProjectID = projectID.Int64
+	}
+	if issueID.Valid {
+		notification.IssueID = issueID.Int64
+	}
+	if userID.Valid {
+		notification.UserID = userID.Int64
+	}
+	notification.NextAttemptAt = parseTime(nextAttempt)
+	notification.LockedUntil = parseNullTime(lockedUntil)
+	notification.CreatedAt = parseTime(created)
+	notification.SentAt = parseNullTime(sentAt)
+	return notification, nil
+}
+
 func projectRepoConfig(project Project) RepoConfig {
 	return RepoConfig{
 		ProjectID:     project.ID,
@@ -1796,6 +2506,18 @@ func defaultString(value, fallback string) string {
 
 func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
+}
+
+func normalizeEmail(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	address, err := mail.ParseAddress(value)
+	if err != nil || strings.TrimSpace(address.Address) == "" {
+		return "", fmt.Errorf("%w: invalid email address", ErrValidation)
+	}
+	return strings.ToLower(address.Address), nil
 }
 
 func isValid(allowed map[string]struct{}, value string) bool {
@@ -1856,6 +2578,16 @@ func eventMatches(events []string, event string) bool {
 	return false
 }
 
+func emailRetryDelay(attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if attempts > 6 {
+		attempts = 6
+	}
+	return time.Duration(1<<(attempts-1)) * time.Minute
+}
+
 func validateWebhookURL(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
@@ -1888,6 +2620,17 @@ func copyWebhook(hook Webhook) Webhook {
 	return hook
 }
 
+func publicComments(comments []Comment) []Comment {
+	result := make([]Comment, 0, len(comments))
+	for _, comment := range comments {
+		if comment.Visibility == "" || comment.Visibility == "public" {
+			comment.Visibility = "public"
+			result = append(result, comment)
+		}
+	}
+	return result
+}
+
 func boolInt(value bool) int {
 	if value {
 		return 1
@@ -1900,6 +2643,21 @@ func nullableInt64(value *int64) any {
 		return nil
 	}
 	return *value
+}
+
+func nullEmptyString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullString(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }
 
 func nullZero(value int64) any {
@@ -1938,7 +2696,8 @@ CREATE TABLE IF NOT EXISTS users (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	username TEXT NOT NULL UNIQUE,
 	display_name TEXT NOT NULL,
-	role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+	email TEXT,
+	role TEXT NOT NULL,
 	password_hash TEXT NOT NULL,
 	disabled INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
@@ -1948,7 +2707,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
 	token_hash TEXT PRIMARY KEY,
 	csrf_token TEXT NOT NULL,
-	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 	created_at TEXT NOT NULL,
 	expires_at TEXT NOT NULL
 );
@@ -1995,6 +2754,10 @@ CREATE TABLE IF NOT EXISTS issues (
 	priority TEXT NOT NULL,
 	assignee TEXT NOT NULL DEFAULT '',
 	reporter TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL DEFAULT 'staff',
+	requester_name TEXT NOT NULL DEFAULT '',
+	requester_email TEXT NOT NULL DEFAULT '',
+	customer_token TEXT,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	closed_at TEXT,
@@ -2012,6 +2775,7 @@ CREATE TABLE IF NOT EXISTS comments (
 	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
 	author TEXT NOT NULL,
 	body TEXT NOT NULL,
+	visibility TEXT NOT NULL DEFAULT 'public',
 	created_at TEXT NOT NULL
 );
 
@@ -2042,6 +2806,26 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 	created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS email_notifications (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+	issue_id INTEGER REFERENCES issues(id) ON DELETE CASCADE,
+	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	recipient_email TEXT NOT NULL,
+	recipient_name TEXT NOT NULL,
+	event TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	body_text TEXT NOT NULL,
+	body_html TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')) DEFAULT 'pending',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL,
+	locked_until TEXT,
+	last_error TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	sent_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS commit_links (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -2061,4 +2845,7 @@ CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_commit_links_issue ON commit_links(issue_id);
 CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(project_id);
+CREATE INDEX IF NOT EXISTS idx_email_notifications_pending ON email_notifications(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_email_notifications_issue ON email_notifications(issue_id);
+CREATE INDEX IF NOT EXISTS idx_email_notifications_user ON email_notifications(user_id);
 `
