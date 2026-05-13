@@ -1,4 +1,6 @@
 /pemmece
 /pemmece-data.json
+/pemmece.db
+/pemmece.db-*
 /tmp/
 *.test

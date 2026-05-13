@@ -17,10 +17,16 @@ type Commit struct {
 	Email     string
 	Date      time.Time
 	Subject   string
+	IssueRefs []IssueRef
 	IssueIDs  []int64
 }
 
-var issueRefPattern = regexp.MustCompile(`(?i)(?:#|PME-)([0-9]+)`)
+type IssueRef struct {
+	ProjectKey string
+	Number     int64
+}
+
+var issueRefPattern = regexp.MustCompile(`(?i)(?:#([0-9]+)|([A-Z][A-Z0-9]{1,15})-([0-9]+))`)
 
 func Scan(ctx context.Context, path string, limit int) ([]Commit, error) {
 	if strings.TrimSpace(path) == "" {
@@ -56,8 +62,8 @@ func Scan(ctx context.Context, path string, limit int) ([]Commit, error) {
 		if len(fields) < 7 {
 			continue
 		}
-		issueIDs := extractIssueIDs(fields[5] + "\n" + fields[6])
-		if len(issueIDs) == 0 {
+		issueRefs := extractIssueRefs(fields[5] + "\n" + fields[6])
+		if len(issueRefs) == 0 {
 			continue
 		}
 		date, _ := time.Parse(time.RFC3339, strings.TrimSpace(fields[4]))
@@ -68,29 +74,49 @@ func Scan(ctx context.Context, path string, limit int) ([]Commit, error) {
 			Email:     strings.TrimSpace(fields[3]),
 			Date:      date,
 			Subject:   strings.TrimSpace(fields[5]),
-			IssueIDs:  issueIDs,
+			IssueRefs: issueRefs,
+			IssueIDs:  issueIDs(issueRefs),
 		})
 	}
 	return commits, nil
 }
 
-func extractIssueIDs(text string) []int64 {
+func extractIssueRefs(text string) []IssueRef {
 	matches := issueRefPattern.FindAllStringSubmatch(text, -1)
-	seen := make(map[int64]struct{}, len(matches))
-	ids := make([]int64, 0, len(matches))
+	seen := make(map[string]struct{}, len(matches))
+	refs := make([]IssueRef, 0, len(matches))
 	for _, match := range matches {
-		if len(match) != 2 {
+		if len(match) != 4 {
 			continue
 		}
-		id, err := strconv.ParseInt(match[1], 10, 64)
-		if err != nil || id < 1 {
+		projectKey := strings.ToUpper(strings.TrimSpace(match[2]))
+		rawNumber := match[1]
+		if rawNumber == "" {
+			rawNumber = match[3]
+		}
+		number, err := strconv.ParseInt(rawNumber, 10, 64)
+		if err != nil || number < 1 {
 			continue
 		}
-		if _, ok := seen[id]; ok {
+		key := fmt.Sprintf("%s:%d", projectKey, number)
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+		seen[key] = struct{}{}
+		refs = append(refs, IssueRef{ProjectKey: projectKey, Number: number})
+	}
+	return refs
+}
+
+func issueIDs(refs []IssueRef) []int64 {
+	seen := make(map[int64]struct{}, len(refs))
+	ids := make([]int64, 0, len(refs))
+	for _, ref := range refs {
+		if _, ok := seen[ref.Number]; ok {
+			continue
+		}
+		seen[ref.Number] = struct{}{}
+		ids = append(ids, ref.Number)
 	}
 	return ids
 }

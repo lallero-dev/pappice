@@ -12,13 +12,24 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{
+		Username: "Admin",
+		Password: "correct horse",
+	})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	projects := tracker.ListProjects(admin)
+	if len(projects) != 1 {
+		t.Fatalf("projects = %d, want 1", len(projects))
+	}
 
 	issue, err := tracker.CreateIssue(CreateIssue{
-		Title:    "Crash on import",
-		Project:  "Core",
-		Severity: "crash",
-		Priority: "urgent",
-		Tags:     []string{"import", "Import", "regression"},
+		ProjectID: projects[0].ID,
+		Title:     "Crash on import",
+		Severity:  "crash",
+		Priority:  "urgent",
+		Tags:      []string{"import", "Import", "regression"},
 	})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -62,7 +73,7 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if len(issues) != 0 {
 		t.Fatalf("comments should not match issue search, got %d", len(issues))
 	}
-	issues = reloaded.ListIssues(Filter{Project: "Core"})
+	issues = reloaded.ListIssues(Filter{ProjectID: projects[0].ID})
 	if len(issues) != 1 {
 		t.Fatalf("project issues = %d, want 1", len(issues))
 	}
@@ -74,12 +85,18 @@ func TestStoreValidation(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 
-	_, err = tracker.CreateIssue(CreateIssue{Severity: "minor", Priority: "normal"})
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	projectID := tracker.ListProjects(admin)[0].ID
+
+	_, err = tracker.CreateIssue(CreateIssue{ProjectID: projectID, Severity: "minor", Priority: "normal"})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty title error = %v, want ErrValidation", err)
 	}
 
-	issue, err := tracker.CreateIssue(CreateIssue{Title: "Bad status"})
+	issue, err := tracker.CreateIssue(CreateIssue{ProjectID: projectID, Title: "Bad status"})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -118,11 +135,14 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 		t.Fatal("authenticated user leaked password hash")
 	}
 
-	session, _, err := tracker.CreateSession(admin.ID)
+	session, csrf, _, err := tracker.CreateSession(admin.ID)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if user, ok := tracker.UserBySession(session); !ok || user.ID != admin.ID {
+	if csrf == "" {
+		t.Fatal("session should include csrf token")
+	}
+	if user, gotCSRF, ok := tracker.UserBySession(session); !ok || user.ID != admin.ID || gotCSRF != csrf {
 		t.Fatalf("session user = %#v, %v", user, ok)
 	}
 
@@ -147,8 +167,47 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
-	hooks := tracker.ListWebhooksForEvent("issue.created")
+	projectID := tracker.ListProjects(admin)[0].ID
+	hooks := tracker.ListWebhooksForEvent("issue.created", projectID)
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
 		t.Fatalf("event hooks = %#v", hooks)
+	}
+}
+
+func TestProjectMembershipFiltersIssues(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	visibleProject := tracker.ListProjects(admin)[0]
+	hiddenProject, err := tracker.CreateProject(CreateProject{Key: "OPS", Name: "Operations"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	user, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := tracker.UpsertProjectMember(visibleProject.ID, UpsertProjectMember{UserID: user.ID, Role: "viewer"}); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+	if _, err := tracker.CreateIssue(CreateIssue{ProjectID: visibleProject.ID, Title: "Visible"}); err != nil {
+		t.Fatalf("create visible issue: %v", err)
+	}
+	if _, err := tracker.CreateIssue(CreateIssue{ProjectID: hiddenProject.ID, Title: "Hidden"}); err != nil {
+		t.Fatalf("create hidden issue: %v", err)
+	}
+
+	issues := tracker.ListIssuesForUser(Filter{}, user)
+	if len(issues) != 1 || issues[0].Title != "Visible" {
+		t.Fatalf("visible issues = %#v", issues)
+	}
+	projects := tracker.ListProjects(user)
+	if len(projects) != 1 || projects[0].ID != visibleProject.ID {
+		t.Fatalf("visible projects = %#v", projects)
 	}
 }

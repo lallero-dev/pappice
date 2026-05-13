@@ -65,6 +65,10 @@ func HashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func ConstantTimeEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
 func HMACSHA256(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)

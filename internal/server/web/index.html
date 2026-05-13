@@ -17,6 +17,7 @@
       </div>
       <nav class="topnav" id="topNav" hidden>
         <button class="nav-button active" id="issuesTab" type="button">Issues</button>
+        <button class="nav-button" id="projectTab" type="button">Project</button>
         <button class="nav-button" id="adminTab" type="button">Admin</button>
       </nav>
       <div class="topbar-actions">
@@ -84,7 +85,7 @@
         <section class="filter-section">
           <label for="projectFilter">Project</label>
           <select id="projectFilter">
-            <option value="">All projects</option>
+            <option value="">No projects</option>
           </select>
         </section>
 
@@ -125,6 +126,18 @@
         <div class="admin-grid">
           <section class="admin-panel">
             <div class="panel-head">
+              <h2>Projects</h2>
+            </div>
+            <form class="inline-form" id="projectForm">
+              <input name="key" required maxlength="16" placeholder="KEY" autocomplete="off">
+              <input name="name" required placeholder="project name" autocomplete="off">
+              <button class="primary-button" type="submit">Add</button>
+            </form>
+            <div class="admin-list" id="projectList"></div>
+          </section>
+
+          <section class="admin-panel">
+            <div class="panel-head">
               <h2>Users</h2>
             </div>
             <form class="inline-form" id="userForm">
@@ -151,7 +164,56 @@
 
           <section class="admin-panel">
             <div class="panel-head">
-              <h2>Webhooks</h2>
+              <h2>Global Webhooks</h2>
+            </div>
+            <form class="stack-form" id="globalWebhookForm">
+              <div class="form-grid">
+                <input name="name" required placeholder="name" autocomplete="off">
+                <input name="url" required placeholder="https://example.test/hook" autocomplete="off">
+              </div>
+              <input name="events" placeholder="issue.created, issue.updated, issue.commented">
+              <label class="check-row">
+                <input name="enabled" type="checkbox" checked>
+                Enabled
+              </label>
+              <button class="primary-button" type="submit">Add Webhook</button>
+            </form>
+            <div class="admin-list" id="globalWebhookList"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="admin-view" id="projectView" hidden>
+        <div class="admin-grid">
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>Members</h2>
+            </div>
+            <form class="inline-form" id="memberForm">
+              <select name="user_id" id="memberUserSelect"></select>
+              <select name="role" id="memberRoleSelect"></select>
+              <button class="primary-button" type="submit">Add</button>
+            </form>
+            <div class="admin-list" id="memberList"></div>
+          </section>
+
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>Repository</h2>
+            </div>
+            <form class="inline-form" id="repoForm">
+              <input name="path" placeholder="/path/to/repo" autocomplete="off">
+              <input name="scan_limit" type="number" min="1" max="1000" step="1" value="200">
+              <button class="primary-button" type="submit">Save</button>
+              <button class="ghost-button" id="scanRepoButton" type="button">Scan</button>
+            </form>
+            <div class="repo-status" id="repoStatus"></div>
+            <div class="admin-list" id="commitList"></div>
+          </section>
+
+          <section class="admin-panel">
+            <div class="panel-head">
+              <h2>Project Webhooks</h2>
             </div>
             <form class="stack-form" id="webhookForm">
               <div class="form-grid">
@@ -170,16 +232,9 @@
 
           <section class="admin-panel">
             <div class="panel-head">
-              <h2>Git Repository</h2>
+              <h2>Deliveries</h2>
             </div>
-            <form class="inline-form" id="repoForm">
-              <input name="path" placeholder="/path/to/repo" autocomplete="off">
-              <input name="scan_limit" type="number" min="1" max="1000" step="1" value="200">
-              <button class="primary-button" type="submit">Save</button>
-              <button class="ghost-button" id="scanRepoButton" type="button">Scan</button>
-            </form>
-            <div class="repo-status" id="repoStatus"></div>
-            <div class="admin-list" id="commitList"></div>
+            <div class="admin-list" id="deliveryList"></div>
           </section>
         </div>
       </section>
@@ -202,7 +257,7 @@
         <div class="form-grid">
           <label>
             Project
-            <input name="project" value="Inbox" autocomplete="off">
+            <select name="project_id" id="issueProjectSelect"></select>
           </label>
           <label>
             Assignee
