@@ -327,9 +327,9 @@ var validPriorities = map[string]struct{}{
 }
 
 var validGlobalRoles = map[string]struct{}{
-	"admin":  {},
-	"user":   {},
-	"client": {},
+	"admin":    {},
+	"staff":    {},
+	"customer": {},
 }
 
 var validProjectRoles = map[string]struct{}{
@@ -413,12 +413,18 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
-	if ok, err := s.usersRoleAllowsClient(); err != nil {
+	if ok, err := s.usersRolesAreCurrent(); err != nil {
 		return err
 	} else if !ok {
 		if err := s.rebuildUsersRoleConstraint(); err != nil {
 			return err
 		}
+	}
+	if _, err := s.db.Exec(`UPDATE users SET role = 'staff' WHERE role = 'user'`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE users SET role = 'customer' WHERE role = 'client'`); err != nil {
+		return err
 	}
 	if ok, err := s.projectRolesAreTicketing(); err != nil {
 		return err
@@ -545,12 +551,16 @@ func (s *Store) columnNotNull(table, column string) (bool, error) {
 	return false, rows.Err()
 }
 
-func (s *Store) usersRoleAllowsClient() (bool, error) {
+func (s *Store) usersRolesAreCurrent() (bool, error) {
 	var sqlText string
 	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).Scan(&sqlText); err != nil {
 		return false, err
 	}
-	return !strings.Contains(sqlText, "CHECK") || strings.Contains(sqlText, "'client'") || strings.Contains(sqlText, `"client"`), nil
+	if !strings.Contains(sqlText, "CHECK") {
+		return true, nil
+	}
+	return (strings.Contains(sqlText, "'staff'") || strings.Contains(sqlText, `"staff"`)) &&
+		(strings.Contains(sqlText, "'customer'") || strings.Contains(sqlText, `"customer"`)), nil
 }
 
 func (s *Store) projectRolesAreTicketing() (bool, error) {
@@ -785,7 +795,7 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 		user.PasswordHash = hash
 	}
 	if patch.Role != nil {
-		role := strings.TrimSpace(*patch.Role)
+		role := normalizeGlobalRole(*patch.Role)
 		if !isValid(validGlobalRoles, role) {
 			return User{}, fmt.Errorf("%w: invalid role %q", ErrValidation, role)
 		}
@@ -890,6 +900,7 @@ func (s *Store) UserBySession(token string) (User, string, bool) {
 		return User{}, "", false
 	}
 	user.Email = nullString(email)
+	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -990,6 +1001,7 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 		return User{}, false
 	}
 	user.Email = nullString(email)
+	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -1017,6 +1029,7 @@ func (s *Store) GetUser(id int64) (User, error) {
 		return User{}, err
 	}
 	user.Email = nullString(email)
+	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -1042,7 +1055,7 @@ func (s *Store) CreateProject(input CreateProject) (Project, error) {
 func (s *Store) ListProjects(user User) []Project {
 	var rows *sql.Rows
 	var err error
-	if user.Role == "admin" {
+	if normalizeGlobalRole(user.Role) == "admin" {
 		rows, err = s.db.Query(`
 			SELECT id, key, name, description, 'owner', created_at, updated_at
 			FROM projects
@@ -1301,9 +1314,24 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 
 	conditions := []string{"1 = 1"}
 	args := []any{}
-	if user.Role != "admin" {
-		conditions = append(conditions, `EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = i.project_id AND pm.user_id = ?)`)
-		args = append(args, user.ID)
+	role := normalizeGlobalRole(user.Role)
+	if role != "admin" {
+		staffScope := 0
+		if role == "staff" {
+			staffScope = 1
+		}
+		conditions = append(conditions, `EXISTS (
+			SELECT 1
+			FROM project_members pm
+			WHERE pm.project_id = i.project_id
+			  AND pm.user_id = ?
+			  AND (
+			    (? = 1 AND pm.role NOT IN ('customer', 'reporter')) OR
+			    lower(i.reporter) = ? OR
+			    lower(i.requester_email) = ?
+			  )
+		)`)
+		args = append(args, user.ID, staffScope, strings.ToLower(strings.TrimSpace(user.Username)), strings.ToLower(strings.TrimSpace(user.Email)))
 	}
 	if filter.ProjectID > 0 {
 		conditions = append(conditions, "i.project_id = ?")
@@ -1998,7 +2026,7 @@ func Priorities() []string {
 }
 
 func Roles() []string {
-	return []string{"admin", "user", "client"}
+	return []string{"admin", "staff", "customer"}
 }
 
 func ProjectRoles() []string {
@@ -2015,7 +2043,7 @@ func ToPublicUser(user User) PublicUser {
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Email:       user.Email,
-		Role:        user.Role,
+		Role:        normalizeGlobalRole(user.Role),
 		Disabled:    user.Disabled,
 		CreatedAt:   user.CreatedAt,
 		UpdatedAt:   user.UpdatedAt,
@@ -2044,7 +2072,7 @@ func createUserTx(tx *sql.Tx, input CreateUser) (User, error) {
 	if !usernamePattern.MatchString(username) {
 		return User{}, fmt.Errorf("%w: username must be 3-48 lowercase letters, numbers, dot, dash, or underscore", ErrValidation)
 	}
-	role := defaultString(input.Role, "user")
+	role := normalizeGlobalRole(defaultString(input.Role, "staff"))
 	if !isValid(validGlobalRoles, role) {
 		return User{}, fmt.Errorf("%w: invalid role %q", ErrValidation, role)
 	}
@@ -2117,6 +2145,7 @@ func getUserTx(tx *sql.Tx, id int64) (User, error) {
 		return User{}, err
 	}
 	user.Email = nullString(email)
+	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -2167,6 +2196,7 @@ func (s *Store) userByUsername(username string, includeHash bool) (User, error) 
 		return User{}, err
 	}
 	user.Email = nullString(email)
+	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -2266,6 +2296,7 @@ func scanUser(rows scanner) (User, error) {
 		return User{}, err
 	}
 	user.Email = nullString(email)
+	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
@@ -2424,6 +2455,17 @@ func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
 }
 
+func normalizeGlobalRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case "user":
+		return "staff"
+	case "client":
+		return "customer"
+	default:
+		return strings.TrimSpace(role)
+	}
+}
+
 func normalizeProjectRole(role string) string {
 	switch strings.TrimSpace(role) {
 	case "developer":
@@ -2527,6 +2569,7 @@ func validateWebhookURL(raw string) error {
 }
 
 func publicUserCopy(user User) User {
+	user.Role = normalizeGlobalRole(user.Role)
 	user.PasswordHash = ""
 	return user
 }

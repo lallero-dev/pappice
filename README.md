@@ -2,15 +2,15 @@
 
 Pemmece is a small self-hosted customer support ticketing system. It is a
 single Go binary with SQLite persistence, embedded web assets, staff tools, and
-a registered-client support portal.
+registered customer access.
 
 Current focus:
 
-- First-run admin setup, secure login sessions, staff/client roles, product
+- First-run admin setup, secure login sessions, staff/customer roles, product
   roles, and API tokens.
 - Customer tickets with statuses, priorities, assignees, requesters, tags,
   public replies, internal notes, and filtering.
-- Registered-client support portal at `/support`.
+- Registered customers use the same ticket UI as staff with restricted actions.
 - SQLite-backed local persistence for multiuser deployments.
 - Global and product webhooks with `X-Pemmece-Signature`.
 - SQLite-backed no-reply email notification outbox with SMTP delivery.
@@ -24,9 +24,9 @@ Browser sessions require HTTPS because session cookies are always marked
 go run ./cmd/pemmece -tls-cert ./localhost.pem -tls-key ./localhost-key.pem
 ```
 
-Open `https://127.0.0.1:8388` and create the first admin user. Admins can create
-client users, add them to products as customers, and those clients can submit and
-follow support tickets at `/support`.
+Open `https://127.0.0.1:8388` and create the first admin account. Admins can
+create customer accounts, add them to products as customers, and those customers
+can submit and follow support tickets from the main ticket UI.
 
 Useful flags:
 
@@ -82,10 +82,6 @@ Core endpoints:
 - `POST /api/setup`
 - `POST /api/login`
 - `POST /api/logout`
-- `GET /api/support/projects`
-- `POST /api/support/tickets`
-- `GET /api/support/tickets/{token}`
-- `POST /api/support/tickets/{token}/comments`
 - `GET /api/projects`
 - `POST /api/projects`
 - `GET /api/projects/{id}`

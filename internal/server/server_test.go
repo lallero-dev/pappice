@@ -69,8 +69,9 @@ func TestProjectRBACAndCSRF(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
 		"username": "bob",
+		"email":    "bob@example.test",
 		"password": "correct horse",
-		"role":     "user",
+		"role":     "staff",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	bobID := decodeInt64(t, body, "id")
@@ -138,16 +139,16 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/support", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("support-portal")) {
-		t.Fatalf("support body missing component: %s", body)
+	if !bytes.Contains(body, []byte("Pemmece")) || bytes.Contains(body, []byte("support-portal")) {
+		t.Fatalf("support route should serve the main app: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/missing", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/health", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte(`"client"`)) {
-		t.Fatalf("health should expose client role: %s", body)
+	if !bytes.Contains(body, []byte(`"customer"`)) {
+		t.Fatalf("health should expose customer role: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/session", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -224,19 +225,19 @@ func TestAdminProjectIssueCommentAndNotificationFlow(t *testing.T) {
 		"username": "dev",
 		"password": "correct horse",
 		"email":    "dev@example.test",
-		"role":     "user",
+		"role":     "staff",
 	})
 	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
 		"username": "customer",
 		"password": "correct horse",
 		"email":    "customer@example.test",
-		"role":     "user",
+		"role":     "customer",
 	})
 	disabledID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
 		"username": "disabled",
 		"password": "correct horse",
 		"email":    "disabled@example.test",
-		"role":     "user",
+		"role":     "staff",
 	})
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/users/"+itoa(disabledID), map[string]any{"disabled": true}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
@@ -258,22 +259,26 @@ func TestAdminProjectIssueCommentAndNotificationFlow(t *testing.T) {
 		"title":       "Dashboard fails",
 		"description": "The dashboard cannot load",
 		"priority":    "high",
-		"tags":        []string{"dashboard", "client"},
+		"tags":        []string{"dashboard", "customer"},
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	issueID := decodeInt64(t, body, "id")
 
 	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+
+	devCookie, devCSRF := loginUser(t, client, server.URL, "dev", "correct horse")
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(issueID)+"/comments", map[string]any{
 		"body":       "I can reproduce this",
 		"visibility": "public",
-	}, customerCookie, customerCSRF, server.URL)
+	}, devCookie, devCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(issueID)+"/comments", map[string]any{
 		"body":       "Customer tries an internal note",
 		"visibility": "internal",
 	}, customerCookie, customerCSRF, server.URL)
-	requireStatus(t, resp, body, http.StatusForbidden)
+	requireStatus(t, resp, body, http.StatusNotFound)
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(issueID)+"/comments", map[string]any{
 		"body":       "Internal triage",
 		"visibility": "internal",
@@ -444,7 +449,7 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 }
 
-func TestRegisteredSupportTicketFlow(t *testing.T) {
+func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{
 		EmailNotifications: true,
 		PublicURL:          "https://tracker.example.test",
@@ -464,13 +469,13 @@ func TestRegisteredSupportTicketFlow(t *testing.T) {
 		"display_name": "Customer",
 		"email":        "customer@example.test",
 		"password":     "correct horse",
-		"role":         "client",
+		"role":         "customer",
 	})
 	intruderID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
 		"username": "intruder",
 		"email":    "intruder@example.test",
 		"password": "correct horse",
-		"role":     "client",
+		"role":     "customer",
 	})
 	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, customerID, "customer")
 	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, intruderID, "customer")
@@ -484,88 +489,99 @@ func TestRegisteredSupportTicketFlow(t *testing.T) {
 	customerCSRF := decodeString(t, loginBody, "csrf_token")
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, customerCookie, "", "")
-	requireStatus(t, resp, body, http.StatusForbidden)
-
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/projects", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	projectID = decodeFirstProjectID(t, body)
 
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/support/tickets", map[string]any{
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"project_id":  projectID,
 		"title":       "Missing CSRF",
 		"description": "This should fail",
 	}, customerCookie, "", server.URL)
 	requireStatus(t, resp, body, http.StatusForbidden)
 
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/support/tickets", map[string]any{
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"project_id":  projectID,
 		"title":       "Need help",
 		"description": "Something is wrong",
 	}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	var created struct {
-		URL    string `json:"url"`
-		Ticket struct {
-			ID             int64  `json:"id"`
-			Key            string `json:"key"`
-			Title          string `json:"title"`
-			RequesterEmail string `json:"requester_email"`
-		} `json:"ticket"`
+		ID             int64  `json:"id"`
+		Key            string `json:"key"`
+		Title          string `json:"title"`
+		Source         string `json:"source"`
+		RequesterEmail string `json:"requester_email"`
 	}
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("decode created ticket: %v", err)
 	}
-	if created.URL == "" || created.Ticket.Key == "" || created.Ticket.RequesterEmail != "customer@example.test" {
+	if created.ID == 0 || created.Key == "" || created.Source != "portal" || created.RequesterEmail != "customer@example.test" {
 		t.Fatalf("created ticket = %#v", created)
 	}
-	if !strings.HasPrefix(created.URL, "https://tracker.example.test/support/tickets/") {
-		t.Fatalf("ticket URL = %q", created.URL)
-	}
-	token := created.URL[strings.LastIndex(created.URL, "/")+1:]
 
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/tickets/"+token, nil, nil, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(created.ID), nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusUnauthorized)
 
-	intruderCookie, _ := loginUser(t, client, server.URL, "intruder", "correct horse")
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/tickets/"+token, nil, intruderCookie, "", "")
+	intruderCookie, intruderCSRF := loginUser(t, client, server.URL, "intruder", "correct horse")
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  projectID,
+		"title":       "Intruder issue",
+		"description": "Another customer ticket",
+	}, intruderCookie, intruderCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Need help")) || bytes.Contains(body, []byte("Intruder issue")) {
+		t.Fatalf("customer ticket list has wrong visibility: %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(created.ID), nil, intruderCookie, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
 
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/tickets/"+token, nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(created.ID), nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/support/tickets/"+token+"/comments", map[string]any{
-		"body": "Adding more detail",
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]any{
+		"body":       "Adding more detail",
+		"visibility": "public",
 	}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	if !bytes.Contains(body, []byte("Adding more detail")) {
 		t.Fatalf("ticket comment missing from body=%s", body)
 	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]any{
+		"body":       "Customer internal note",
+		"visibility": "internal",
+	}, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusForbidden)
 
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.Ticket.ID)+"/comments", map[string]any{
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]any{
 		"body":       "Private staff note",
 		"visibility": "internal",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.Ticket.ID)+"/comments", map[string]any{
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]any{
 		"body":       "Public staff reply",
 		"visibility": "public",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/support/tickets/"+token, nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(created.ID), nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if bytes.Contains(body, []byte("Private staff note")) {
-		t.Fatalf("support ticket leaked internal note: %s", body)
+		t.Fatalf("customer ticket leaked internal note: %s", body)
 	}
 	if !bytes.Contains(body, []byte("Public staff reply")) {
-		t.Fatalf("support ticket missing public reply: %s", body)
+		t.Fatalf("customer ticket missing public reply: %s", body)
 	}
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("customer@example.test")) ||
 		!bytes.Contains(body, []byte("Replies to this email are not read")) ||
-		!bytes.Contains(body, []byte("/support/tickets/"+token)) {
+		!bytes.Contains(body, []byte("https://tracker.example.test/")) ||
+		bytes.Contains(body, []byte("/support/tickets/")) {
 		t.Fatalf("outbox missing no-reply customer notification: %s", body)
 	}
 	if bytes.Contains(body, []byte("Private staff note")) {

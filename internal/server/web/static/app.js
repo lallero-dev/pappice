@@ -61,7 +61,6 @@ const els = {
   adminView: document.querySelector("#adminView"),
   projectView: document.querySelector("#projectView"),
   issueList: document.querySelector("#issueList"),
-  detailPane: document.querySelector("#detailPane"),
   searchInput: document.querySelector("#searchInput"),
   projectFilter: document.querySelector("#projectFilter"),
   assigneeFilter: document.querySelector("#assigneeFilter"),
@@ -129,10 +128,6 @@ async function loadSession() {
     return;
   }
   state.user = session.user;
-  if (state.user?.role === "client") {
-    window.location.assign("/support");
-    return;
-  }
   await enterApp();
 }
 
@@ -140,7 +135,9 @@ async function enterApp() {
   showApp();
   await loadHealth();
   await loadProjects();
-  await loadTokens();
+  if (!isCustomer()) {
+    await loadTokens();
+  }
   if (isAdmin()) {
     await loadAdmin();
   }
@@ -298,7 +295,6 @@ function updateProjectActions() {
 function renderIssuesView() {
   renderCounts();
   renderIssueList();
-  renderDetail();
 }
 
 function renderCounts() {
@@ -340,7 +336,7 @@ function renderIssueList() {
     row.addEventListener("click", () => {
       state.selectedId = issue.id;
       renderIssueList();
-      renderDetail();
+      openTicketDetail(issue);
     });
     row.append(
       el("span", { className: "issue-id" }, issue.key || `#${issue.number || issue.id}`),
@@ -362,38 +358,57 @@ function issueTitle(issue) {
   return wrap;
 }
 
-function renderDetail() {
-  els.detailPane.replaceChildren();
-  const issue = selectedIssue();
-  if (!issue) {
-    els.detailPane.append(el("div", { className: "empty-state" }, "No ticket selected."));
-    return;
-  }
-  const header = el("div", { className: "detail-header" });
-  header.append(el("h1", {}, issue.title), detailMeta(issue));
+function openTicketDetail(issue = selectedIssue()) {
+  if (!issue) return;
+  state.selectedId = issue.id;
+  els.modalHost.open({
+    title: issue.key || `Ticket #${issue.id}`,
+    size: "wide",
+    hideFooter: true,
+    content: ticketDetailContent(issue)
+  });
+}
 
-  const controls = el("div", { className: "detail-controls" });
-  controls.append(
-    selectControl("Status", issue.status, state.meta.statuses, (value) => patchIssue(issue.id, { status: value })),
-    selectControl("Priority", issue.priority, state.meta.priorities, (value) => patchIssue(issue.id, { priority: value })),
-    textControl("Assignee", issue.assignee || "", (value) => patchIssue(issue.id, { assignee: value }))
-  );
-  if (!canEditIssue()) {
-    controls.querySelectorAll("input, select").forEach((field) => {
-      field.disabled = true;
-    });
-  }
-  const blocks = [
-    header,
-    controls,
+function ticketDetailContent(issue) {
+  const wrap = el("div", { className: "ticket-detail" });
+  const header = el("div", { className: "detail-header" });
+  header.append(el("h3", {}, issue.title), detailMeta(issue));
+
+  const main = el("section", { className: "ticket-main" });
+  main.append(
+    el("h4", { className: "section-title" }, "Description"),
     el("div", { className: "description" }, issue.description || "No description."),
+    el("h4", { className: "section-title" }, "Tags"),
     tagRow(issue.tags || []),
+    el("h4", { className: "section-title" }, "Conversation"),
     comments(issue),
-    canCommentIssue() ? commentForm(issue) : el("div")
-  ];
+    canCommentIssue() ? commentComposer(issue) : el("div")
+  );
+
+  const side = el("aside", { className: "ticket-side" });
+  if (canEditIssue()) {
+    const controls = el("div", { className: "detail-controls" });
+    controls.append(
+      selectControl("Status", issue.status, state.meta.statuses, (value) => patchIssue(issue.id, { status: value })),
+      selectControl("Priority", issue.priority, state.meta.priorities, (value) => patchIssue(issue.id, { priority: value })),
+      textControl("Assignee", issue.assignee || "", (value) => patchIssue(issue.id, { assignee: value }))
+    );
+    side.append(el("h4", { className: "section-title" }, "Workflow"), controls);
+  }
   const requester = requesterBlock(issue);
-  if (requester) blocks.splice(2, 0, requester);
-  els.detailPane.append(...blocks);
+  if (requester) {
+    side.append(el("h4", { className: "section-title" }, "Requester"), requester);
+  }
+  side.append(
+    el("h4", { className: "section-title" }, "Ticket"),
+    factBlock("Product", issue.project_key || issue.project || "Product"),
+    factBlock("Assignee", issue.assignee || "Unassigned"),
+    factBlock("Created", relativeTime(issue.created_at)),
+    factBlock("Updated", relativeTime(issue.updated_at))
+  );
+
+  wrap.append(header, el("div", { className: "ticket-detail-grid" }, [main, side]));
+  return wrap;
 }
 
 function detailMeta(issue) {
@@ -415,6 +430,12 @@ function requesterBlock(issue) {
     el("span", {}, `${issue.requester_name || "Unknown"}${issue.requester_email ? ` / ${issue.requester_email}` : ""}`),
     badge(issue.source || "staff", "priority-normal")
   );
+  return block;
+}
+
+function factBlock(label, value) {
+  const block = el("div", { className: "fact-block" });
+  block.append(el("strong", {}, label), el("span", {}, value));
   return block;
 }
 
@@ -581,6 +602,10 @@ function tagRow(tags) {
 
 function comments(issue) {
   const list = el("div", { className: "comment-list" });
+  if ((issue.comments || []).length === 0) {
+    list.append(el("p", { className: "muted" }, "No replies yet."));
+    return list;
+  }
   for (const comment of issue.comments || []) {
     const item = el("div", { className: "comment" });
     item.classList.toggle("internal", comment.visibility === "internal");
@@ -594,38 +619,55 @@ function comments(issue) {
   return list;
 }
 
-function commentForm(issue) {
-  const form = el("form", { className: "comment-form" });
+function commentComposer(issue) {
+  const wrap = el("div", { className: "comment-form" });
   const body = document.createElement("textarea");
   body.name = "body";
-  body.rows = 3;
-  body.placeholder = "comment";
+  body.rows = 4;
+  body.placeholder = "Write a reply";
   const visibility = document.createElement("select");
   visibility.name = "visibility";
   visibility.append(new Option("Public reply", "public"), new Option("Internal note", "internal"));
-  if (!canEditIssue()) {
-    visibility.value = "public";
-    visibility.disabled = true;
-  }
-  const submit = el("button", { className: "ghost-button", type: "submit" }, "Add Comment");
-  form.append(body, visibility, submit);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await addComment(issue.id, { body: body.value, visibility: visibility.value || "public" });
-    form.reset();
-    visibility.value = "public";
+  visibility.value = "public";
+  const submit = el("button", { className: "ghost", type: "button" }, "Add Comment");
+  const actions = el("div", { className: "comment-actions" }, canEditIssue() ? [visibility, submit] : [submit]);
+  wrap.append(body, actions);
+  submit.addEventListener("click", async () => {
+    if (!body.value.trim()) return;
+    submit.disabled = true;
+    try {
+      await addComment(issue.id, { body: body.value, visibility: visibility.value || "public" });
+      body.value = "";
+      visibility.value = "public";
+    } catch (error) {
+      showError(error);
+    } finally {
+      submit.disabled = false;
+    }
   });
-  return form;
+  return wrap;
 }
 
 async function patchIssue(id, patch) {
   await request(`/api/tickets/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
   await loadIssues();
+  refreshTicketDetailModal();
 }
 
 async function addComment(id, comment) {
   await request(`/api/tickets/${id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   await loadIssues();
+  refreshTicketDetailModal();
+}
+
+function refreshTicketDetailModal() {
+  if (!els.modalHost.isOpen?.()) return;
+  const issue = selectedIssue();
+  if (!issue) {
+    els.modalHost.close();
+    return;
+  }
+  openTicketDetail(issue);
 }
 
 async function updateUser(id, patch) {
@@ -680,6 +722,20 @@ function openIssueModal() {
     showError(new Error("Create a product before adding tickets"));
     return;
   }
+  const fields = [
+    { name: "title", label: "Title", required: true, maxlength: 160, autocomplete: "off" },
+    { name: "description", label: "Description", type: "textarea", rows: 5 },
+    { name: "project_id", label: "Product", type: "select", options: projects, required: true }
+  ];
+  if (!isCustomer()) {
+    fields.push(
+      { group: [
+        { name: "assignee", label: "Assignee", autocomplete: "off" },
+        { name: "priority", label: "Priority", type: "select", options: selectOptions(state.meta.priorities) }
+      ] },
+      { name: "tags", label: "Tags", autocomplete: "off", placeholder: "ui, regression" }
+    );
+  }
   els.modalHost.open({
     title: "New Ticket",
     submitText: "Create",
@@ -687,28 +743,19 @@ function openIssueModal() {
       project_id: String(projectId),
       priority: "normal"
     },
-    fields: [
-      { name: "title", label: "Title", required: true, maxlength: 160, autocomplete: "off" },
-      { name: "description", label: "Description", type: "textarea", rows: 5 },
-      { group: [
-        { name: "project_id", label: "Product", type: "select", options: projects, required: true },
-        { name: "assignee", label: "Assignee", autocomplete: "off" }
-      ] },
-      { group: [
-        { name: "priority", label: "Priority", type: "select", options: selectOptions(state.meta.priorities) }
-      ] },
-      { name: "tags", label: "Tags", autocomplete: "off", placeholder: "ui, regression" }
-    ],
+    fields,
     onSubmit: async (data) => {
       const targetProjectId = Number(data.project_id || projectId);
       const issue = {
         title: data.title,
         description: data.description,
-        project_id: targetProjectId,
-        assignee: data.assignee,
-        priority: data.priority,
-        tags: splitList(data.tags)
+        project_id: targetProjectId
       };
+      if (!isCustomer()) {
+        issue.assignee = data.assignee;
+        issue.priority = data.priority;
+        issue.tags = splitList(data.tags);
+      }
       const created = await request(`/api/projects/${targetProjectId}/tickets`, { method: "POST", body: JSON.stringify(issue) });
       state.selectedProjectId = targetProjectId;
       state.selectedId = created.id;
@@ -742,7 +789,7 @@ function openUserModal(user = null) {
     email: user.email || "",
     role: user.role,
     disabled: Boolean(user.disabled)
-  } : { role: "user" };
+  } : { role: "staff" };
   const fields = editing ? [
     { group: [
       { name: "display_name", label: "Display name", autocomplete: "off" },
@@ -761,12 +808,12 @@ function openUserModal(user = null) {
     { name: "email", label: "Email", type: "email", autocomplete: "email" },
     { group: [
       { name: "password", label: "Password", type: "password", required: true, minlength: 8 },
-      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "user" }
+      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "staff" }
     ] }
   ];
 
   els.modalHost.open({
-    title: editing ? `Edit ${user.username}` : "New User",
+    title: editing ? `Edit ${user.username}` : "New Account",
     submitText: editing ? "Save" : "Create",
     values,
     fields,
@@ -811,7 +858,7 @@ function openMemberModal() {
     title: "Add Product Member",
     submitText: "Save",
     fields: [
-      { name: "user_id", label: "User", type: "select", options: users },
+      { name: "user_id", label: "Account", type: "select", options: users },
       { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.projectRoles), value: "viewer" }
     ],
     onSubmit: async (data) => {
@@ -945,12 +992,16 @@ function isAdmin() {
   return state.user?.role === "admin";
 }
 
+function isCustomer() {
+  return state.user?.role === "customer";
+}
+
 function projectRole(projectId = state.selectedProjectId) {
   return currentProject(projectId)?.role || "";
 }
 
 function canManageProject(projectId = state.selectedProjectId) {
-  return Boolean(projectId) && (isAdmin() || projectRole(projectId) === "owner");
+  return Boolean(projectId) && !isCustomer() && (isAdmin() || projectRole(projectId) === "owner");
 }
 
 function canCreateIssue(projectId = state.selectedProjectId) {
@@ -966,7 +1017,7 @@ function canCommentIssue() {
 
 function canEditIssue() {
   const projectId = selectedIssue()?.project_id || state.selectedProjectId;
-  return Boolean(projectId) && (isAdmin() || ["owner", "agent"].includes(projectRole(projectId)));
+  return Boolean(projectId) && !isCustomer() && (isAdmin() || ["owner", "agent"].includes(projectRole(projectId)));
 }
 
 function setConnection(text) {

@@ -24,21 +24,29 @@ export class PemmeceModal extends HTMLElement {
     this.titleNode = this.shadowRoot.querySelector("h2");
     this.errorNode = this.shadowRoot.querySelector(".error");
     this.bodyNode = this.shadowRoot.querySelector("section");
+    this.footerNode = this.shadowRoot.querySelector("footer");
     this.submitButton = this.shadowRoot.querySelector(".primary");
     this.shadowRoot.querySelectorAll("[value='cancel']").forEach((button) => {
       button.addEventListener("click", () => this.close());
     });
   }
 
-  open({ title, submitText = "Save", fields = [], values = {}, onSubmit }) {
+  open({ title, submitText = "Save", fields = [], values = {}, content = null, size = "", hideFooter = false, onSubmit }) {
     this.titleNode.textContent = title;
+    this.dialog.classList.toggle("wide", size === "wide");
+    this.footerNode.hidden = hideFooter;
     this.submitButton.textContent = submitText;
     this.submitButton.disabled = false;
     this.errorNode.hidden = true;
     this.errorNode.textContent = "";
-    this.bodyNode.replaceChildren(...fields.map((field) => modalField(field, values[field.name], values)));
+    if (content) {
+      this.bodyNode.replaceChildren(content);
+    } else {
+      this.bodyNode.replaceChildren(...fields.map((field) => modalField(field, values[field.name], values)));
+    }
     this.form.onsubmit = async (event) => {
       event.preventDefault();
+      if (!onSubmit) return;
       const data = Object.fromEntries(new FormData(this.form).entries());
       for (const checkbox of this.bodyNode.querySelectorAll("input[type='checkbox']")) {
         data[checkbox.name] = checkbox.checked;
@@ -59,12 +67,16 @@ export class PemmeceModal extends HTMLElement {
         this.submitButton.removeAttribute("aria-busy");
       }
     };
-    this.dialog.showModal();
-    requestAnimationFrame(() => this.bodyNode.querySelector("input, select, textarea")?.focus());
+    if (!this.dialog.open) this.dialog.showModal();
+    requestAnimationFrame(() => this.bodyNode.querySelector("input, select, textarea, button")?.focus());
   }
 
   close() {
     this.dialog.close();
+  }
+
+  isOpen() {
+    return this.dialog.open;
   }
 }
 

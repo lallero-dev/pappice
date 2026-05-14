@@ -22,7 +22,7 @@ import (
 	"pemmece/internal/store"
 )
 
-//go:embed web/index.html web/support.html web/static/*
+//go:embed web/index.html web/static/*
 var assets embed.FS
 
 const sessionCookieName = "pemmece_session"
@@ -134,9 +134,9 @@ func (s *Server) handleSupportIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	content, err := assets.ReadFile("web/support.html")
+	content, err := assets.ReadFile("web/index.html")
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "support asset not found")
+		respondError(w, http.StatusInternalServerError, "index asset not found")
 		return
 	}
 	_, _ = w.Write(content)
@@ -388,7 +388,7 @@ func (s *Server) handleSupportTicketByToken(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireStaff(w, r)
+	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
@@ -416,7 +416,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireStaff(w, r)
+	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
@@ -553,7 +553,7 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
 		respondJSON(w, http.StatusOK, map[string]any{
-			"tickets":    issues,
+			"tickets":    s.issuesForUser(auth.User, issues),
 			"statuses":   store.Statuses(),
 			"priorities": store.Priorities(),
 		})
@@ -567,21 +567,27 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			return
 		}
 		input.ProjectID = projectID
-		input.Reporter = auth.User.Username
+		customerTicket, ok := s.prepareIssueInput(w, auth.User, projectID, &input)
+		if !ok {
+			return
+		}
 		issue, err := s.store.CreateIssue(input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
 		s.emitIssueEvent("ticket.created", issue, auth.User)
-		respondJSON(w, http.StatusCreated, issue)
+		if customerTicket {
+			s.enqueueRequesterEmail("ticket.created", issue, "Pemmece Support")
+		}
+		respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, issue))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
 func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireStaff(w, r)
+	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
@@ -595,7 +601,7 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 			Status:    query.Get("status"),
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
-		respondJSON(w, http.StatusOK, map[string]any{"tickets": issues})
+		respondJSON(w, http.StatusOK, map[string]any{"tickets": s.issuesForUser(auth.User, issues)})
 	case http.MethodPost:
 		var input store.CreateIssue
 		if !decodeJSON(w, r, &input) {
@@ -605,21 +611,27 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
-		input.Reporter = auth.User.Username
+		customerTicket, ok := s.prepareIssueInput(w, auth.User, input.ProjectID, &input)
+		if !ok {
+			return
+		}
 		issue, err := s.store.CreateIssue(input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
 		s.emitIssueEvent("ticket.created", issue, auth.User)
-		respondJSON(w, http.StatusCreated, issue)
+		if customerTicket {
+			s.enqueueRequesterEmail("ticket.created", issue, "Pemmece Support")
+		}
+		respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, issue))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
 func (s *Server) handleTicketByID(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireStaff(w, r)
+	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
@@ -638,7 +650,7 @@ func (s *Server) handleTicketByID(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
-	if !s.canReadProject(auth.User, issue.ProjectID) {
+	if !s.canReadIssue(auth.User, issue) {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -657,7 +669,7 @@ func (s *Server) handleTicketByID(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth authContext, issue store.Issue) {
 	switch r.Method {
 	case http.MethodGet:
-		respondJSON(w, http.StatusOK, issue)
+		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, issue))
 	case http.MethodPatch:
 		if !s.canEditIssue(auth.User, issue.ProjectID) {
 			respondError(w, http.StatusForbidden, "agent access is required")
@@ -676,7 +688,7 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 		if patch.Assignee != nil && strings.TrimSpace(*patch.Assignee) != "" && !strings.EqualFold(strings.TrimSpace(*patch.Assignee), strings.TrimSpace(issue.Assignee)) {
 			s.emitIssueEvent("ticket.assigned", updated, auth.User)
 		}
-		respondJSON(w, http.StatusOK, updated)
+		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, updated))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch)
 	}
@@ -708,9 +720,11 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 	}
 	if input.Visibility == "public" {
 		s.emitIssueEvent("ticket.commented", updated, auth.User)
-		s.enqueueRequesterEmail("ticket.commented", updated, defaultString(auth.User.DisplayName, auth.User.Username))
+		if !s.isSupportTicketRequester(auth.User, issue) {
+			s.enqueueRequesterEmail("ticket.commented", updated, defaultString(auth.User.DisplayName, auth.User.Username))
+		}
 	}
-	respondJSON(w, http.StatusCreated, updated)
+	respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, updated))
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -1109,7 +1123,24 @@ func (s *Server) canReadProject(user store.User, projectID int64) bool {
 	return ok
 }
 
+func (s *Server) canReadIssue(user store.User, issue store.Issue) bool {
+	if isAdmin(user) {
+		return true
+	}
+	role, ok := s.store.ProjectRole(user.ID, issue.ProjectID)
+	if !ok {
+		return false
+	}
+	if isCustomer(user) || role == "customer" {
+		return s.isSupportTicketRequester(user, issue)
+	}
+	return true
+}
+
 func (s *Server) canManageProject(user store.User, projectID int64) bool {
+	if isCustomer(user) {
+		return false
+	}
 	if isAdmin(user) {
 		return true
 	}
@@ -1126,6 +1157,9 @@ func (s *Server) canCommentIssue(user store.User, projectID int64) bool {
 }
 
 func (s *Server) canEditIssue(user store.User, projectID int64) bool {
+	if isCustomer(user) {
+		return false
+	}
 	return s.hasProjectRole(user, projectID, "owner", "agent")
 }
 
@@ -1142,6 +1176,61 @@ func (s *Server) isSupportTicketRequester(user store.User, issue store.Issue) bo
 		return true
 	}
 	return issue.Source == "portal" && strings.EqualFold(strings.TrimSpace(issue.Reporter), strings.TrimSpace(user.Username))
+}
+
+func (s *Server) prepareIssueInput(w http.ResponseWriter, user store.User, projectID int64, input *store.CreateIssue) (bool, bool) {
+	input.ProjectID = projectID
+	input.Reporter = user.Username
+	if !s.isCustomerTicketCreator(user, projectID) {
+		return false, true
+	}
+	requesterEmail := strings.TrimSpace(user.Email)
+	if requesterEmail == "" {
+		respondError(w, http.StatusBadRequest, "your account needs an email address before you can open support tickets")
+		return true, false
+	}
+	input.Assignee = ""
+	input.Priority = "normal"
+	input.Source = "portal"
+	input.RequesterName = defaultString(user.DisplayName, user.Username)
+	input.RequesterEmail = requesterEmail
+	input.Tags = []string{"support"}
+	return true, true
+}
+
+func (s *Server) isCustomerTicketCreator(user store.User, projectID int64) bool {
+	if isCustomer(user) {
+		return true
+	}
+	role, ok := s.store.ProjectRole(user.ID, projectID)
+	return ok && role == "customer"
+}
+
+func (s *Server) issueForUser(user store.User, issue store.Issue) store.Issue {
+	if s.canEditIssue(user, issue.ProjectID) {
+		return issue
+	}
+	issue.Comments = publicComments(issue.Comments)
+	return issue
+}
+
+func (s *Server) issuesForUser(user store.User, issues []store.Issue) []store.Issue {
+	result := make([]store.Issue, 0, len(issues))
+	for _, issue := range issues {
+		result = append(result, s.issueForUser(user, issue))
+	}
+	return result
+}
+
+func publicComments(comments []store.Comment) []store.Comment {
+	result := make([]store.Comment, 0, len(comments))
+	for _, comment := range comments {
+		if comment.Visibility == "" || comment.Visibility == "public" {
+			comment.Visibility = "public"
+			result = append(result, comment)
+		}
+	}
+	return result
 }
 
 func (s *Server) hasProjectRole(user store.User, projectID int64, allowed ...string) bool {
@@ -1232,9 +1321,9 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 		fmt.Fprintf(&text, "%s replied to your ticket.\n\n", actorName)
 	}
 	if link != "" {
-		fmt.Fprintf(&text, "Open your ticket to respond:\n%s\n\n", link)
+		fmt.Fprintf(&text, "Open your ticket:\n%s\n\n", link)
 	}
-	text.WriteString("Replies to this email are not read. Please use the ticket link above.\n")
+	text.WriteString("Replies to this email are not read. Please open Pemmece to continue the conversation.\n")
 
 	var htmlBody strings.Builder
 	htmlBody.WriteString("<!doctype html><meta charset=\"utf-8\">")
@@ -1243,9 +1332,9 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 		fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> replied to your ticket.</p>", html.EscapeString(actorName))
 	}
 	if link != "" {
-		fmt.Fprintf(&htmlBody, "<p><a href=\"%s\">Open your ticket to respond</a></p>", html.EscapeString(link))
+		fmt.Fprintf(&htmlBody, "<p><a href=\"%s\">Open your ticket</a></p>", html.EscapeString(link))
 	}
-	htmlBody.WriteString("<p>Replies to this email are not read. Please use the ticket link.</p>")
+	htmlBody.WriteString("<p>Replies to this email are not read. Please open Pemmece to continue the conversation.</p>")
 	return subject, strings.TrimSpace(text.String()), htmlBody.String()
 }
 
@@ -1433,9 +1522,9 @@ func (s *Server) ticketURL(token string) string {
 	}
 	base := strings.TrimRight(s.options.PublicURL, "/")
 	if base == "" {
-		return "/support/tickets/" + token
+		return "/"
 	}
-	return base + "/support/tickets/" + token
+	return base + "/"
 }
 
 func nullableUser(user store.User, ok bool) any {
@@ -1457,7 +1546,11 @@ func isAdmin(user store.User) bool {
 }
 
 func isStaff(user store.User) bool {
-	return user.Role == "admin" || user.Role == "user"
+	return user.Role == "admin" || user.Role == "staff" || user.Role == "user"
+}
+
+func isCustomer(user store.User) bool {
+	return user.Role == "customer" || user.Role == "client"
 }
 
 func isUnsafeMethod(method string) bool {

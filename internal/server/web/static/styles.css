@@ -212,8 +212,7 @@ button {
 
 .sidebar,
 .workspace,
-.issue-pane,
-.detail-pane {
+.issue-pane {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -344,13 +343,12 @@ button:focus-visible {
 .content-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   padding: 10px;
 }
 
-.issue-pane,
-.detail-pane {
+.issue-pane {
   min-width: 0;
 }
 

@@ -191,15 +191,15 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	updatedUser, err := tracker.UpdateUser(user.ID, UpdateUser{
-		DisplayName: strPtr("Client Bob"),
-		Email:       strPtr("client-bob@example.test"),
-		Role:        strPtr("client"),
+		DisplayName: strPtr("Customer Bob"),
+		Email:       strPtr("customer-bob@example.test"),
+		Role:        strPtr("customer"),
 		Password:    strPtr("new password"),
 	})
 	if err != nil {
 		t.Fatalf("update user: %v", err)
 	}
-	if updatedUser.Role != "client" || updatedUser.Email != "client-bob@example.test" {
+	if updatedUser.Role != "customer" || updatedUser.Email != "customer-bob@example.test" {
 		t.Fatalf("updated user = %#v", updatedUser)
 	}
 	users := tracker.ListUsers()
