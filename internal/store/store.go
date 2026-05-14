@@ -42,7 +42,6 @@ type Issue struct {
 	RequesterName  string     `json:"requester_name,omitempty"`
 	RequesterEmail string     `json:"requester_email,omitempty"`
 	CustomerToken  string     `json:"-"`
-	Tags           []string   `json:"tags"`
 	Comments       []Comment  `json:"comments"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
@@ -58,28 +57,26 @@ type Comment struct {
 }
 
 type CreateIssue struct {
-	ProjectID      int64    `json:"project_id"`
-	Title          string   `json:"title"`
-	Description    string   `json:"description"`
-	Project        string   `json:"project"`
-	Severity       string   `json:"-"`
-	Priority       string   `json:"priority"`
-	Assignee       string   `json:"assignee"`
-	Reporter       string   `json:"requester"`
-	Source         string   `json:"source"`
-	RequesterName  string   `json:"requester_name"`
-	RequesterEmail string   `json:"requester_email"`
-	Tags           []string `json:"tags"`
+	ProjectID      int64  `json:"project_id"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	Project        string `json:"project"`
+	Severity       string `json:"-"`
+	Priority       string `json:"priority"`
+	Assignee       string `json:"assignee"`
+	Reporter       string `json:"requester"`
+	Source         string `json:"source"`
+	RequesterName  string `json:"requester_name"`
+	RequesterEmail string `json:"requester_email"`
 }
 
 type UpdateIssue struct {
-	Title       *string   `json:"title"`
-	Description *string   `json:"description"`
-	Status      *string   `json:"status"`
-	Severity    *string   `json:"-"`
-	Priority    *string   `json:"priority"`
-	Assignee    *string   `json:"assignee"`
-	Tags        *[]string `json:"tags"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Status      *string `json:"status"`
+	Severity    *string `json:"-"`
+	Priority    *string `json:"priority"`
+	Assignee    *string `json:"assignee"`
 }
 
 type AddComment struct {
@@ -91,6 +88,7 @@ type AddComment struct {
 type Filter struct {
 	Query     string
 	Status    string
+	Statuses  []string
 	ProjectID int64
 	Assignee  string
 }
@@ -305,11 +303,9 @@ type Store struct {
 
 var validStatuses = map[string]struct{}{
 	"new":      {},
-	"open":     {},
-	"pending":  {},
 	"assigned": {},
 	"resolved": {},
-	"closed":   {},
+	"rejected": {},
 }
 
 var validSeverities = map[string]struct{}{
@@ -439,7 +435,10 @@ func (s *Store) migrate() error {
 	if _, err := s.db.Exec(`UPDATE project_members SET role = 'customer' WHERE role = 'reporter'`); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`UPDATE issues SET status = 'open' WHERE status IN ('acknowledged', 'confirmed')`); err != nil {
+	if _, err := s.db.Exec(`UPDATE issues SET status = 'assigned' WHERE status IN ('acknowledged', 'confirmed', 'open', 'pending')`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE issues SET status = 'resolved' WHERE status = 'closed'`); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`
@@ -1230,7 +1229,6 @@ func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
 		Source:         source,
 		RequesterName:  strings.TrimSpace(input.RequesterName),
 		RequesterEmail: requesterEmail,
-		Tags:           normalizeTags(input.Tags),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -1290,9 +1288,6 @@ func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
 		return Issue{}, err
 	}
 	issue.ID, _ = result.LastInsertId()
-	if err := replaceTagsTx(tx, issue.ID, issue.Tags); err != nil {
-		return Issue{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return Issue{}, err
 	}
@@ -1310,6 +1305,7 @@ func (s *Store) ListIssuesForUser(filter Filter, user User) []Issue {
 func (s *Store) listIssues(filter Filter, user User) []Issue {
 	filter.Query = strings.ToLower(strings.TrimSpace(filter.Query))
 	filter.Status = strings.TrimSpace(filter.Status)
+	filter.Statuses = normalizeFilterStatuses(filter.Status, filter.Statuses)
 	filter.Assignee = strings.TrimSpace(filter.Assignee)
 
 	conditions := []string{"1 = 1"}
@@ -1337,9 +1333,14 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 		conditions = append(conditions, "i.project_id = ?")
 		args = append(args, filter.ProjectID)
 	}
-	if filter.Status != "" {
+	if len(filter.Statuses) == 1 {
 		conditions = append(conditions, "i.status = ?")
-		args = append(args, filter.Status)
+		args = append(args, filter.Statuses[0])
+	} else if len(filter.Statuses) > 1 {
+		conditions = append(conditions, fmt.Sprintf("i.status IN (%s)", placeholders(len(filter.Statuses))))
+		for _, status := range filter.Statuses {
+			args = append(args, status)
+		}
 	}
 	if filter.Assignee != "" {
 		conditions = append(conditions, "i.assignee = ?")
@@ -1348,11 +1349,10 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 	if filter.Query != "" {
 		conditions = append(conditions, `(
 			lower(i.title) LIKE ? OR lower(i.description) LIKE ? OR lower(p.key) LIKE ? OR lower(p.name) LIKE ? OR
-			lower(i.assignee) LIKE ? OR lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ? OR
-			EXISTS (SELECT 1 FROM issue_tags it WHERE it.issue_id = i.id AND lower(it.tag) LIKE ?)
+			lower(i.assignee) LIKE ? OR lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ?
 		)`)
 		q := "%" + filter.Query + "%"
-		args = append(args, q, q, q, q, q, q, q, q, q)
+		args = append(args, q, q, q, q, q, q, q, q)
 	}
 
 	query := `
@@ -1448,7 +1448,7 @@ func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
 			return Issue{}, fmt.Errorf("%w: invalid status %q", ErrValidation, status)
 		}
 		current.Status = status
-		if status == "closed" || status == "resolved" {
+		if status == "resolved" || status == "rejected" {
 			now := time.Now().UTC()
 			current.ClosedAt = &now
 		} else {
@@ -1472,9 +1472,6 @@ func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
 	if patch.Assignee != nil {
 		current.Assignee = strings.TrimSpace(*patch.Assignee)
 	}
-	if patch.Tags != nil {
-		current.Tags = normalizeTags(*patch.Tags)
-	}
 	current.UpdatedAt = time.Now().UTC()
 
 	tx, err := s.db.Begin()
@@ -1491,11 +1488,6 @@ func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
 	)
 	if err != nil {
 		return Issue{}, err
-	}
-	if patch.Tags != nil {
-		if err := replaceTagsTx(tx, current.ID, current.Tags); err != nil {
-			return Issue{}, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Issue{}, err
@@ -2018,7 +2010,7 @@ func (s *Store) IssueIDByProjectNumber(projectID, number int64) (int64, bool) {
 }
 
 func Statuses() []string {
-	return []string{"new", "open", "pending", "assigned", "resolved", "closed"}
+	return []string{"new", "assigned", "resolved", "rejected"}
 }
 
 func Priorities() []string {
@@ -2171,18 +2163,6 @@ func hasActiveAdminTx(tx *sql.Tx) bool {
 	return count > 0
 }
 
-func replaceTagsTx(tx *sql.Tx, issueID int64, tags []string) error {
-	if _, err := tx.Exec(`DELETE FROM issue_tags WHERE issue_id = ?`, issueID); err != nil {
-		return err
-	}
-	for _, tag := range tags {
-		if _, err := tx.Exec(`INSERT INTO issue_tags (issue_id, tag) VALUES (?, ?)`, issueID, tag); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *Store) userByUsername(username string, includeHash bool) (User, error) {
 	row := s.db.QueryRow(`SELECT id, username, display_name, email, role, password_hash, disabled, created_at, updated_at FROM users WHERE username = ?`, username)
 	var user User
@@ -2250,18 +2230,6 @@ func (s *Store) emailRecipientByUsername(username string) (EmailRecipient, bool)
 func (s *Store) hydrateIssue(issue *Issue) error {
 	issue.Key = fmt.Sprintf("%s-%d", issue.ProjectKey, issue.Number)
 	issue.Project = issue.ProjectKey
-
-	tagRows, err := s.db.Query(`SELECT tag FROM issue_tags WHERE issue_id = ? ORDER BY tag COLLATE NOCASE`, issue.ID)
-	if err != nil {
-		return err
-	}
-	for tagRows.Next() {
-		var tag string
-		if err := tagRows.Scan(&tag); err == nil {
-			issue.Tags = append(issue.Tags, tag)
-		}
-	}
-	tagRows.Close()
 
 	commentRows, err := s.db.Query(`SELECT id, author, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
 	if err != nil {
@@ -2494,22 +2462,34 @@ func isValid(allowed map[string]struct{}, value string) bool {
 	return ok
 }
 
-func normalizeTags(tags []string) []string {
-	seen := make(map[string]struct{}, len(tags))
-	result := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
-		if tag == "" {
-			continue
+func normalizeFilterStatuses(single string, values []string) []string {
+	seen := make(map[string]struct{}, len(values)+1)
+	result := make([]string, 0, len(values)+1)
+	appendStatus := func(value string) {
+		for _, part := range strings.Split(value, ",") {
+			status := strings.TrimSpace(part)
+			if status == "" {
+				continue
+			}
+			if _, ok := seen[status]; ok {
+				continue
+			}
+			seen[status] = struct{}{}
+			result = append(result, status)
 		}
-		key := strings.ToLower(tag)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		result = append(result, tag)
+	}
+	appendStatus(single)
+	for _, value := range values {
+		appendStatus(value)
 	}
 	return result
+}
+
+func placeholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", count), ",")
 }
 
 func normalizeEvents(events []string) ([]string, error) {
@@ -2728,12 +2708,6 @@ CREATE TABLE IF NOT EXISTS issues (
 	updated_at TEXT NOT NULL,
 	closed_at TEXT,
 	UNIQUE (project_id, number)
-);
-
-CREATE TABLE IF NOT EXISTS issue_tags (
-	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-	tag TEXT NOT NULL,
-	PRIMARY KEY (issue_id, tag)
 );
 
 CREATE TABLE IF NOT EXISTS comments (

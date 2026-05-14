@@ -11,16 +11,24 @@
 
 dialog {
   border: 1px solid #cbd5df;
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: 0 18px 42px rgb(15 23 42 / 18%);
+  max-height: calc(100vh - 28px);
   max-width: min(680px, calc(100vw - 28px));
+  overflow: hidden;
   padding: 0;
   width: var(--pm-modal-width, 560px);
 }
 
 dialog.wide {
-  max-width: min(1120px, calc(100vw - 28px));
-  width: min(1040px, calc(100vw - 28px));
+  max-height: min(920px, calc(100vh - 28px));
+  max-width: min(1180px, calc(100vw - 28px));
+  width: min(1080px, calc(100vw - 28px));
+}
+
+dialog.compact {
+  max-width: min(900px, calc(100vw - 28px));
+  width: min(860px, calc(100vw - 28px));
 }
 
 dialog::backdrop {
@@ -29,9 +37,19 @@ dialog::backdrop {
 
 form {
   display: grid;
-  gap: 12px;
-  max-height: min(86vh, 920px);
-  padding: 16px;
+  gap: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  max-height: min(92vh, 920px);
+  min-height: 0;
+  padding: 0;
+}
+
+dialog.wide form {
+  max-height: min(920px, calc(100vh - 28px));
+}
+
+dialog.compact form {
+  max-height: calc(100vh - 28px);
 }
 
 header,
@@ -43,14 +61,27 @@ footer {
 }
 
 footer {
+  background: #fff;
   border-top: 1px solid #dde4ec;
   justify-content: flex-end;
-  padding-top: 12px;
+  padding: 12px 18px;
+}
+
+header {
+  background: #fff;
+  border-bottom: 1px solid #dde4ec;
+  padding: 14px 18px;
 }
 
 section[part="body"] {
   min-height: 0;
-  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+
+dialog.wide section[part="body"] {
+  max-height: calc(100vh - 128px);
 }
 
 h2 {
@@ -96,7 +127,7 @@ button:focus-visible {
   border: 1px solid #f0b6b6;
   border-radius: 6px;
   color: #9f1d1d;
-  margin: 0;
+  margin: 12px 18px 0;
   padding: 8px 10px;
 }
 
@@ -128,6 +159,11 @@ button {
   padding: 7px 12px;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .primary {
   background: #2367a4;
   color: white;
@@ -138,6 +174,10 @@ button {
 }
 
 .primary:disabled {
+  opacity: 0.58;
+}
+
+.primary[aria-busy="true"] {
   cursor: wait;
   opacity: 0.72;
 }
@@ -170,32 +210,79 @@ button {
 
 .ticket-detail {
   display: grid;
-  gap: 14px;
+  gap: 16px;
+  min-height: 0;
 }
 
 .detail-header {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .detail-header h3 {
-  font-size: 22px;
+  font-size: 24px;
   line-height: 1.2;
   margin: 0;
+}
+
+.ticket-form-field {
+  display: grid;
+  gap: 6px;
+}
+
+.ticket-form-field > span {
+  color: #3b4856;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.ticket-title-input {
+  font-size: 22px;
+  font-weight: 750;
+  min-height: 44px;
+}
+
+.ticket-description-input {
+  line-height: 1.55;
+  min-height: 150px;
+}
+
+.ticket-create {
+  gap: 14px;
+}
+
+.ticket-create .ticket-detail-grid {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 310px);
+}
+
+.ticket-create .ticket-main {
+  gap: 10px;
+}
+
+.ticket-create .ticket-title-input {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ticket-create .ticket-description-input {
+  min-height: 150px;
 }
 
 .detail-meta {
   color: #667085;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   font-size: 12px;
 }
 
 .ticket-detail-grid {
   display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 310px);
+  min-height: 0;
 }
 
 .ticket-main,
@@ -207,10 +294,22 @@ button {
 }
 
 .ticket-side {
-  background: #f8fafc;
+  background: #fff;
   border: 1px solid #dde4ec;
   border-radius: 8px;
+  gap: 0;
+  overflow: hidden;
+}
+
+.side-section {
+  border-bottom: 1px solid #dde4ec;
+  display: grid;
+  gap: 10px;
   padding: 12px;
+}
+
+.side-section:last-child {
+  border-bottom: 0;
 }
 
 .section-title {
@@ -228,21 +327,26 @@ button {
 
 .detail-controls {
   display: grid;
+  gap: 9px;
+}
+
+.workflow-editor {
+  display: grid;
   gap: 10px;
 }
 
 .description {
-  background: #f8fafc;
+  background: #fff;
   border: 1px solid #dde4ec;
   border-radius: 6px;
-  min-height: 140px;
+  line-height: 1.55;
+  min-height: 116px;
   padding: 12px;
   white-space: pre-wrap;
 }
 
-.requester-block,
-.fact-block {
-  background: #fff;
+.requester-block {
+  background: #f8fafc;
   border: 1px solid #dde4ec;
   border-radius: 6px;
   display: grid;
@@ -250,58 +354,101 @@ button {
   padding: 9px 10px;
 }
 
-.requester-block span,
-.fact-block span {
+.requester-block span {
   color: #667085;
   overflow-wrap: anywhere;
 }
 
-.tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.requester-block .badge {
+  justify-self: start;
+  margin-top: 2px;
 }
 
-.tag {
-  background: #e8edf2;
-  border-radius: 999px;
-  color: #314151;
+.fact-list {
+  border: 1px solid #dde4ec;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fact-block {
+  align-items: start;
+  background: #fff;
+  border-bottom: 1px solid #dde4ec;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 82px minmax(0, 1fr);
+  padding: 9px 10px;
+}
+
+.fact-block:last-child {
+  border-bottom: 0;
+}
+
+.fact-label {
+  color: #667085;
   font-size: 12px;
-  padding: 4px 8px;
+  font-weight: 650;
+}
+
+.fact-block strong {
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .comment-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .comment {
-  background: #f8fafc;
+  background: #fff;
   border: 1px solid #dde4ec;
+  border-left: 3px solid #b8c7d7;
   border-radius: 6px;
   padding: 10px;
 }
 
 .comment.internal {
-  background: #fff8e8;
+  background: #fffaf0;
   border-color: #e6c777;
+  border-left-color: #b7791f;
+}
+
+.comment-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 5px;
 }
 
 .comment strong {
-  display: inline-block;
   font-size: 12px;
-  margin-bottom: 5px;
-  margin-right: 8px;
+}
+
+.comment-time {
+  color: #667085;
+  font-size: 12px;
 }
 
 .comment p {
+  line-height: 1.5;
   margin: 0;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .comment-form {
+  background: #f8fafc;
+  border: 1px solid #dde4ec;
+  border-radius: 8px;
   display: grid;
   gap: 8px;
+  padding: 10px;
+}
+
+.comment-input {
+  min-height: 90px;
 }
 
 .comment-actions {
@@ -326,22 +473,24 @@ button {
   text-transform: capitalize;
 }
 
-.status-new,
-.status-open {
+.status-new {
   background: #edf6ff;
   color: #194d7b;
 }
 
-.status-pending,
 .status-assigned {
   background: #fff4db;
   color: #7a4b00;
 }
 
-.status-resolved,
-.status-closed {
+.status-resolved {
   background: #e8f6ee;
   color: #2f855a;
+}
+
+.status-rejected {
+  background: #fff1f0;
+  color: #b42318;
 }
 
 .priority-urgent,
@@ -360,7 +509,7 @@ button {
   color: #2f855a;
 }
 
-@media (max-width: 620px) {
+@media (max-width: 760px) {
   .grid {
     grid-template-columns: 1fr;
   }

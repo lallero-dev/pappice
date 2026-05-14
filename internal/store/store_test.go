@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -29,16 +30,12 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 		ProjectID: projects[0].ID,
 		Title:     "Cannot import invoice",
 		Priority:  "urgent",
-		Tags:      []string{"import", "Import", "regression"},
 	})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	if issue.ID != 1 {
 		t.Fatalf("issue ID = %d, want 1", issue.ID)
-	}
-	if len(issue.Tags) != 2 {
-		t.Fatalf("tags = %#v, want deduplicated tags", issue.Tags)
 	}
 
 	status := "assigned"
@@ -104,6 +101,20 @@ func TestStoreValidation(t *testing.T) {
 	_, err = tracker.UpdateIssue(issue.ID, UpdateIssue{Status: &status})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("bad status error = %v, want ErrValidation", err)
+	}
+
+	wantStatuses := []string{"new", "assigned", "resolved", "rejected"}
+	if got := Statuses(); !slices.Equal(got, wantStatuses) {
+		t.Fatalf("statuses = %#v, want %#v", got, wantStatuses)
+	}
+
+	status = "rejected"
+	rejected, err := tracker.UpdateIssue(issue.ID, UpdateIssue{Status: &status})
+	if err != nil {
+		t.Fatalf("reject issue: %v", err)
+	}
+	if rejected.Status != "rejected" || rejected.ClosedAt == nil {
+		t.Fatalf("rejected issue = %#v, want rejected with closed_at", rejected)
 	}
 }
 

@@ -259,7 +259,6 @@ func TestAdminProjectIssueCommentAndNotificationFlow(t *testing.T) {
 		"title":       "Dashboard fails",
 		"description": "The dashboard cannot load",
 		"priority":    "high",
-		"tags":        []string{"dashboard", "customer"},
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	issueID := decodeInt64(t, body, "id")
@@ -290,7 +289,7 @@ func TestAdminProjectIssueCommentAndNotificationFlow(t *testing.T) {
 		"assignee": "dev",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?project_id="+itoa(projectID)+"&status=assigned&assignee=dev&q=dashboard", nil, adminCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?project_id="+itoa(projectID)+"&status=new&status=assigned&assignee=dev&q=dashboard", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Dashboard fails")) {
 		t.Fatalf("filtered tickets missing ticket: %s", body)
@@ -574,6 +573,14 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("Public staff reply")) {
 		t.Fatalf("customer ticket missing public reply: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Private staff note")) {
+		t.Fatalf("customer ticket list leaked internal note: %s", body)
+	}
+	if !bytes.Contains(body, []byte("Public staff reply")) {
+		t.Fatalf("customer ticket list missing public reply: %s", body)
 	}
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")

@@ -34,6 +34,7 @@ export class PemmeceModal extends HTMLElement {
   open({ title, submitText = "Save", fields = [], values = {}, content = null, size = "", hideFooter = false, onSubmit }) {
     this.titleNode.textContent = title;
     this.dialog.classList.toggle("wide", size === "wide");
+    this.dialog.classList.toggle("compact", size === "compact");
     this.footerNode.hidden = hideFooter;
     this.submitButton.textContent = submitText;
     this.submitButton.disabled = false;

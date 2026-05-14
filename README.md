@@ -8,7 +8,7 @@ Current focus:
 
 - First-run admin setup, secure login sessions, staff/customer roles, product
   roles, and API tokens.
-- Customer tickets with statuses, priorities, assignees, requesters, tags,
+- Customer tickets with statuses, priorities, assignees, requesters,
   public replies, internal notes, and filtering.
 - Registered customers use the same ticket UI as staff with restricted actions.
 - SQLite-backed local persistence for multiuser deployments.

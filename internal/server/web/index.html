@@ -18,14 +18,25 @@
       <nav class="topnav" id="topNav" hidden>
         <button class="nav-button active" id="issuesTab" type="button">Tickets</button>
         <button class="nav-button" id="projectTab" type="button">Product</button>
-        <button class="nav-button" id="adminTab" type="button">Admin</button>
       </nav>
       <div class="topbar-actions">
-        <span class="status-pill" id="connectionState">Starting</span>
-        <span class="user-pill" id="userLabel" hidden></span>
-        <button class="ghost-button" id="refreshButton" type="button" title="Refresh" hidden>Refresh</button>
-        <button class="ghost-button" id="logoutButton" type="button" hidden>Logout</button>
-        <button class="primary-button" id="newIssueButton" type="button" hidden>New Ticket</button>
+        <button class="nav-button topbar-admin-button" id="adminTab" type="button" hidden>Admin</button>
+        <div class="profile-menu" id="profileMenu" hidden>
+          <button class="profile-button" id="profileButton" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span class="profile-avatar" id="profileAvatar">P</span>
+            <span class="profile-label">
+              <strong id="profileName"></strong>
+              <span id="profileRole"></span>
+            </span>
+          </button>
+          <div class="profile-popover" id="profilePopover" role="menu" hidden>
+            <div class="profile-summary">
+              <strong id="profileMenuName"></strong>
+              <span id="profileEmail"></span>
+            </div>
+            <button class="profile-menu-item" id="logoutButton" type="button" role="menuitem">Logout</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -66,55 +77,38 @@
     </section>
 
     <main class="shell" id="appView" hidden>
-      <aside class="sidebar">
-        <section class="filter-section project-picker">
-          <label for="projectFilter">Product</label>
-          <select id="projectFilter">
-            <option value="">All products</option>
-          </select>
-        </section>
-
-        <section class="summary-grid" aria-label="Ticket summary">
-          <button class="metric active" data-filter-status="">
-            <span class="metric-value" id="countAll">0</span>
-            <span class="metric-label">All</span>
-          </button>
-          <button class="metric" data-filter-status="new">
-            <span class="metric-value" id="countNew">0</span>
-            <span class="metric-label">New</span>
-          </button>
-          <button class="metric" data-filter-status="assigned">
-            <span class="metric-value" id="countAssigned">0</span>
-            <span class="metric-label">Assigned</span>
-          </button>
-          <button class="metric" data-filter-status="resolved">
-            <span class="metric-value" id="countResolved">0</span>
-            <span class="metric-label">Resolved</span>
-          </button>
-        </section>
-
-        <section class="filter-section">
-          <label for="assigneeFilter">Assignee</label>
-          <input id="assigneeFilter" type="search" autocomplete="off" placeholder="anyone">
-        </section>
-      </aside>
-
       <section class="workspace" id="issueView">
         <div class="toolbar">
-          <div class="search-box">
+          <div class="filter-control">
             <label for="searchInput">Search</label>
-            <input id="searchInput" type="search" autocomplete="off" placeholder="title, tag, description">
+            <input id="searchInput" type="search" autocomplete="off" placeholder="title, requester, description">
+          </div>
+          <div class="filter-control">
+            <label>Status</label>
+            <div class="status-filter-list" id="statusFilterList" aria-label="Status filters"></div>
+          </div>
+          <div class="filter-control">
+            <label for="productFilter">Product</label>
+            <select id="productFilter"></select>
+          </div>
+          <div class="filter-control">
+            <label for="assigneeFilter">Assignee</label>
+            <select id="assigneeFilter"></select>
+          </div>
+          <div class="toolbar-actions">
+            <button class="primary-button" id="newIssueButton" type="button" hidden>New Ticket</button>
           </div>
         </div>
 
         <div class="content-grid">
           <section class="issue-pane" aria-label="Tickets">
             <div class="table-head">
-              <span>ID</span>
-              <span>Ticket</span>
-              <span>Status</span>
-              <span>Priority</span>
-              <span>Updated</span>
+              <button class="sort-header" type="button" data-sort-key="created_at">Created</button>
+              <button class="sort-header" type="button" data-sort-key="product">Product</button>
+              <button class="sort-header" type="button" data-sort-key="title">Ticket</button>
+              <button class="sort-header" type="button" data-sort-key="status">Status</button>
+              <button class="sort-header" type="button" data-sort-key="priority">Priority</button>
+              <button class="sort-header" type="button" data-sort-key="updated_at">Updated</button>
             </div>
             <div class="issue-list" id="issueList"></div>
           </section>

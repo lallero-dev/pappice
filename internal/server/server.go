@@ -309,7 +309,6 @@ func (s *Server) handleSupportTickets(w http.ResponseWriter, r *http.Request) {
 			Source:         "portal",
 			RequesterName:  requesterName,
 			RequesterEmail: requesterEmail,
-			Tags:           []string{"support"},
 		})
 		if err != nil {
 			respondStoreError(w, err)
@@ -549,7 +548,7 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 		issues := s.store.ListIssuesForUser(store.Filter{
 			ProjectID: projectID,
 			Query:     query.Get("q"),
-			Status:    query.Get("status"),
+			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
 		respondJSON(w, http.StatusOK, map[string]any{
@@ -598,7 +597,7 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 		issues := s.store.ListIssuesForUser(store.Filter{
 			ProjectID: projectID,
 			Query:     query.Get("q"),
-			Status:    query.Get("status"),
+			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
 		respondJSON(w, http.StatusOK, map[string]any{"tickets": s.issuesForUser(auth.User, issues)})
@@ -1194,7 +1193,6 @@ func (s *Server) prepareIssueInput(w http.ResponseWriter, user store.User, proje
 	input.Source = "portal"
 	input.RequesterName = defaultString(user.DisplayName, user.Username)
 	input.RequesterEmail = requesterEmail
-	input.Tags = []string{"support"}
 	return true, true
 }
 
@@ -1409,6 +1407,19 @@ func issueEventAction(event string) string {
 	default:
 		return "Updated"
 	}
+}
+
+func queryStatuses(query url.Values) []string {
+	statuses := make([]string, 0, len(query["status"]))
+	for _, value := range query["status"] {
+		for _, status := range strings.Split(value, ",") {
+			status = strings.TrimSpace(status)
+			if status != "" {
+				statuses = append(statuses, status)
+			}
+		}
+	}
+	return statuses
 }
 
 func (s *Server) deliverWebhook(hook store.Webhook, event string, issueID int64, body []byte) store.WebhookDelivery {
