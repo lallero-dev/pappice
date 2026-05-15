@@ -1,18 +1,12 @@
 package server
 
 import (
-	"bytes"
-	"context"
 	"embed"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"html"
 	"io"
 	"io/fs"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -91,11 +85,9 @@ func New(tracker *store.Store, opts ...Options) http.Handler {
 		store:   tracker,
 		started: time.Now().UTC(),
 		mux:     http.NewServeMux(),
-		client: &http.Client{
-			Timeout: 8 * time.Second,
-		},
 		options: options,
 	}
+	s.client = s.newWebhookClient()
 	s.routes()
 	return securityHeaders(s.mux)
 }
@@ -1434,203 +1426,6 @@ func (s *Server) emitIssueEvent(event string, issue store.Issue, actor store.Use
 	s.enqueueIssueEmails(event, issue, actor)
 }
 
-func (s *Server) emitIssueWebhook(event string, issue store.Issue, actor store.User) {
-	payload := map[string]any{
-		"event":      event,
-		"created_at": time.Now().UTC(),
-		"actor":      store.ToPublicUser(actor),
-		"ticket":     issue,
-	}
-	body, _ := json.Marshal(payload)
-	for _, hook := range s.store.ListWebhooksForEvent(event, issue.ProjectID) {
-		go s.deliverWebhook(hook, event, issue.ID, body)
-	}
-}
-
-func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store.User) {
-	if !s.options.EmailNotifications {
-		return
-	}
-	recipients := s.store.IssueEmailRecipients(event, issue, actor)
-	if len(recipients) == 0 {
-		return
-	}
-	project, _ := s.store.GetProject(issue.ProjectID)
-	subject, textBody, htmlBody := s.issueEmailContent(event, project, issue, actor)
-	inputs := make([]store.CreateEmailNotification, 0, len(recipients))
-	for _, recipient := range recipients {
-		inputs = append(inputs, store.CreateEmailNotification{
-			ProjectID:      issue.ProjectID,
-			IssueID:        issue.ID,
-			UserID:         recipient.UserID,
-			RecipientEmail: recipient.Email,
-			RecipientName:  defaultString(recipient.DisplayName, recipient.Username),
-			Event:          event,
-			Subject:        subject,
-			BodyText:       textBody,
-			BodyHTML:       htmlBody,
-			SendAfter:      time.Now().UTC().Add(s.options.EmailBatchDelay),
-			Coalesce:       true,
-		})
-	}
-	_, _ = s.store.EnqueueEmailNotifications(inputs)
-}
-
-func (s *Server) enqueueRequesterEmail(event string, issue store.Issue, actorName string) {
-	if !s.options.EmailNotifications || strings.TrimSpace(issue.RequesterEmail) == "" || strings.TrimSpace(issue.CustomerToken) == "" {
-		return
-	}
-	subject, textBody, htmlBody := s.requesterEmailContent(event, issue, actorName)
-	_, _ = s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
-		ProjectID:      issue.ProjectID,
-		IssueID:        issue.ID,
-		UserID:         0,
-		RecipientEmail: issue.RequesterEmail,
-		RecipientName:  defaultString(issue.RequesterName, issue.RequesterEmail),
-		Event:          event,
-		Subject:        subject,
-		BodyText:       textBody,
-		BodyHTML:       htmlBody,
-		SendAfter:      time.Now().UTC().Add(s.options.EmailBatchDelay),
-		Coalesce:       true,
-	}})
-}
-
-func (s *Server) requesterEmailContent(event string, issue store.Issue, actorName string) (string, string, string) {
-	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, requesterEmailSubjectAction(event), issue.Title)
-	link := s.ticketURL(issue.CustomerToken)
-	var text strings.Builder
-	fmt.Fprintf(&text, "%s\n\n", subject)
-	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
-		fmt.Fprintf(&text, "%s replied to your ticket.\n\n", actorName)
-	}
-	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(issue); ok {
-			fmt.Fprintf(&text, "Latest public reply from %s:\n%s\n\n", comment.Author, comment.Body)
-		}
-	}
-	if link != "" {
-		fmt.Fprintf(&text, "Open your ticket:\n%s\n\n", link)
-	}
-	text.WriteString("Replies to this email are not read. Please open Pemmece to continue the conversation.\n")
-
-	var htmlBody strings.Builder
-	htmlBody.WriteString("<!doctype html><meta charset=\"utf-8\">")
-	fmt.Fprintf(&htmlBody, "<h1>%s</h1>", html.EscapeString(subject))
-	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
-		fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> replied to your ticket.</p>", html.EscapeString(actorName))
-	}
-	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(issue); ok {
-			fmt.Fprintf(&htmlBody, "<h2>Latest public reply from %s</h2><pre>%s</pre>", html.EscapeString(comment.Author), html.EscapeString(comment.Body))
-		}
-	}
-	if link != "" {
-		fmt.Fprintf(&htmlBody, "<p><a href=\"%s\">Open your ticket</a></p>", html.EscapeString(link))
-	}
-	htmlBody.WriteString("<p>Replies to this email are not read. Please open Pemmece to continue the conversation.</p>")
-	return subject, strings.TrimSpace(text.String()), htmlBody.String()
-}
-
-func (s *Server) issueEmailContent(event string, project store.Project, issue store.Issue, actor store.User) (string, string, string) {
-	actorName := defaultString(actor.DisplayName, actor.Username)
-	action := issueEventAction(event)
-	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, issueEmailSubjectAction(event), issue.Title)
-	projectLabel := issue.ProjectKey
-	if project.Name != "" {
-		projectLabel = fmt.Sprintf("%s / %s", project.Key, project.Name)
-	}
-	link := strings.TrimRight(s.options.PublicURL, "/")
-	if link != "" {
-		link += "/"
-	}
-
-	var text strings.Builder
-	fmt.Fprintf(&text, "%s %s %s\n\n", actorName, strings.ToLower(action), issue.Key)
-	fmt.Fprintf(&text, "Title: %s\n", issue.Title)
-	fmt.Fprintf(&text, "Product: %s\n", projectLabel)
-	fmt.Fprintf(&text, "Status: %s\nPriority: %s\n", issue.Status, issue.Priority)
-	if strings.TrimSpace(issue.Assignee) != "" {
-		fmt.Fprintf(&text, "Assignee: %s\n", issue.Assignee)
-	}
-	if strings.TrimSpace(issue.Reporter) != "" {
-		fmt.Fprintf(&text, "Requester: %s\n", issue.Reporter)
-	}
-	if link != "" {
-		fmt.Fprintf(&text, "Open: %s\n", link)
-	}
-	if strings.TrimSpace(issue.Description) != "" {
-		fmt.Fprintf(&text, "\n%s\n", issue.Description)
-	}
-	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(issue); ok {
-			fmt.Fprintf(&text, "\nLatest public reply from %s:\n%s\n", comment.Author, comment.Body)
-		}
-	}
-
-	var htmlBody strings.Builder
-	htmlBody.WriteString("<!doctype html><meta charset=\"utf-8\">")
-	fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> %s <strong>%s</strong>.</p>", html.EscapeString(actorName), html.EscapeString(strings.ToLower(action)), html.EscapeString(issue.Key))
-	htmlBody.WriteString("<dl>")
-	fmt.Fprintf(&htmlBody, "<dt>Title</dt><dd>%s</dd>", html.EscapeString(issue.Title))
-	fmt.Fprintf(&htmlBody, "<dt>Product</dt><dd>%s</dd>", html.EscapeString(projectLabel))
-	fmt.Fprintf(&htmlBody, "<dt>Status</dt><dd>%s</dd>", html.EscapeString(issue.Status))
-	fmt.Fprintf(&htmlBody, "<dt>Priority</dt><dd>%s</dd>", html.EscapeString(issue.Priority))
-	if strings.TrimSpace(issue.Assignee) != "" {
-		fmt.Fprintf(&htmlBody, "<dt>Assignee</dt><dd>%s</dd>", html.EscapeString(issue.Assignee))
-	}
-	htmlBody.WriteString("</dl>")
-	if link != "" {
-		fmt.Fprintf(&htmlBody, "<p><a href=\"%s\">Open in Pemmece</a></p>", html.EscapeString(link))
-	}
-	if strings.TrimSpace(issue.Description) != "" {
-		fmt.Fprintf(&htmlBody, "<pre>%s</pre>", html.EscapeString(issue.Description))
-	}
-	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(issue); ok {
-			fmt.Fprintf(&htmlBody, "<h2>Latest public reply from %s</h2><pre>%s</pre>", html.EscapeString(comment.Author), html.EscapeString(comment.Body))
-		}
-	}
-	return subject, strings.TrimSpace(text.String()), htmlBody.String()
-}
-
-func latestPublicComment(issue store.Issue) (store.Comment, bool) {
-	for i := len(issue.Comments) - 1; i >= 0; i-- {
-		comment := issue.Comments[i]
-		if comment.Visibility == "" || comment.Visibility == "public" {
-			return comment, true
-		}
-	}
-	return store.Comment{}, false
-}
-
-func issueEventAction(event string) string {
-	switch event {
-	case "ticket.created":
-		return "Created"
-	case "ticket.commented":
-		return "Commented on"
-	case "ticket.assigned":
-		return "Assigned"
-	default:
-		return "Updated"
-	}
-}
-
-func issueEmailSubjectAction(event string) string {
-	if event == "ticket.created" {
-		return "New ticket"
-	}
-	return "Ticket update"
-}
-
-func requesterEmailSubjectAction(event string) string {
-	if event == "ticket.created" {
-		return "Ticket received"
-	}
-	return "Ticket update"
-}
-
 func queryStatuses(query url.Values) []string {
 	statuses := make([]string, 0, len(query["status"]))
 	for _, value := range query["status"] {
@@ -1642,84 +1437,6 @@ func queryStatuses(query url.Values) []string {
 		}
 	}
 	return statuses
-}
-
-func (s *Server) deliverWebhook(hook store.Webhook, event string, issueID int64, body []byte) store.WebhookDelivery {
-	started := time.Now()
-	delivery := store.WebhookDelivery{
-		WebhookID: hook.ID,
-		ProjectID: hook.ProjectID,
-		Event:     event,
-		IssueID:   issueID,
-	}
-	if err := s.validateWebhookTarget(hook.URL); err != nil {
-		delivery.Error = err.Error()
-		delivery.DurationMS = time.Since(started).Milliseconds()
-		_ = s.store.RecordDelivery(delivery)
-		return delivery
-	}
-	req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
-	if err != nil {
-		delivery.Error = err.Error()
-		delivery.DurationMS = time.Since(started).Milliseconds()
-		_ = s.store.RecordDelivery(delivery)
-		return delivery
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "pemmece-webhook")
-	req.Header.Set("X-Pemmece-Event", event)
-	if hook.Secret != "" {
-		req.Header.Set("X-Pemmece-Signature", "sha256="+security.HMACSHA256(hook.Secret, body))
-	}
-
-	resp, err := s.client.Do(req)
-	delivery.DurationMS = time.Since(started).Milliseconds()
-	if err != nil {
-		delivery.Error = err.Error()
-		_ = s.store.RecordDelivery(delivery)
-		return delivery
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	delivery.StatusCode = resp.StatusCode
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		delivery.Error = fmt.Sprintf("webhook returned HTTP %d", resp.StatusCode)
-	}
-	_ = s.store.RecordDelivery(delivery)
-	return delivery
-}
-
-func (s *Server) validateWebhookTarget(raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Hostname() == "" {
-		return fmt.Errorf("invalid webhook URL")
-	}
-	if parsed.Scheme != "https" && !(s.options.AllowInsecureWebhooks && parsed.Scheme == "http") {
-		return fmt.Errorf("webhook URL must use https")
-	}
-	if s.options.AllowPrivateWebhooks {
-		return nil
-	}
-	host := strings.ToLower(parsed.Hostname())
-	if host == "localhost" {
-		return fmt.Errorf("webhook private targets are blocked")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return err
-	}
-	for _, addr := range addrs {
-		ip, ok := netip.AddrFromSlice(addr.IP)
-		if !ok {
-			return fmt.Errorf("webhook private targets are blocked")
-		}
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
-			return fmt.Errorf("webhook private targets are blocked")
-		}
-	}
-	return nil
 }
 
 func publicWebhooks(hooks []store.Webhook) []store.PublicWebhook {

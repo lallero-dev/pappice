@@ -466,6 +466,44 @@ func TestWebhookGuardrails(t *testing.T) {
 	if targetHits != 1 {
 		t.Fatalf("target hits = %d, want 1", targetHits)
 	}
+
+	redirectHits := 0
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectHits++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer redirectTarget.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, redirectTarget.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	resp, body = doJSON(t, permissiveClient, http.MethodPost, permissive.URL+"/api/webhooks", map[string]any{
+		"name": "redirect",
+		"url":  redirector.URL,
+	}, adminCookie, adminCSRF, permissive.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	hook = decodeNestedInt64(t, body, "webhook", "id")
+	resp, body = doJSON(t, permissiveClient, http.MethodPost, permissive.URL+"/api/webhooks/"+itoa(hook)+"/test", nil, adminCookie, adminCSRF, permissive.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if redirectHits != 0 {
+		t.Fatalf("redirected webhook reached target")
+	}
+	if got := decodeInt64(t, body, "status_code"); got != http.StatusFound {
+		t.Fatalf("redirect webhook status = %d, want %d; body=%s", got, http.StatusFound, body)
+	}
+}
+
+func TestWebhookValidationBlocksPrivateHTTP(t *testing.T) {
+	server := &Server{options: Options{AllowInsecureWebhooks: true}}
+	for _, target := range []string{
+		"http://localhost:8080/hook",
+		"http://127.0.0.1:8080/hook",
+	} {
+		if err := server.validateWebhookTarget(target); err == nil {
+			t.Fatalf("validateWebhookTarget(%q) succeeded, want private target error", target)
+		}
+	}
 }
 
 func TestWebhookDeliveryFlow(t *testing.T) {
