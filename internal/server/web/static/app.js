@@ -20,6 +20,9 @@ const state = {
   webhooks: [],
   globalWebhooks: [],
   emailNotifications: [],
+  emailStats: null,
+  emailEnabled: false,
+  emailBatchDelaySeconds: 0,
   deliveries: [],
   tokens: [],
   user: null,
@@ -85,6 +88,8 @@ const els = {
   webhookList: document.querySelector("#webhookList"),
   addGlobalWebhookButton: document.querySelector("#addGlobalWebhookButton"),
   globalWebhookList: document.querySelector("#globalWebhookList"),
+  sendTestEmailButton: document.querySelector("#sendTestEmailButton"),
+  emailOverview: document.querySelector("#emailOverview"),
   emailList: document.querySelector("#emailList"),
   deliveryList: document.querySelector("#deliveryList"),
   modalHost: document.querySelector("#modalHost")
@@ -101,6 +106,16 @@ const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short"
 });
+
+function formatSeconds(seconds) {
+  const value = Number(seconds || 0);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  if (value < 60) return `${Math.round(value)}s`;
+  const minutes = Math.round(value / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h`;
+}
 
 async function request(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
@@ -309,7 +324,10 @@ async function loadGlobalWebhooks() {
 async function loadEmailNotifications() {
   const payload = await request("/api/email-notifications");
   state.emailNotifications = payload.notifications || [];
-  renderEmailNotifications(payload.enabled);
+  state.emailStats = payload.stats || null;
+  state.emailEnabled = Boolean(payload.enabled);
+  state.emailBatchDelaySeconds = Number(payload.batch_delay_seconds || 0);
+  renderEmailNotifications();
 }
 
 async function loadProjectDeliveries() {
@@ -872,9 +890,11 @@ function renderDeliveries() {
   }
 }
 
-function renderEmailNotifications(enabled) {
+function renderEmailNotifications() {
+  renderEmailOverview();
+  els.sendTestEmailButton.disabled = !state.emailEnabled;
   els.emailList.replaceChildren();
-  if (!enabled && state.emailNotifications.length === 0) {
+  if (!state.emailEnabled && state.emailNotifications.length === 0) {
     els.emailList.append(el("div", { className: "empty-inline" }, "Email is not configured."));
     return;
   }
@@ -883,14 +903,99 @@ function renderEmailNotifications(enabled) {
     return;
   }
   for (const notification of state.emailNotifications) {
-    const row = el("div", { className: "admin-row" });
-    row.append(
-      el("div", { className: "admin-row-main" }, `${notification.event} / ${notification.recipient_email}`),
-      badge(notification.status, notification.status === "failed" ? "priority-urgent" : "priority-normal"),
-      el("span", { className: "muted" }, notification.last_error || relativeTime(notification.created_at))
-    );
-    els.emailList.append(row);
+    els.emailList.append(emailNotificationRow(notification));
   }
+}
+
+function renderEmailOverview() {
+  const stats = state.emailStats || {};
+  els.emailOverview.replaceChildren(
+    emailStat("Enabled", state.emailEnabled ? "Yes" : "No"),
+    emailStat("Pending", stats.pending || 0),
+    emailStat("Sending", stats.sending || 0),
+    emailStat("Failed", stats.failed || 0),
+    emailStat("Sent", stats.sent || 0),
+    emailStat("Batch delay", formatSeconds(state.emailBatchDelaySeconds)),
+    emailStat("Last sent", stats.last_sent_at ? relativeTime(stats.last_sent_at) : "-")
+  );
+}
+
+function emailStat(label, value) {
+  return el("div", { className: "email-stat" }, [
+    el("span", {}, label),
+    el("strong", {}, String(value))
+  ]);
+}
+
+function emailNotificationRow(notification) {
+  const row = el("div", { className: "admin-row email-row", role: "button", tabindex: "0" });
+  row.addEventListener("click", () => openEmailNotificationModal(notification));
+  row.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openEmailNotificationModal(notification);
+    }
+  });
+  const status = badge(notification.status, emailStatusClass(notification.status));
+  const retry = el("button", { className: "ghost-button", type: "button" }, "Retry");
+  retry.hidden = notification.status !== "failed";
+  retry.addEventListener("click", (event) => {
+    event.stopPropagation();
+    retryEmailNotification(notification.id).catch(showError);
+  });
+  row.append(
+    el("div", { className: "admin-row-main" }, [
+      el("strong", {}, notification.subject || notification.event),
+      el("span", {}, `${notification.event} / ${notification.recipient_email}`)
+    ]),
+    status,
+    el("span", { className: "muted" }, notification.last_error || emailNotificationTime(notification)),
+    retry
+  );
+  return row;
+}
+
+function emailStatusClass(status) {
+  if (status === "failed") return "priority-urgent";
+  if (status === "sent") return "priority-low";
+  return "priority-normal";
+}
+
+function emailNotificationTime(notification) {
+  if (notification.status === "sent" && notification.sent_at) return `Sent ${relativeTime(notification.sent_at)}`;
+  if (notification.status === "pending" && notification.next_attempt_at) {
+    const nextAttempt = new Date(notification.next_attempt_at);
+    if (!Number.isNaN(nextAttempt.getTime()) && nextAttempt.getTime() > Date.now()) {
+      return `Sends ${shortDateFormatter.format(nextAttempt)}`;
+    }
+    return "Due now";
+  }
+  return relativeTime(notification.created_at);
+}
+
+function openEmailNotificationModal(notification) {
+  const content = el("div", { className: "email-detail" }, [
+    el("div", { className: "fact-list" }, [
+      factBlock("Status", labelize(notification.status)),
+      factBlock("Event", notification.event),
+      factBlock("Recipient", notification.recipient_email),
+      factBlock("Subject", notification.subject),
+      factBlock("Created", relativeTime(notification.created_at)),
+      factBlock("Attempts", notification.attempts || 0)
+    ]),
+    notification.last_error ? el("div", { className: "description" }, notification.last_error) : el("div"),
+    el("h4", { className: "section-title" }, "Body"),
+    el("pre", { className: "email-body" }, notification.body_text || "")
+  ]);
+  els.modalHost.open({
+    title: "Email Notification",
+    hideFooter: notification.status !== "failed",
+    submitText: "Retry",
+    content,
+    onSubmit: notification.status === "failed" ? async () => {
+      await retryEmailNotification(notification.id);
+    } : null
+  });
 }
 
 function workflowEditor(issue, { creating = false } = {}) {
@@ -949,10 +1054,9 @@ async function saveTicketChanges(issue, data, { editable, canComment }) {
   const patch = editable ? ticketUpdatePatch(issue, data) : {};
   const comment = canComment ? ticketCommentPayload(issue, data) : null;
   if (Object.keys(patch).length === 0 && !comment) return;
-  if (Object.keys(patch).length > 0) {
-    await request(`/api/tickets/${issue.id}`, { method: "PATCH", body: JSON.stringify(patch) });
-  }
-  if (comment) {
+  if (editable) {
+    await request(`/api/tickets/${issue.id}`, { method: "PATCH", body: JSON.stringify({ ...patch, comment }) });
+  } else if (comment) {
     await request(`/api/tickets/${issue.id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   }
   await loadIssues();
@@ -1170,6 +1274,25 @@ function openTokenModal() {
   });
 }
 
+function openTestEmailModal() {
+  els.modalHost.open({
+    title: "Send Test Email",
+    submitText: "Queue Test",
+    fields: [
+      { name: "email", label: "Recipient", type: "email", value: state.user?.email || "", required: true, autocomplete: "email" }
+    ],
+    onSubmit: async (data) => {
+      await request("/api/email-notifications/test", { method: "POST", body: JSON.stringify({ email: data.email }) });
+      await loadEmailNotifications();
+    }
+  });
+}
+
+async function retryEmailNotification(id) {
+  await request(`/api/email-notifications/${id}/retry`, { method: "POST" });
+  await loadEmailNotifications();
+}
+
 function openMemberModal() {
   const users = state.users
     .filter((user) => !user.disabled)
@@ -1275,6 +1398,7 @@ function bindEvents() {
   els.addProjectButton.addEventListener("click", () => openProjectModal());
   els.addUserButton.addEventListener("click", () => openUserModal());
   els.createTokenButton.addEventListener("click", () => openTokenModal());
+  els.sendTestEmailButton.addEventListener("click", () => openTestEmailModal());
   els.addMemberButton.addEventListener("click", () => openMemberModal());
   els.addGlobalWebhookButton.addEventListener("click", () => openWebhookModal("global"));
   els.addWebhookButton.addEventListener("click", () => openWebhookModal("project"));

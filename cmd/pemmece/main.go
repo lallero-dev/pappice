@@ -38,6 +38,7 @@ func main() {
 	smtpPassword := flag.String("smtp-password", envOr("PEMMECE_SMTP_PASSWORD", ""), "SMTP password")
 	smtpFrom := flag.String("smtp-from", envOr("PEMMECE_SMTP_FROM", ""), "sender address for email notifications")
 	smtpTLSMode := flag.String("smtp-tls-mode", envOr("PEMMECE_SMTP_TLS_MODE", "starttls"), "SMTP TLS mode: starttls, tls, or none")
+	emailBatchDelay := flag.Duration("email-batch-delay", envDuration("PEMMECE_EMAIL_BATCH_DELAY", 20*time.Second), "delay before sending coalesced ticket notification emails")
 	flag.Parse()
 
 	tracker, err := store.Open(*dbPath)
@@ -85,6 +86,7 @@ func main() {
 			AllowInsecureWebhooks: *allowInsecureWebhooks,
 			AllowPrivateWebhooks:  *allowPrivateWebhooks,
 			EmailNotifications:    emailEnabled,
+			EmailBatchDelay:       *emailBatchDelay,
 			PublicURL:             *publicURL,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -200,6 +202,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return fallback
 	}

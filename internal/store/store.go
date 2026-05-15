@@ -285,6 +285,16 @@ type EmailNotification struct {
 	SentAt         *time.Time `json:"sent_at,omitempty"`
 }
 
+type EmailNotificationStats struct {
+	Total      int        `json:"total"`
+	Pending    int        `json:"pending"`
+	Sending    int        `json:"sending"`
+	Sent       int        `json:"sent"`
+	Failed     int        `json:"failed"`
+	LastSentAt *time.Time `json:"last_sent_at,omitempty"`
+	LastError  string     `json:"last_error,omitempty"`
+}
+
 type CreateEmailNotification struct {
 	ProjectID      int64
 	IssueID        int64
@@ -295,6 +305,8 @@ type CreateEmailNotification struct {
 	Subject        string
 	BodyText       string
 	BodyHTML       string
+	SendAfter      time.Time
+	Coalesce       bool
 }
 
 type Store struct {
@@ -351,6 +363,14 @@ var validEvents = map[string]struct{}{
 	"ticket.commented": {},
 	"ticket.assigned":  {},
 	"*":                {},
+}
+
+var validEmailEvents = map[string]struct{}{
+	"ticket.created":   {},
+	"ticket.updated":   {},
+	"ticket.commented": {},
+	"ticket.assigned":  {},
+	"email.test":       {},
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,46}[a-z0-9]$`)
@@ -1817,8 +1837,36 @@ func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]E
 		if notification.Event == "" {
 			return nil, fmt.Errorf("%w: event is required", ErrValidation)
 		}
-		if !isValid(validEvents, notification.Event) {
+		if !isValid(validEmailEvents, notification.Event) {
 			return nil, fmt.Errorf("%w: invalid notification event %q", ErrValidation, notification.Event)
+		}
+		if !input.SendAfter.IsZero() {
+			notification.NextAttemptAt = input.SendAfter.UTC()
+		}
+		if input.Coalesce {
+			existingID, ok, err := pendingEmailNotificationIDTx(tx, notification)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				_, err := tx.Exec(`
+					UPDATE email_notifications
+					SET event = ?, subject = ?, body_text = ?, body_html = ?, status = 'pending',
+					    attempts = 0, next_attempt_at = ?, locked_until = NULL, last_error = ''
+					WHERE id = ?`,
+					notification.Event, notification.Subject, notification.BodyText, notification.BodyHTML,
+					formatTime(notification.NextAttemptAt), existingID,
+				)
+				if err != nil {
+					return nil, normalizeSQLError(err)
+				}
+				updated, err := getEmailNotificationTx(tx, existingID)
+				if err != nil {
+					return nil, err
+				}
+				created = append(created, updated)
+				continue
+			}
 		}
 		result, err := tx.Exec(`
 			INSERT INTO email_notifications (
@@ -2001,6 +2049,65 @@ func (s *Store) ListEmailNotifications(limit int) []EmailNotification {
 		}
 	}
 	return notifications
+}
+
+func (s *Store) EmailNotificationStats() EmailNotificationStats {
+	var stats EmailNotificationStats
+	rows, err := s.db.Query(`SELECT status, count(*) FROM email_notifications GROUP BY status`)
+	if err != nil {
+		return stats
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			continue
+		}
+		stats.Total += count
+		switch status {
+		case "pending":
+			stats.Pending = count
+		case "sending":
+			stats.Sending = count
+		case "sent":
+			stats.Sent = count
+		case "failed":
+			stats.Failed = count
+		}
+	}
+	var sentAt sql.NullString
+	var lastError sql.NullString
+	_ = s.db.QueryRow(`SELECT sent_at FROM email_notifications WHERE sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1`).Scan(&sentAt)
+	if sentAt.Valid {
+		parsed := parseTime(sentAt.String)
+		stats.LastSentAt = &parsed
+	}
+	_ = s.db.QueryRow(`SELECT last_error FROM email_notifications WHERE last_error <> '' ORDER BY created_at DESC LIMIT 1`).Scan(&lastError)
+	if lastError.Valid {
+		stats.LastError = lastError.String
+	}
+	return stats
+}
+
+func (s *Store) RetryEmailNotification(id int64) (EmailNotification, error) {
+	if id < 1 {
+		return EmailNotification{}, ErrNotFound
+	}
+	now := time.Now().UTC()
+	result, err := s.db.Exec(`
+		UPDATE email_notifications
+		SET status = 'pending', attempts = 0, next_attempt_at = ?, locked_until = NULL, last_error = ''
+		WHERE id = ? AND status = 'failed'`,
+		formatTime(now), id,
+	)
+	if err != nil {
+		return EmailNotification{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return EmailNotification{}, ErrNotFound
+	}
+	return s.GetEmailNotification(id)
 }
 
 func (s *Store) IssueIDByProjectNumber(projectID, number int64) (int64, bool) {
@@ -2354,6 +2461,38 @@ func scanEmailRecipient(rows scanner) (EmailRecipient, error) {
 		return EmailRecipient{}, err
 	}
 	return recipient, nil
+}
+
+func pendingEmailNotificationIDTx(tx *sql.Tx, notification EmailNotification) (int64, bool, error) {
+	var row *sql.Row
+	if notification.IssueID > 0 {
+		row = tx.QueryRow(`
+			SELECT id
+			FROM email_notifications
+			WHERE status = 'pending'
+			  AND issue_id = ?
+			  AND lower(recipient_email) = lower(?)
+			ORDER BY created_at DESC
+			LIMIT 1`, notification.IssueID, notification.RecipientEmail)
+	} else {
+		row = tx.QueryRow(`
+			SELECT id
+			FROM email_notifications
+			WHERE status = 'pending'
+			  AND issue_id IS NULL
+			  AND lower(recipient_email) = lower(?)
+			  AND event = ?
+			ORDER BY created_at DESC
+			LIMIT 1`, notification.RecipientEmail, notification.Event)
+	}
+	var id int64
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 func getEmailNotificationTx(tx *sql.Tx, id int64) (EmailNotification, error) {

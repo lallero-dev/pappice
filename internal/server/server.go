@@ -25,12 +25,16 @@ import (
 //go:embed web/index.html web/static/*
 var assets embed.FS
 
-const sessionCookieName = "pemmece_session"
+const (
+	sessionCookieName      = "pemmece_session"
+	defaultEmailBatchDelay = 20 * time.Second
+)
 
 type Options struct {
 	AllowInsecureWebhooks bool
 	AllowPrivateWebhooks  bool
 	EmailNotifications    bool
+	EmailBatchDelay       time.Duration
 	PublicURL             string
 }
 
@@ -48,10 +52,40 @@ type authContext struct {
 	ViaToken bool
 }
 
+type ticketPatchInput struct {
+	Title       *string           `json:"title"`
+	Description *string           `json:"description"`
+	Status      *string           `json:"status"`
+	Priority    *string           `json:"priority"`
+	Assignee    *string           `json:"assignee"`
+	Comment     *store.AddComment `json:"comment"`
+}
+
+func (input ticketPatchInput) updateIssue() store.UpdateIssue {
+	return store.UpdateIssue{
+		Title:       input.Title,
+		Description: input.Description,
+		Status:      input.Status,
+		Priority:    input.Priority,
+		Assignee:    input.Assignee,
+	}
+}
+
+func (input ticketPatchInput) hasTicketPatch() bool {
+	return input.Title != nil || input.Description != nil || input.Status != nil || input.Priority != nil || input.Assignee != nil
+}
+
+func (input ticketPatchInput) onlyAssigneePatch() bool {
+	return input.Assignee != nil && input.Title == nil && input.Description == nil && input.Status == nil && input.Priority == nil
+}
+
 func New(tracker *store.Store, opts ...Options) http.Handler {
 	options := Options{}
 	if len(opts) > 0 {
 		options = opts[0]
+	}
+	if options.EmailBatchDelay <= 0 {
+		options.EmailBatchDelay = defaultEmailBatchDelay
 	}
 	s := &Server{
 		store:   tracker,
@@ -98,6 +132,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/webhooks/", s.handleWebhookByID)
 	s.mux.HandleFunc("/api/webhook-deliveries", s.handleWebhookDeliveries)
 	s.mux.HandleFunc("/api/email-notifications", s.handleEmailNotifications)
+	s.mux.HandleFunc("/api/email-notifications/", s.handleEmailNotificationByID)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -670,26 +705,96 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 	case http.MethodGet:
 		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, issue))
 	case http.MethodPatch:
-		if !s.canEditIssue(auth.User, issue.ProjectID) {
-			respondError(w, http.StatusForbidden, "agent access is required")
+		var input ticketPatchInput
+		if !decodeJSON(w, r, &input) {
 			return
 		}
-		var patch store.UpdateIssue
-		if !decodeJSON(w, r, &patch) {
+		updated, ok := s.applyTicketPatch(w, auth, issue, input)
+		if !ok {
 			return
-		}
-		updated, err := s.store.UpdateIssue(issue.ID, patch)
-		if err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		s.emitIssueEvent("ticket.updated", updated, auth.User)
-		if patch.Assignee != nil && strings.TrimSpace(*patch.Assignee) != "" && !strings.EqualFold(strings.TrimSpace(*patch.Assignee), strings.TrimSpace(issue.Assignee)) {
-			s.emitIssueEvent("ticket.assigned", updated, auth.User)
 		}
 		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, updated))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch)
+	}
+}
+
+func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue store.Issue, input ticketPatchInput) (store.Issue, bool) {
+	hasPatch := input.hasTicketPatch()
+	hasComment := input.Comment != nil && strings.TrimSpace(input.Comment.Body) != ""
+	if !hasPatch && !hasComment {
+		respondError(w, http.StatusBadRequest, "ticket changes or comment are required")
+		return store.Issue{}, false
+	}
+	if hasPatch && !s.canEditIssue(auth.User, issue.ProjectID) {
+		respondError(w, http.StatusForbidden, "agent access is required")
+		return store.Issue{}, false
+	}
+	if hasComment && !s.canCommentIssue(auth.User, issue.ProjectID) {
+		respondError(w, http.StatusForbidden, "product comment access is required")
+		return store.Issue{}, false
+	}
+
+	updated := issue
+	assignmentChanged := false
+	if hasPatch {
+		patch := input.updateIssue()
+		assignmentChanged = patch.Assignee != nil &&
+			strings.TrimSpace(*patch.Assignee) != "" &&
+			!strings.EqualFold(strings.TrimSpace(*patch.Assignee), strings.TrimSpace(issue.Assignee))
+		next, err := s.store.UpdateIssue(issue.ID, patch)
+		if err != nil {
+			respondStoreError(w, err)
+			return store.Issue{}, false
+		}
+		updated = next
+	}
+
+	publicComment := false
+	if hasComment {
+		comment := *input.Comment
+		comment.Visibility = defaultString(comment.Visibility, "public")
+		if comment.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
+			respondError(w, http.StatusForbidden, "agent access is required for internal notes")
+			return store.Issue{}, false
+		}
+		comment.Author = defaultString(auth.User.DisplayName, auth.User.Username)
+		next, err := s.store.AddComment(issue.ID, comment)
+		if err != nil {
+			respondStoreError(w, err)
+			return store.Issue{}, false
+		}
+		updated = next
+		publicComment = comment.Visibility == "public"
+	}
+
+	if hasPatch {
+		s.emitIssueWebhook("ticket.updated", updated, auth.User)
+		if assignmentChanged {
+			s.emitIssueWebhook("ticket.assigned", updated, auth.User)
+		}
+	}
+	if publicComment {
+		s.emitIssueWebhook("ticket.commented", updated, auth.User)
+	}
+	s.enqueueTicketPatchEmails(input, updated, auth.User, issue, assignmentChanged, publicComment)
+	return updated, true
+}
+
+func (s *Server) enqueueTicketPatchEmails(input ticketPatchInput, updated store.Issue, actor store.User, previous store.Issue, assignmentChanged, publicComment bool) {
+	if !input.hasTicketPatch() && !publicComment {
+		return
+	}
+	event := "ticket.updated"
+	if !input.hasTicketPatch() && publicComment {
+		event = "ticket.commented"
+	}
+	if input.hasTicketPatch() && !publicComment && assignmentChanged && input.onlyAssigneePatch() {
+		event = "ticket.assigned"
+	}
+	s.enqueueIssueEmails(event, updated, actor)
+	if (input.hasTicketPatch() || publicComment) && !s.isSupportTicketRequester(actor, previous) {
+		s.enqueueRequesterEmail(event, updated, defaultString(actor.DisplayName, actor.Username))
 	}
 }
 
@@ -989,9 +1094,86 @@ func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"notifications": s.store.ListEmailNotifications(50),
-		"enabled":       s.options.EmailNotifications,
+		"notifications":       s.store.ListEmailNotifications(50),
+		"enabled":             s.options.EmailNotifications,
+		"batch_delay_seconds": int(s.options.EmailBatchDelay.Seconds()),
+		"stats":               s.store.EmailNotificationStats(),
 	})
+}
+
+func (s *Server) handleEmailNotificationByID(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/email-notifications/"), "/")
+	if rest == "test" {
+		s.handleEmailNotificationTest(w, r, auth)
+		return
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || parts[1] != "retry" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || id < 1 {
+		respondError(w, http.StatusBadRequest, "invalid email notification id")
+		return
+	}
+	notification, err := s.store.RetryEmailNotification(id)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"notification": notification})
+}
+
+func (s *Server) handleEmailNotificationTest(w http.ResponseWriter, r *http.Request, auth authContext) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if !s.options.EmailNotifications {
+		respondError(w, http.StatusConflict, "email notifications are not configured")
+		return
+	}
+	var input struct {
+		Email string `json:"email"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	recipientEmail := strings.TrimSpace(input.Email)
+	if recipientEmail == "" {
+		recipientEmail = strings.TrimSpace(auth.User.Email)
+	}
+	if recipientEmail == "" {
+		respondError(w, http.StatusBadRequest, "test recipient email is required")
+		return
+	}
+	recipientName := defaultString(auth.User.DisplayName, auth.User.Username)
+	subject := "Pemmece test email"
+	bodyText := "This is a no-reply test email from Pemmece.\n\nIf you received this message, SMTP delivery is working."
+	bodyHTML := "<!doctype html><meta charset=\"utf-8\"><p>This is a no-reply test email from Pemmece.</p><p>If you received this message, SMTP delivery is working.</p>"
+	created, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
+		UserID:         auth.User.ID,
+		RecipientEmail: recipientEmail,
+		RecipientName:  recipientName,
+		Event:          "email.test",
+		Subject:        subject,
+		BodyText:       bodyText,
+		BodyHTML:       bodyHTML,
+	}})
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{"notification": created[0]})
 }
 
 func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
@@ -1248,6 +1430,11 @@ func (s *Server) hasProjectRole(user store.User, projectID int64, allowed ...str
 }
 
 func (s *Server) emitIssueEvent(event string, issue store.Issue, actor store.User) {
+	s.emitIssueWebhook(event, issue, actor)
+	s.enqueueIssueEmails(event, issue, actor)
+}
+
+func (s *Server) emitIssueWebhook(event string, issue store.Issue, actor store.User) {
 	payload := map[string]any{
 		"event":      event,
 		"created_at": time.Now().UTC(),
@@ -1258,7 +1445,6 @@ func (s *Server) emitIssueEvent(event string, issue store.Issue, actor store.Use
 	for _, hook := range s.store.ListWebhooksForEvent(event, issue.ProjectID) {
 		go s.deliverWebhook(hook, event, issue.ID, body)
 	}
-	s.enqueueIssueEmails(event, issue, actor)
 }
 
 func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store.User) {
@@ -1283,6 +1469,8 @@ func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store
 			Subject:        subject,
 			BodyText:       textBody,
 			BodyHTML:       htmlBody,
+			SendAfter:      time.Now().UTC().Add(s.options.EmailBatchDelay),
+			Coalesce:       true,
 		})
 	}
 	_, _ = s.store.EnqueueEmailNotifications(inputs)
@@ -1303,20 +1491,23 @@ func (s *Server) enqueueRequesterEmail(event string, issue store.Issue, actorNam
 		Subject:        subject,
 		BodyText:       textBody,
 		BodyHTML:       htmlBody,
+		SendAfter:      time.Now().UTC().Add(s.options.EmailBatchDelay),
+		Coalesce:       true,
 	}})
 }
 
 func (s *Server) requesterEmailContent(event string, issue store.Issue, actorName string) (string, string, string) {
-	action := issueEventAction(event)
-	if event == "ticket.created" {
-		action = "Received"
-	}
-	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, action, issue.Title)
+	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, requesterEmailSubjectAction(event), issue.Title)
 	link := s.ticketURL(issue.CustomerToken)
 	var text strings.Builder
 	fmt.Fprintf(&text, "%s\n\n", subject)
 	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
 		fmt.Fprintf(&text, "%s replied to your ticket.\n\n", actorName)
+	}
+	if event != "ticket.created" {
+		if comment, ok := latestPublicComment(issue); ok {
+			fmt.Fprintf(&text, "Latest public reply from %s:\n%s\n\n", comment.Author, comment.Body)
+		}
 	}
 	if link != "" {
 		fmt.Fprintf(&text, "Open your ticket:\n%s\n\n", link)
@@ -1329,6 +1520,11 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
 		fmt.Fprintf(&htmlBody, "<p><strong>%s</strong> replied to your ticket.</p>", html.EscapeString(actorName))
 	}
+	if event != "ticket.created" {
+		if comment, ok := latestPublicComment(issue); ok {
+			fmt.Fprintf(&htmlBody, "<h2>Latest public reply from %s</h2><pre>%s</pre>", html.EscapeString(comment.Author), html.EscapeString(comment.Body))
+		}
+	}
 	if link != "" {
 		fmt.Fprintf(&htmlBody, "<p><a href=\"%s\">Open your ticket</a></p>", html.EscapeString(link))
 	}
@@ -1339,7 +1535,7 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 func (s *Server) issueEmailContent(event string, project store.Project, issue store.Issue, actor store.User) (string, string, string) {
 	actorName := defaultString(actor.DisplayName, actor.Username)
 	action := issueEventAction(event)
-	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, action, issue.Title)
+	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, issueEmailSubjectAction(event), issue.Title)
 	projectLabel := issue.ProjectKey
 	if project.Name != "" {
 		projectLabel = fmt.Sprintf("%s / %s", project.Key, project.Name)
@@ -1366,9 +1562,10 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 	if strings.TrimSpace(issue.Description) != "" {
 		fmt.Fprintf(&text, "\n%s\n", issue.Description)
 	}
-	if event == "ticket.commented" && len(issue.Comments) > 0 {
-		comment := issue.Comments[len(issue.Comments)-1]
-		fmt.Fprintf(&text, "\nLatest comment from %s:\n%s\n", comment.Author, comment.Body)
+	if event != "ticket.created" {
+		if comment, ok := latestPublicComment(issue); ok {
+			fmt.Fprintf(&text, "\nLatest public reply from %s:\n%s\n", comment.Author, comment.Body)
+		}
 	}
 
 	var htmlBody strings.Builder
@@ -1389,11 +1586,22 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 	if strings.TrimSpace(issue.Description) != "" {
 		fmt.Fprintf(&htmlBody, "<pre>%s</pre>", html.EscapeString(issue.Description))
 	}
-	if event == "ticket.commented" && len(issue.Comments) > 0 {
-		comment := issue.Comments[len(issue.Comments)-1]
-		fmt.Fprintf(&htmlBody, "<h2>Latest comment from %s</h2><pre>%s</pre>", html.EscapeString(comment.Author), html.EscapeString(comment.Body))
+	if event != "ticket.created" {
+		if comment, ok := latestPublicComment(issue); ok {
+			fmt.Fprintf(&htmlBody, "<h2>Latest public reply from %s</h2><pre>%s</pre>", html.EscapeString(comment.Author), html.EscapeString(comment.Body))
+		}
 	}
 	return subject, strings.TrimSpace(text.String()), htmlBody.String()
+}
+
+func latestPublicComment(issue store.Issue) (store.Comment, bool) {
+	for i := len(issue.Comments) - 1; i >= 0; i-- {
+		comment := issue.Comments[i]
+		if comment.Visibility == "" || comment.Visibility == "public" {
+			return comment, true
+		}
+	}
+	return store.Comment{}, false
 }
 
 func issueEventAction(event string) string {
@@ -1407,6 +1615,20 @@ func issueEventAction(event string) string {
 	default:
 		return "Updated"
 	}
+}
+
+func issueEmailSubjectAction(event string) string {
+	if event == "ticket.created" {
+		return "New ticket"
+	}
+	return "Ticket update"
+}
+
+func requesterEmailSubjectAction(event string) string {
+	if event == "ticket.created" {
+		return "Ticket received"
+	}
+	return "Ticket update"
 }
 
 func queryStatuses(query url.Values) []string {

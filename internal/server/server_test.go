@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -301,8 +302,96 @@ func TestAdminProjectIssueCommentAndNotificationFlow(t *testing.T) {
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("ticket.assigned")) || !bytes.Contains(body, []byte("dev@example.test")) {
-		t.Fatalf("email outbox missing assignment notification: %s", body)
+	if !bytes.Contains(body, []byte("ticket.updated")) ||
+		!bytes.Contains(body, []byte("Ticket update")) ||
+		!bytes.Contains(body, []byte("dev@example.test")) {
+		t.Fatalf("email outbox missing grouped update notification: %s", body)
+	}
+}
+
+func TestEmailNotificationAdminTools(t *testing.T) {
+	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/test", map[string]any{}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	var created struct {
+		Notification store.EmailNotification `json:"notification"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode test email: %v", err)
+	}
+	if created.Notification.ID == 0 || created.Notification.Event != "email.test" || created.Notification.RecipientEmail != "admin@example.test" {
+		t.Fatalf("test email notification = %#v", created.Notification)
+	}
+
+	if err := tracker.MarkEmailFailed(created.Notification.ID, errors.New("smtp unavailable"), 1); err != nil {
+		t.Fatalf("mark test email failed: %v", err)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte(`"failed":1`)) || !bytes.Contains(body, []byte("smtp unavailable")) {
+		t.Fatalf("email outbox missing failed overview: %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/"+itoa(created.Notification.ID)+"/retry", nil, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	var retried struct {
+		Notification store.EmailNotification `json:"notification"`
+	}
+	if err := json.Unmarshal(body, &retried); err != nil {
+		t.Fatalf("decode retried email: %v", err)
+	}
+	if retried.Notification.Status != "pending" || retried.Notification.Attempts != 0 || retried.Notification.LastError != "" {
+		t.Fatalf("retried notification = %#v", retried.Notification)
+	}
+}
+
+func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
+	_, server, client := newTestServer(t, Options{EmailNotifications: true})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	devID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "dev",
+		"password": "correct horse",
+		"email":    "dev@example.test",
+		"role":     "staff",
+	})
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, devID, "agent")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  projectID,
+		"title":       "Grouped save",
+		"description": "Needs one email",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	issueID := decodeInt64(t, body, "id")
+
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]any{
+		"status":   "assigned",
+		"assignee": "dev",
+		"comment": map[string]any{
+			"body":       "Taking this now",
+			"visibility": "public",
+		},
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Taking this now")) || !bytes.Contains(body, []byte(`"status":"assigned"`)) {
+		t.Fatalf("grouped ticket save response = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte(`"pending":1`)) ||
+		!bytes.Contains(body, []byte("ticket.updated")) ||
+		!bytes.Contains(body, []byte("Ticket update")) ||
+		!bytes.Contains(body, []byte("dev@example.test")) ||
+		!bytes.Contains(body, []byte("Taking this now")) {
+		t.Fatalf("email outbox missing grouped ticket update: %s", body)
 	}
 }
 

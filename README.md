@@ -45,7 +45,9 @@ precedence over `.env` values.
 
 Email notifications are enabled when SMTP is configured. The app enqueues email
 jobs durably in SQLite when ticket events happen, then a background worker sends
-them with retry/backoff.
+them with retry/backoff. Ticket update emails are delayed briefly and coalesced
+per ticket and recipient, so a save with status, assignee, and reply changes
+produces one no-reply "Ticket update" email instead of several.
 
 ```sh
 go run ./cmd/pemmece \
@@ -60,7 +62,10 @@ go run ./cmd/pemmece \
 Equivalent environment variables are `PEMMECE_PUBLIC_URL`,
 `PEMMECE_EMAIL_NOTIFICATIONS`, `PEMMECE_SMTP_HOST`, `PEMMECE_SMTP_PORT`,
 `PEMMECE_SMTP_USER`, `PEMMECE_SMTP_PASSWORD`, `PEMMECE_SMTP_FROM`, and
-`PEMMECE_SMTP_TLS_MODE` (`starttls`, `tls`, or `none`).
+`PEMMECE_SMTP_TLS_MODE` (`starttls`, `tls`, or `none`). The coalescing window is
+`PEMMECE_EMAIL_BATCH_DELAY` and accepts Go duration values like `20s` or `2m`.
+Admins can inspect the email outbox, queue a test email, and retry failed
+notifications from the admin page.
 
 Webhook delivery defaults are conservative: webhook URLs must be HTTPS and must
 not resolve to private, loopback, or link-local addresses. Development-only
@@ -116,6 +121,8 @@ Core endpoints:
 - `GET /api/webhook-deliveries`
 - `GET /api/projects/{id}/webhook-deliveries`
 - `GET /api/email-notifications`
+- `POST /api/email-notifications/test`
+- `POST /api/email-notifications/{id}/retry`
 
 Webhook events:
 

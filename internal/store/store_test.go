@@ -302,6 +302,17 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 	if len(notifications) != 1 || notifications[0].Status != "failed" || notifications[0].LastError != "temporary failure" {
 		t.Fatalf("notifications = %#v", notifications)
 	}
+	stats := tracker.EmailNotificationStats()
+	if stats.Total != 1 || stats.Failed != 1 || stats.LastError != "temporary failure" {
+		t.Fatalf("email stats = %#v", stats)
+	}
+	retried, err := tracker.RetryEmailNotification(queued[0].ID)
+	if err != nil {
+		t.Fatalf("retry email: %v", err)
+	}
+	if retried.Status != "pending" || retried.Attempts != 0 || retried.LastError != "" {
+		t.Fatalf("retried email = %#v", retried)
+	}
 	if err := tracker.DeleteWebhook(hook.ID); err != nil {
 		t.Fatalf("delete webhook: %v", err)
 	}
@@ -430,6 +441,49 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	}
 	if sent.Status != "sent" || sent.SentAt == nil {
 		t.Fatalf("sent = %#v", sent)
+	}
+
+	sendAfter := time.Now().UTC().Add(time.Hour)
+	first, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
+		ProjectID:      issue.ProjectID,
+		IssueID:        issue.ID,
+		UserID:         assignee.ID,
+		RecipientEmail: assignee.Email,
+		Event:          "ticket.updated",
+		Subject:        "[PME-1] Ticket update",
+		BodyText:       "first update",
+		SendAfter:      sendAfter,
+		Coalesce:       true,
+	}})
+	if err != nil {
+		t.Fatalf("enqueue first coalesced email: %v", err)
+	}
+	second, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
+		ProjectID:      issue.ProjectID,
+		IssueID:        issue.ID,
+		UserID:         assignee.ID,
+		RecipientEmail: assignee.Email,
+		Event:          "ticket.commented",
+		Subject:        "[PME-1] Ticket update",
+		BodyText:       "second update",
+		SendAfter:      sendAfter.Add(time.Hour),
+		Coalesce:       true,
+	}})
+	if err != nil {
+		t.Fatalf("enqueue second coalesced email: %v", err)
+	}
+	if first[0].ID != second[0].ID || second[0].Event != "ticket.commented" || second[0].BodyText != "second update" {
+		t.Fatalf("coalesced emails = first %#v second %#v", first[0], second[0])
+	}
+	if second[0].NextAttemptAt.Before(sendAfter.Add(59 * time.Minute)) {
+		t.Fatalf("coalesced next attempt = %s, want delayed", second[0].NextAttemptAt)
+	}
+	claimed, err = tracker.ClaimEmailNotifications(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim delayed email: %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("claimed delayed email too early: %#v", claimed)
 	}
 }
 

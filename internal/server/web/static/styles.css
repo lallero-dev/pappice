@@ -782,6 +782,104 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.admin-row-main strong,
+.admin-row-main span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-row-main span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.email-overview {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+}
+
+.email-stat {
+  background: var(--panel-strong);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+}
+
+.email-stat span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.email-stat strong {
+  font-size: 15px;
+}
+
+.email-row {
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.email-row:hover,
+.email-row:focus-visible {
+  background: #f8fbfd;
+}
+
+.email-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.fact-list {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fact-block {
+  align-items: start;
+  background: #fff;
+  border-bottom: 1px solid var(--border-soft);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 96px minmax(0, 1fr);
+  padding: 8px 10px;
+}
+
+.fact-block:last-child {
+  border-bottom: 0;
+}
+
+.fact-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.fact-block strong {
+  overflow-wrap: anywhere;
+}
+
+.email-body {
+  background: var(--panel-strong);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  color: var(--text);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 .token-result {
   background: #ecfdf3;
   border: 1px solid #a6d8b7;
@@ -834,6 +932,10 @@ button:focus-visible {
   .toolbar,
   .detail-controls {
     grid-template-columns: 1fr;
+  }
+
+  .email-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-row {
