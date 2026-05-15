@@ -39,7 +39,9 @@ go run ./cmd/pemmece \
 ```
 
 The same values can be supplied with `PEMMECE_ADDR`, `PEMMECE_DB`,
-`PEMMECE_TLS_CERT`, and `PEMMECE_TLS_KEY`.
+`PEMMECE_TLS_CERT`, and `PEMMECE_TLS_KEY`. At startup, Pemmece also loads a
+repo-local `.env` file when present; existing process environment variables take
+precedence over `.env` values.
 
 Email notifications are enabled when SMTP is configured. The app enqueues email
 jobs durably in SQLite when ticket events happen, then a background worker sends

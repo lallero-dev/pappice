@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +20,10 @@ import (
 )
 
 func main() {
+	if err := loadDotEnv(".env"); err != nil {
+		log.Fatalf("load .env: %v", err)
+	}
+
 	addr := flag.String("addr", envOr("PEMMECE_ADDR", "127.0.0.1:8388"), "HTTP listen address")
 	dbPath := flag.String("db", envOr("PEMMECE_DB", "pemmece.db"), "path to SQLite database file")
 	tlsCert := flag.String("tls-cert", envOr("PEMMECE_TLS_CERT", ""), "TLS certificate path")
@@ -114,6 +120,66 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown: %v", err)
 	}
+}
+
+func loadDotEnv(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		index := strings.Index(line, "=")
+		if index < 1 {
+			return fmt.Errorf("%s:%d: expected KEY=VALUE", path, lineNumber)
+		}
+		key := strings.TrimSpace(line[:index])
+		value, err := parseDotEnvValue(strings.TrimSpace(line[index+1:]))
+		if err != nil {
+			return fmt.Errorf("%s:%d: %w", path, lineNumber, err)
+		}
+		if key == "" {
+			return fmt.Errorf("%s:%d: empty key", path, lineNumber)
+		}
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("%s:%d: %w", path, lineNumber, err)
+		}
+	}
+	return scanner.Err()
+}
+
+func parseDotEnvValue(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(value, `"`) {
+		if !strings.HasSuffix(value, `"`) {
+			return "", fmt.Errorf("unterminated quoted value")
+		}
+		return strconv.Unquote(value)
+	}
+	if strings.HasPrefix(value, `'`) {
+		if !strings.HasSuffix(value, `'`) {
+			return "", fmt.Errorf("unterminated quoted value")
+		}
+		return value[1 : len(value)-1], nil
+	}
+	return value, nil
 }
 
 func envOr(key, fallback string) string {

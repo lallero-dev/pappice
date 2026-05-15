@@ -2,5 +2,10 @@
 /pemmece-data.json
 /pemmece.db
 /pemmece.db-*
+/localhost.pem
+/localhost-key.pem
 /tmp/
+.env
+.env.local
+.env.*.local
 *.test

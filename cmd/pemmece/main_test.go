@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -28,5 +30,40 @@ func TestEnvHelpers(t *testing.T) {
 	}
 	if got := envInt("PEMMECE_TEST_MISSING", 9); got != 9 {
 		t.Fatalf("envInt missing fallback = %d", got)
+	}
+}
+
+func TestLoadDotEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	content := `
+# comments and blanks are ignored
+PEMMECE_ENV_PLAIN=plain
+PEMMECE_ENV_QUOTED="quoted value"
+PEMMECE_ENV_SINGLE='single value'
+export PEMMECE_ENV_EXPORTED=exported
+PEMMECE_ENV_KEEP=file-value
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write env: %v", err)
+	}
+	t.Setenv("PEMMECE_ENV_KEEP", "external-value")
+
+	if err := loadDotEnv(path); err != nil {
+		t.Fatalf("load env: %v", err)
+	}
+	if got := os.Getenv("PEMMECE_ENV_PLAIN"); got != "plain" {
+		t.Fatalf("plain = %q", got)
+	}
+	if got := os.Getenv("PEMMECE_ENV_QUOTED"); got != "quoted value" {
+		t.Fatalf("quoted = %q", got)
+	}
+	if got := os.Getenv("PEMMECE_ENV_SINGLE"); got != "single value" {
+		t.Fatalf("single = %q", got)
+	}
+	if got := os.Getenv("PEMMECE_ENV_EXPORTED"); got != "exported" {
+		t.Fatalf("exported = %q", got)
+	}
+	if got := os.Getenv("PEMMECE_ENV_KEEP"); got != "external-value" {
+		t.Fatalf("keep = %q", got)
 	}
 }
