@@ -22,35 +22,37 @@ var (
 )
 
 type Issue struct {
-	ID             int64      `json:"id"`
-	ProjectID      int64      `json:"project_id"`
-	ProjectKey     string     `json:"project_key"`
-	Number         int64      `json:"number"`
-	Key            string     `json:"key"`
-	Title          string     `json:"title"`
-	Description    string     `json:"description"`
-	Project        string     `json:"project"`
-	Status         string     `json:"status"`
-	Severity       string     `json:"-"`
-	Priority       string     `json:"priority"`
-	Assignee       string     `json:"assignee"`
-	Reporter       string     `json:"requester"`
-	Source         string     `json:"source"`
-	RequesterName  string     `json:"requester_name,omitempty"`
-	RequesterEmail string     `json:"requester_email,omitempty"`
-	CustomerToken  string     `json:"-"`
-	Comments       []Comment  `json:"comments"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	ClosedAt       *time.Time `json:"closed_at,omitempty"`
+	ID             int64        `json:"id"`
+	ProjectID      int64        `json:"project_id"`
+	ProjectKey     string       `json:"project_key"`
+	Number         int64        `json:"number"`
+	Key            string       `json:"key"`
+	Title          string       `json:"title"`
+	Description    string       `json:"description"`
+	Project        string       `json:"project"`
+	Status         string       `json:"status"`
+	Severity       string       `json:"-"`
+	Priority       string       `json:"priority"`
+	Assignee       string       `json:"assignee"`
+	Reporter       string       `json:"requester"`
+	Source         string       `json:"source"`
+	RequesterName  string       `json:"requester_name,omitempty"`
+	RequesterEmail string       `json:"requester_email,omitempty"`
+	CustomerToken  string       `json:"-"`
+	Attachments    []Attachment `json:"attachments,omitempty"`
+	Comments       []Comment    `json:"comments"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	ClosedAt       *time.Time   `json:"closed_at,omitempty"`
 }
 
 type Comment struct {
-	ID         int64     `json:"id"`
-	Author     string    `json:"author"`
-	Body       string    `json:"body"`
-	Visibility string    `json:"visibility"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          int64        `json:"id"`
+	Author      string       `json:"author"`
+	Body        string       `json:"body"`
+	Visibility  string       `json:"visibility"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
 }
 
 type CreateIssue struct {
@@ -83,9 +85,11 @@ type AddComment struct {
 }
 
 type SaveIssueInput struct {
-	IssueID int64
-	Patch   UpdateIssue
-	Comment *AddComment
+	IssueID          int64
+	Patch            UpdateIssue
+	Comment          *AddComment
+	Attachments      []CreateAttachment
+	AttachmentUserID int64
 }
 
 type SaveIssueResult struct {
@@ -95,6 +99,7 @@ type SaveIssueResult struct {
 	HasComment        bool
 	PublicComment     bool
 	AssignmentChanged bool
+	CommentID         int64
 }
 
 type Filter struct {
@@ -128,6 +133,27 @@ type PublicUser struct {
 	PasswordResetRequired bool      `json:"password_reset_required"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type Attachment struct {
+	ID              int64     `json:"id"`
+	IssueID         int64     `json:"issue_id"`
+	CommentID       *int64    `json:"comment_id,omitempty"`
+	Filename        string    `json:"filename"`
+	ContentType     string    `json:"content_type"`
+	SizeBytes       int64     `json:"size_bytes"`
+	SHA256          string    `json:"sha256"`
+	StorageKey      string    `json:"-"`
+	CreatedByUserID int64     `json:"created_by_user_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type CreateAttachment struct {
+	Filename    string
+	ContentType string
+	SizeBytes   int64
+	SHA256      string
+	StorageKey  string
 }
 
 type CreateUser struct {
@@ -1066,6 +1092,19 @@ CREATE TABLE IF NOT EXISTS comments (
 	created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS attachments (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	comment_id INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+	filename TEXT NOT NULL,
+	content_type TEXT NOT NULL,
+	size_bytes INTEGER NOT NULL,
+	sha256 TEXT NOT NULL,
+	storage_key TEXT NOT NULL,
+	created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+	created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS webhooks (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
@@ -1116,6 +1155,9 @@ CREATE TABLE IF NOT EXISTS email_notifications (
 CREATE INDEX IF NOT EXISTS idx_issues_project_updated ON issues(project_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_comment ON attachments(comment_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_storage ON attachments(storage_key);
 CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(project_id);
 CREATE INDEX IF NOT EXISTS idx_account_links_user_purpose ON account_links(user_id, purpose, used_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);

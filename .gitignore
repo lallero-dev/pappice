@@ -2,6 +2,7 @@
 /pemmece-data.json
 /pemmece.db
 /pemmece.db-*
+/pemmece-uploads/
 /localhost.pem
 /localhost-key.pem
 /tmp/

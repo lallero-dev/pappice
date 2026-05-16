@@ -63,6 +63,7 @@ Important values:
 - `PEMMECE_PUBLIC_URL`: public HTTPS URL used in emails
 - `PEMMECE_SESSION_TTL`: browser session lifetime, default `336h`
 - `PEMMECE_BRAND_NAME`: display name for the deployed instance
+- `PEMMECE_UPLOAD_DIR`: directory for ticket attachments
 
 Use [.env.example](./.env.example) as the complete reference.
 
@@ -72,6 +73,12 @@ Set `PEMMECE_BRAND_NAME`, `PEMMECE_BRAND_SUBTITLE`, `PEMMECE_BRAND_MARK`, and
 `PEMMECE_BRAND_COLOR` to brand a deployment, for example `lallero.dev`.
 Branding changes the visible instance identity without changing the software
 name or requiring a custom build.
+
+## Attachments
+
+Ticket descriptions and replies can include files. Files are stored on disk in
+`PEMMECE_UPLOAD_DIR`; SQLite stores only metadata and access rules. Back up the
+database and upload directory together.
 
 ## Email
 

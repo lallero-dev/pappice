@@ -11,6 +11,10 @@ import (
 )
 
 func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
+	return s.CreateIssueWithAttachments(input, nil, 0)
+}
+
+func (s *Store) CreateIssueWithAttachments(input CreateIssue, attachments []CreateAttachment, attachmentUserID int64) (Issue, error) {
 	now := time.Now().UTC()
 	source := defaultString(input.Source, "staff")
 	if !isValid(validIssueSources, source) {
@@ -91,6 +95,9 @@ func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
 		return Issue{}, err
 	}
 	issue.ID, _ = result.LastInsertId()
+	if err := insertAttachmentsTx(tx, issue.ID, nil, attachmentUserID, attachments, now); err != nil {
+		return Issue{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Issue{}, err
 	}
@@ -226,12 +233,14 @@ func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
 
 func (s *Store) SaveIssue(input SaveIssueInput) (SaveIssueResult, error) {
 	hasPatch := issuePatchPresent(input.Patch)
-	hasComment := input.Comment != nil && strings.TrimSpace(input.Comment.Body) != ""
+	hasAttachments := len(input.Attachments) > 0
+	hasCommentBody := input.Comment != nil && strings.TrimSpace(input.Comment.Body) != ""
+	hasComment := input.Comment != nil && (hasCommentBody || hasAttachments)
 	if !hasPatch && input.Comment != nil && !hasComment {
-		_, _, err := normalizeComment(*input.Comment)
+		_, _, err := normalizeComment(*input.Comment, false)
 		return SaveIssueResult{}, err
 	}
-	if !hasPatch && !hasComment {
+	if !hasPatch && !hasComment && !hasAttachments {
 		return SaveIssueResult{}, fmt.Errorf("%w: issue changes or comment are required", ErrValidation)
 	}
 	tx, err := s.db.Begin()
@@ -264,19 +273,30 @@ func (s *Store) SaveIssue(input SaveIssueInput) (SaveIssueResult, error) {
 		}
 	}
 	if hasComment {
-		comment, publicComment, err := normalizeComment(*input.Comment)
+		comment, publicComment, err := normalizeComment(*input.Comment, hasAttachments)
 		if err != nil {
 			return SaveIssueResult{}, err
 		}
-		if err := addCommentTx(tx, input.IssueID, comment, now); err != nil {
+		commentID, err := addCommentTx(tx, input.IssueID, comment, now)
+		if err != nil {
 			return SaveIssueResult{}, err
 		}
+		result.CommentID = commentID
 		result.PublicComment = publicComment
-		if !hasPatch {
-			current.UpdatedAt = now
-			if err := updateIssueTimestampTx(tx, input.IssueID, now); err != nil {
-				return SaveIssueResult{}, err
-			}
+	}
+	if hasAttachments {
+		var commentID *int64
+		if result.CommentID > 0 {
+			commentID = &result.CommentID
+		}
+		if err := insertAttachmentsTx(tx, input.IssueID, commentID, input.AttachmentUserID, input.Attachments, now); err != nil {
+			return SaveIssueResult{}, err
+		}
+	}
+	if !hasPatch && (hasComment || hasAttachments) {
+		current.UpdatedAt = now
+		if err := updateIssueTimestampTx(tx, input.IssueID, now); err != nil {
+			return SaveIssueResult{}, err
 		}
 	}
 
@@ -359,9 +379,9 @@ func (s *Store) AddComment(id int64, input AddComment) (Issue, error) {
 	return result.Issue, nil
 }
 
-func normalizeComment(input AddComment) (AddComment, bool, error) {
+func normalizeComment(input AddComment, allowEmptyBody bool) (AddComment, bool, error) {
 	body := strings.TrimSpace(input.Body)
-	if body == "" {
+	if body == "" && !allowEmptyBody {
 		return AddComment{}, false, fmt.Errorf("%w: comment body is required", ErrValidation)
 	}
 	author := defaultString(input.Author, "anonymous")
@@ -372,18 +392,19 @@ func normalizeComment(input AddComment) (AddComment, bool, error) {
 	return AddComment{Author: author, Body: body, Visibility: visibility}, visibility == "public", nil
 }
 
-func addCommentTx(tx *sql.Tx, id int64, input AddComment, now time.Time) error {
+func addCommentTx(tx *sql.Tx, id int64, input AddComment, now time.Time) (int64, error) {
 	result, err := tx.Exec(
 		`INSERT INTO comments (issue_id, author, body, visibility, created_at) VALUES (?, ?, ?, ?, ?)`,
 		id, input.Author, input.Body, input.Visibility, formatTime(now),
 	)
 	if err != nil {
-		return normalizeSQLError(err)
+		return 0, normalizeSQLError(err)
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
+		return 0, ErrNotFound
 	}
-	return nil
+	commentID, _ := result.LastInsertId()
+	return commentID, nil
 }
 
 func updateIssueTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
@@ -401,6 +422,61 @@ func (s *Store) IssueIDByProjectNumber(projectID, number int64) (int64, bool) {
 	var id int64
 	err := s.db.QueryRow(`SELECT id FROM issues WHERE project_id = ? AND number = ?`, projectID, number).Scan(&id)
 	return id, err == nil
+}
+
+func insertAttachmentsTx(tx *sql.Tx, issueID int64, commentID *int64, userID int64, attachments []CreateAttachment, now time.Time) error {
+	for _, attachment := range attachments {
+		filename := strings.TrimSpace(attachment.Filename)
+		if filename == "" {
+			return fmt.Errorf("%w: attachment filename is required", ErrValidation)
+		}
+		contentType := strings.TrimSpace(attachment.ContentType)
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		storageKey := strings.TrimSpace(attachment.StorageKey)
+		if storageKey == "" {
+			return fmt.Errorf("%w: attachment storage key is required", ErrValidation)
+		}
+		if attachment.SizeBytes < 0 {
+			return fmt.Errorf("%w: invalid attachment size", ErrValidation)
+		}
+		var comment sql.NullInt64
+		if commentID != nil && *commentID > 0 {
+			comment = sql.NullInt64{Int64: *commentID, Valid: true}
+		}
+		var createdBy sql.NullInt64
+		if userID > 0 {
+			createdBy = sql.NullInt64{Int64: userID, Valid: true}
+		}
+		_, err := tx.Exec(`
+			INSERT INTO attachments (
+				issue_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			issueID, comment, filename, contentType, attachment.SizeBytes, strings.TrimSpace(attachment.SHA256),
+			storageKey, createdBy, formatTime(now),
+		)
+		if err != nil {
+			return normalizeSQLError(err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) GetAttachment(id int64) (Attachment, error) {
+	row := s.db.QueryRow(`
+		SELECT id, issue_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
+		FROM attachments
+		WHERE id = ?`, id)
+	attachment, err := scanAttachment(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Attachment{}, ErrNotFound
+	}
+	if err != nil {
+		return Attachment{}, err
+	}
+	return attachment, nil
 }
 
 func (s *Store) getIssue(id int64) (Issue, error) {
@@ -442,6 +518,8 @@ type issueQueryer interface {
 func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 	issue.Key = fmt.Sprintf("%s-%d", issue.ProjectKey, issue.Number)
 	issue.Project = issue.ProjectKey
+	issue.Attachments = nil
+	issue.Comments = nil
 
 	commentRows, err := queryer.Query(`SELECT id, author, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
 	if err != nil {
@@ -459,7 +537,37 @@ func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 			issue.Comments = append(issue.Comments, comment)
 		}
 	}
-	return commentRows.Err()
+	if err := commentRows.Err(); err != nil {
+		return err
+	}
+
+	commentIndexes := make(map[int64]int, len(issue.Comments))
+	for i := range issue.Comments {
+		commentIndexes[issue.Comments[i].ID] = i
+	}
+	attachmentRows, err := queryer.Query(`
+		SELECT id, issue_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
+		FROM attachments
+		WHERE issue_id = ?
+		ORDER BY created_at, id`, issue.ID)
+	if err != nil {
+		return err
+	}
+	defer attachmentRows.Close()
+	for attachmentRows.Next() {
+		attachment, err := scanAttachment(attachmentRows)
+		if err != nil {
+			return err
+		}
+		if attachment.CommentID == nil {
+			issue.Attachments = append(issue.Attachments, attachment)
+			continue
+		}
+		if index, ok := commentIndexes[*attachment.CommentID]; ok {
+			issue.Comments[index].Attachments = append(issue.Comments[index].Attachments, attachment)
+		}
+	}
+	return attachmentRows.Err()
 }
 
 const issueSelectSQL = `
@@ -490,6 +598,26 @@ func scanIssue(rows scanner) (Issue, error) {
 	issue.Key = fmt.Sprintf("%s-%d", issue.ProjectKey, issue.Number)
 	issue.Project = issue.ProjectKey
 	return issue, nil
+}
+
+func scanAttachment(rows scanner) (Attachment, error) {
+	var attachment Attachment
+	var commentID, createdBy sql.NullInt64
+	var created string
+	if err := rows.Scan(
+		&attachment.ID, &attachment.IssueID, &commentID, &attachment.Filename, &attachment.ContentType,
+		&attachment.SizeBytes, &attachment.SHA256, &attachment.StorageKey, &createdBy, &created,
+	); err != nil {
+		return Attachment{}, err
+	}
+	if commentID.Valid {
+		attachment.CommentID = &commentID.Int64
+	}
+	if createdBy.Valid {
+		attachment.CreatedByUserID = createdBy.Int64
+	}
+	attachment.CreatedAt = parseTime(created)
+	return attachment, nil
 }
 
 func publicComments(comments []Comment) []Comment {

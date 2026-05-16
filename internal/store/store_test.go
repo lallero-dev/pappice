@@ -200,6 +200,68 @@ func TestSaveIssueIsTransactional(t *testing.T) {
 	}
 }
 
+func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	projectID := tracker.ListProjects(admin)[0].ID
+
+	issue, err := tracker.CreateIssueWithAttachments(CreateIssue{
+		ProjectID: projectID,
+		Title:     "Attached ticket",
+	}, []CreateAttachment{{
+		Filename:    "request.txt",
+		ContentType: "text/plain",
+		SizeBytes:   12,
+		SHA256:      "ticket-hash",
+		StorageKey:  "ti/ck/ticket-hash",
+	}}, admin.ID)
+	if err != nil {
+		t.Fatalf("create issue with attachment: %v", err)
+	}
+	if len(issue.Attachments) != 1 || issue.Attachments[0].Filename != "request.txt" || issue.Attachments[0].CreatedByUserID != admin.ID {
+		t.Fatalf("ticket attachments = %#v", issue.Attachments)
+	}
+
+	saved, err := tracker.SaveIssue(SaveIssueInput{
+		IssueID: issue.ID,
+		Comment: &AddComment{
+			Author:     "Admin",
+			Visibility: "internal",
+		},
+		Attachments: []CreateAttachment{{
+			Filename:    "diagnosis.txt",
+			ContentType: "text/plain",
+			SizeBytes:   10,
+			SHA256:      "comment-hash",
+			StorageKey:  "co/mm/comment-hash",
+		}},
+		AttachmentUserID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("save file-only comment: %v", err)
+	}
+	if !saved.HasComment || saved.CommentID == 0 || len(saved.Issue.Comments) != 1 {
+		t.Fatalf("save result = %#v", saved)
+	}
+	comment := saved.Issue.Comments[0]
+	if comment.Body != "" || comment.Visibility != "internal" || len(comment.Attachments) != 1 || comment.Attachments[0].Filename != "diagnosis.txt" {
+		t.Fatalf("comment attachments = %#v", comment)
+	}
+	attachment, err := tracker.GetAttachment(comment.Attachments[0].ID)
+	if err != nil {
+		t.Fatalf("get attachment: %v", err)
+	}
+	if attachment.IssueID != issue.ID || attachment.CommentID == nil || *attachment.CommentID != saved.CommentID {
+		t.Fatalf("attachment = %#v", attachment)
+	}
+}
+
 func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.json"))
 	if err != nil {

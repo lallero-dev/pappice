@@ -28,6 +28,9 @@ const (
 	defaultBrandName       = "Pemmece"
 	defaultBrandSubtitle   = "customer support"
 	defaultBrandColor      = "#5bb974"
+	defaultUploadDir       = "pemmece-uploads"
+	defaultMaxUploadSize   = 10 << 20
+	defaultMaxUploadFiles  = 5
 )
 
 type RateLimit struct {
@@ -43,6 +46,10 @@ type Options struct {
 	EmailBatchDelay       time.Duration
 	PublicURL             string
 	SessionTTL            time.Duration
+	UploadDir             string
+	MaxUploadSize         int64
+	MaxUploadFiles        int
+	AllowedUploadTypes    []string
 	LoginRateLimit        RateLimit
 	AccountLinkRateLimit  RateLimit
 }
@@ -110,6 +117,7 @@ func New(tracker *store.Store, opts ...Options) http.Handler {
 		options.SessionTTL = defaultSessionTTL
 	}
 	options.Branding = normalizeBranding(options.Branding)
+	options = normalizeUploadOptions(options)
 	options.LoginRateLimit = withDefaultRateLimit(options.LoginRateLimit, 10, time.Minute)
 	options.AccountLinkRateLimit = withDefaultRateLimit(options.AccountLinkRateLimit, 10, time.Minute)
 	s := &Server{
@@ -149,6 +157,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/projects/", s.handleProjectByID)
 	s.mux.HandleFunc("/api/tickets", s.handleTickets)
 	s.mux.HandleFunc("/api/tickets/", s.handleTicketByID)
+	s.mux.HandleFunc("/api/attachments/", s.handleAttachmentByID)
 	s.mux.HandleFunc("/api/users", s.handleUsers)
 	s.mux.HandleFunc("/api/users/", s.handleUserByID)
 	s.mux.HandleFunc("/api/tokens", s.handleTokens)
@@ -240,6 +249,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"project_roles":  store.ProjectRoles(),
 		"webhook_events": store.Events(),
 		"email_enabled":  s.options.EmailNotifications,
+		"uploads":        s.publicUploadConfig(),
 	})
 }
 
@@ -711,16 +721,37 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			return
 		}
 		var input store.CreateIssue
-		if !decodeJSON(w, r, &input) {
-			return
+		var uploads []storedUpload
+		if isMultipartRequest(r) {
+			if !s.parseMultipartForm(w, r) {
+				return
+			}
+			defer cleanupMultipartForm(r)
+			var err error
+			input, err = multipartCreateIssueInput(r, projectID)
+			if err != nil {
+				respondStoreError(w, err)
+				return
+			}
+			var ok bool
+			uploads, ok = s.saveRequestAttachments(w, r)
+			if !ok {
+				return
+			}
+		} else {
+			if !decodeJSON(w, r, &input) {
+				return
+			}
+			input.ProjectID = projectID
 		}
-		input.ProjectID = projectID
 		customerTicket, ok := s.prepareIssueInput(w, auth.User, projectID, &input)
 		if !ok {
+			cleanupStoredUploads(uploads)
 			return
 		}
-		issue, err := s.store.CreateIssue(input)
+		issue, err := s.store.CreateIssueWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
 		if err != nil {
+			cleanupStoredUploads(uploads)
 			respondStoreError(w, err)
 			return
 		}
@@ -752,8 +783,22 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]any{"tickets": s.issuesForUser(auth.User, issues)})
 	case http.MethodPost:
 		var input store.CreateIssue
-		if !decodeJSON(w, r, &input) {
-			return
+		var uploads []storedUpload
+		if isMultipartRequest(r) {
+			if !s.parseMultipartForm(w, r) {
+				return
+			}
+			defer cleanupMultipartForm(r)
+			var err error
+			input, err = multipartCreateIssueInput(r, 0)
+			if err != nil {
+				respondStoreError(w, err)
+				return
+			}
+		} else {
+			if !decodeJSON(w, r, &input) {
+				return
+			}
 		}
 		if !s.canCreateIssue(auth.User, input.ProjectID) {
 			respondError(w, http.StatusForbidden, "product write access is required")
@@ -763,8 +808,16 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		issue, err := s.store.CreateIssue(input)
+		if isMultipartRequest(r) {
+			var ok bool
+			uploads, ok = s.saveRequestAttachments(w, r)
+			if !ok {
+				return
+			}
+		}
+		issue, err := s.store.CreateIssueWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
 		if err != nil {
+			cleanupStoredUploads(uploads)
 			respondStoreError(w, err)
 			return
 		}
@@ -820,11 +873,26 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, issue))
 	case http.MethodPatch:
 		var input ticketPatchInput
-		if !decodeJSON(w, r, &input) {
-			return
+		var uploads []storedUpload
+		if isMultipartRequest(r) {
+			if !s.parseMultipartForm(w, r) {
+				return
+			}
+			defer cleanupMultipartForm(r)
+			input = multipartTicketPatchInput(r)
+			var ok bool
+			uploads, ok = s.saveRequestAttachments(w, r)
+			if !ok {
+				return
+			}
+		} else {
+			if !decodeJSON(w, r, &input) {
+				return
+			}
 		}
-		updated, ok := s.applyTicketPatch(w, auth, issue, input)
+		updated, ok := s.applyTicketPatch(w, auth, issue, input, attachmentInputs(uploads), auth.User.ID)
 		if !ok {
+			cleanupStoredUploads(uploads)
 			return
 		}
 		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, updated))
@@ -833,9 +901,13 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 	}
 }
 
-func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue store.Issue, input ticketPatchInput) (store.Issue, bool) {
+func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue store.Issue, input ticketPatchInput, attachments []store.CreateAttachment, attachmentUserID int64) (store.Issue, bool) {
 	hasPatch := input.hasTicketPatch()
-	hasComment := input.Comment != nil && strings.TrimSpace(input.Comment.Body) != ""
+	hasAttachments := len(attachments) > 0
+	if hasAttachments && input.Comment == nil {
+		input.Comment = &store.AddComment{Visibility: "public"}
+	}
+	hasComment := input.Comment != nil && (strings.TrimSpace(input.Comment.Body) != "" || hasAttachments)
 	if !hasPatch && !hasComment {
 		respondError(w, http.StatusBadRequest, "ticket changes or comment are required")
 		return store.Issue{}, false
@@ -862,9 +934,11 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 	}
 
 	result, err := s.store.SaveIssue(store.SaveIssueInput{
-		IssueID: issue.ID,
-		Patch:   input.updateIssue(),
-		Comment: comment,
+		IssueID:          issue.ID,
+		Patch:            input.updateIssue(),
+		Comment:          comment,
+		Attachments:      attachments,
+		AttachmentUserID: attachmentUserID,
 	})
 	if err != nil {
 		respondStoreError(w, err)
@@ -922,25 +996,33 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		return
 	}
 	var input store.AddComment
-	if !decodeJSON(w, r, &input) {
-		return
+	var uploads []storedUpload
+	if isMultipartRequest(r) {
+		if !s.parseMultipartForm(w, r) {
+			return
+		}
+		defer cleanupMultipartForm(r)
+		input = multipartCommentInput(r)
+		var ok bool
+		uploads, ok = s.saveRequestAttachments(w, r)
+		if !ok {
+			return
+		}
+	} else {
+		if !decodeJSON(w, r, &input) {
+			return
+		}
 	}
 	input.Visibility = defaultString(input.Visibility, "public")
 	if input.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
 		respondError(w, http.StatusForbidden, "agent access is required for internal notes")
+		cleanupStoredUploads(uploads)
 		return
 	}
-	input.Author = defaultString(auth.User.DisplayName, auth.User.Username)
-	updated, err := s.store.AddComment(issue.ID, input)
-	if err != nil {
-		respondStoreError(w, err)
+	updated, ok := s.applyTicketPatch(w, auth, issue, ticketPatchInput{Comment: &input}, attachmentInputs(uploads), auth.User.ID)
+	if !ok {
+		cleanupStoredUploads(uploads)
 		return
-	}
-	if input.Visibility == "public" {
-		s.emitIssueEvent("ticket.commented", updated, auth.User)
-		if !s.isSupportTicketRequester(auth.User, issue) {
-			s.enqueueRequesterEmail("ticket.commented", updated, defaultString(auth.User.DisplayName, auth.User.Username))
-		}
 	}
 	respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, updated))
 }

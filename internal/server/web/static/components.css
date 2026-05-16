@@ -345,6 +345,52 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.attachment-input {
+  background: #f8fafc;
+  border-style: dashed;
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attachment-list.empty {
+  display: none;
+}
+
+.attachment-link {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #d8e2ec;
+  border-radius: 999px;
+  color: #1b5f9e;
+  display: inline-flex;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 5px 10px;
+  text-decoration: none;
+}
+
+.attachment-link:hover {
+  background: #edf6ff;
+  border-color: #9fc5e8;
+}
+
+.attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-size {
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .requester-block {
   background: #f8fafc;
   border: 1px solid #dde4ec;

@@ -44,6 +44,10 @@ func main() {
 	smtpTLSMode := flag.String("smtp-tls-mode", envOr("PEMMECE_SMTP_TLS_MODE", "starttls"), "SMTP TLS mode: starttls, tls, or none")
 	emailBatchDelay := flag.Duration("email-batch-delay", envDuration("PEMMECE_EMAIL_BATCH_DELAY", 20*time.Second), "delay before sending coalesced ticket notification emails")
 	sessionTTL := flag.Duration("session-ttl", envDuration("PEMMECE_SESSION_TTL", 14*24*time.Hour), "browser session lifetime")
+	uploadDir := flag.String("upload-dir", envOr("PEMMECE_UPLOAD_DIR", "pemmece-uploads"), "directory for ticket attachment files")
+	maxUploadSize := flag.Int64("max-upload-size", envInt64("PEMMECE_MAX_UPLOAD_SIZE", 10<<20), "maximum bytes per attachment")
+	maxUploadFiles := flag.Int("max-upload-files", envInt("PEMMECE_MAX_UPLOAD_FILES", 5), "maximum files per upload request")
+	allowedUploadTypes := flag.String("allowed-upload-types", envOr("PEMMECE_ALLOWED_UPLOAD_TYPES", ""), "comma-separated allowed attachment MIME types")
 	loginRateLimit := flag.Int("login-rate-limit", envInt("PEMMECE_LOGIN_RATE_LIMIT", 10), "login attempts allowed per rate window and user/IP")
 	loginRateWindow := flag.Duration("login-rate-window", envDuration("PEMMECE_LOGIN_RATE_WINDOW", time.Minute), "login rate limit window")
 	accountLinkRateLimit := flag.Int("account-link-rate-limit", envInt("PEMMECE_ACCOUNT_LINK_RATE_LIMIT", 10), "account link attempts allowed per rate window and token/IP")
@@ -104,6 +108,10 @@ func main() {
 			EmailBatchDelay:      *emailBatchDelay,
 			PublicURL:            *publicURL,
 			SessionTTL:           *sessionTTL,
+			UploadDir:            *uploadDir,
+			MaxUploadSize:        *maxUploadSize,
+			MaxUploadFiles:       *maxUploadFiles,
+			AllowedUploadTypes:   splitCSV(*allowedUploadTypes),
 			LoginRateLimit:       server.RateLimit{Limit: *loginRateLimit, Window: *loginRateWindow},
 			AccountLinkRateLimit: server.RateLimit{Limit: *accountLinkRateLimit, Window: *accountLinkRateWindow},
 		}),
@@ -226,6 +234,18 @@ func envInt(key string, fallback int) int {
 	return parsed
 }
 
+func envInt64(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
 func envDuration(key string, fallback time.Duration) time.Duration {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -236,4 +256,16 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	return result
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -989,6 +990,110 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	}
 }
 
+func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
+	_, server, client := newTestServer(t, Options{UploadDir: t.TempDir()})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "customer",
+		"email":    "customer@example.test",
+		"password": "correct horse",
+		"role":     "customer",
+	})
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, customerID, "customer")
+	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
+
+	resp, body = doMultipart(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]string{
+		"project_id":  itoa(projectID),
+		"title":       "Attachment ticket",
+		"description": "Please see the attached log",
+	}, []testUpload{{
+		Field:    "attachments",
+		Filename: "request.txt",
+		Body:     "customer log content",
+	}}, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	var created store.Issue
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode created issue: %v", err)
+	}
+	if len(created.Attachments) != 1 || created.Attachments[0].Filename != "request.txt" {
+		t.Fatalf("created attachments = %#v body=%s", created.Attachments, body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(created.Attachments[0].ID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("customer log content")) || !strings.Contains(resp.Header.Get("Content-Disposition"), "request.txt") {
+		t.Fatalf("download response headers=%v body=%s", resp.Header, body)
+	}
+
+	resp, body = doMultipart(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]string{
+		"body":       "Internal file",
+		"visibility": "internal",
+	}, []testUpload{{
+		Field:    "attachments",
+		Filename: "internal.txt",
+		Body:     "internal attachment content",
+	}}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	var withInternal store.Issue
+	if err := json.Unmarshal(body, &withInternal); err != nil {
+		t.Fatalf("decode internal issue: %v", err)
+	}
+	internalAttachmentID := int64(0)
+	for _, comment := range withInternal.Comments {
+		if comment.Visibility == "internal" && len(comment.Attachments) == 1 {
+			internalAttachmentID = comment.Attachments[0].ID
+		}
+	}
+	if internalAttachmentID == 0 {
+		t.Fatalf("internal attachment missing: %#v", withInternal.Comments)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(internalAttachmentID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("internal attachment content")) {
+		t.Fatalf("admin internal download body=%s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(internalAttachmentID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(created.ID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("internal.txt")) || bytes.Contains(body, []byte("internal attachment content")) {
+		t.Fatalf("customer ticket leaked internal attachment: %s", body)
+	}
+
+	resp, body = doMultipart(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]string{
+		"visibility": "public",
+	}, []testUpload{{
+		Field:    "attachments",
+		Filename: "public.txt",
+		Body:     "public attachment content",
+	}}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	var withPublic store.Issue
+	if err := json.Unmarshal(body, &withPublic); err != nil {
+		t.Fatalf("decode public issue: %v", err)
+	}
+	publicAttachmentID := int64(0)
+	for _, comment := range withPublic.Comments {
+		if comment.Visibility == "public" && len(comment.Attachments) == 1 && comment.Attachments[0].Filename == "public.txt" {
+			publicAttachmentID = comment.Attachments[0].ID
+		}
+	}
+	if publicAttachmentID == 0 {
+		t.Fatalf("public file-only comment missing: %#v", withPublic.Comments)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(publicAttachmentID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("public attachment content")) {
+		t.Fatalf("customer public download body=%s", body)
+	}
+}
+
 func TestRequesterNotificationPolicy(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{
 		EmailNotifications: true,
@@ -1144,6 +1249,63 @@ func addProjectMember(t *testing.T, client *http.Client, baseURL string, cookie 
 		"role":    role,
 	}, cookie, csrf, baseURL)
 	requireStatus(t, resp, body, http.StatusCreated)
+}
+
+type testUpload struct {
+	Field    string
+	Filename string
+	Body     string
+}
+
+func doMultipart(t *testing.T, client *http.Client, method, rawURL string, fields map[string]string, files []testUpload, cookie *http.Cookie, csrf, origin string) (*http.Response, []byte) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write multipart field: %v", err)
+		}
+	}
+	for _, file := range files {
+		field := file.Field
+		if field == "" {
+			field = "attachments"
+		}
+		part, err := writer.CreateFormFile(field, file.Filename)
+		if err != nil {
+			t.Fatalf("create multipart file: %v", err)
+		}
+		if _, err := io.WriteString(part, file.Body); err != nil {
+			t.Fatalf("write multipart file: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req, err := http.NewRequest(method, rawURL, &body)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	if csrf != "" {
+		req.Header.Set("X-Pemmece-CSRF", csrf)
+	}
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp, data
 }
 
 func doJSON(t *testing.T, client *http.Client, method, rawURL string, payload any, cookie *http.Cookie, csrf, origin string) (*http.Response, []byte) {

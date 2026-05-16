@@ -47,7 +47,12 @@ const state = {
     priorities: [],
     roles: [],
     projectRoles: [],
-    webhookEvents: []
+    webhookEvents: [],
+    uploads: {
+      max_size_bytes: 10 * 1024 * 1024,
+      max_files: 5,
+      allowed_types: []
+    }
   },
   filters: {
     q: "",
@@ -186,10 +191,11 @@ function contrastColor(hex) {
 
 async function request(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
-  const headers = {
-    "Content-Type": "application/json",
-    ...options.headers
-  };
+  const bodyIsFormData = options.body instanceof FormData;
+  const headers = { ...(options.headers || {}) };
+  if (!bodyIsFormData && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   if (state.csrf && ["POST", "PATCH", "PUT", "DELETE"].includes(method)) {
     headers["X-Pemmece-CSRF"] = state.csrf;
   }
@@ -374,6 +380,7 @@ async function loadHealth() {
   state.meta.roles = meta.roles || [];
   state.meta.projectRoles = meta.project_roles || [];
   state.meta.webhookEvents = meta.webhook_events || [];
+  state.meta.uploads = meta.uploads || state.meta.uploads;
   state.branding = normalizeBranding(meta.branding);
   applyBranding();
   state.filters.statuses = state.filters.statuses.filter((status) => state.meta.statuses.includes(status));
@@ -822,19 +829,17 @@ function openTicketModal(issue = null) {
       projectId,
       creatableProjects
     }),
-    onSubmit: submittable ? async (data) => {
+    onSubmit: submittable ? async (data, form) => {
       if (creating) {
         const payload = ticketCreatePayload(data, projectId);
-        const created = await request(`/api/projects/${payload.project_id}/tickets`, {
-          method: "POST",
-          body: JSON.stringify(payload)
-        });
+        const body = ticketCreateRequestBody(payload, form);
+        const created = await request(`/api/projects/${payload.project_id}/tickets`, { method: "POST", body });
         state.selectedProjectId = payload.project_id;
         state.selectedId = created.id;
         await loadProjects();
         return;
       }
-      await saveTicketChanges(issue, data, { editable, canComment });
+      await saveTicketChanges(issue, data, { editable, canComment }, form);
     } : null
   });
   if (submittable) bindTicketSaveState({ issue, creating, projectId, editable, canComment });
@@ -864,10 +869,16 @@ function ticketModalContent({ issue, creating, editable, canComment, projectId, 
       placeholder: "Describe the request, impact, and useful context.",
       rows: 6
     }));
+    if (creating) {
+      main.append(ticketAttachmentField("Attachments", "attachments"));
+    } else if ((issue?.attachments || []).length > 0) {
+      main.append(attachmentList(issue.attachments));
+    }
   } else {
     main.append(
       el("h4", { className: "section-title" }, "Description"),
-      el("div", { className: "description" }, issue.description || "No description.")
+      el("div", { className: "description" }, issue.description || "No description."),
+      attachmentList(issue.attachments || [])
     );
   }
   if (!creating) {
@@ -937,6 +948,20 @@ function ticketTextareaField(label, name, value, options = {}) {
 
 function ticketSelectField(label, name, value, options, controlOptions = {}) {
   return ticketControlField(label, ticketSelectControl(name, value, options, controlOptions));
+}
+
+function ticketAttachmentField(label, name) {
+  const control = document.createElement("input");
+  control.type = "file";
+  control.name = name;
+  control.multiple = true;
+  control.className = "attachment-input";
+  control.dataset.ticketControl = "true";
+  const allowed = state.meta.uploads?.allowed_types || [];
+  if (allowed.length > 0 && !allowed.includes("*") && !allowed.includes("*/*")) {
+    control.accept = allowed.join(",");
+  }
+  return ticketControlField(label, control);
 }
 
 function ticketSelectControl(name, value, options, controlOptions = {}) {
@@ -1403,6 +1428,17 @@ function ticketCreatePayload(data, fallbackProjectId) {
   return payload;
 }
 
+function ticketCreateRequestBody(payload, form) {
+  const files = selectedTicketFiles(form);
+  if (files.length === 0) return JSON.stringify(payload);
+  const body = new FormData();
+  for (const [key, value] of Object.entries(payload)) {
+    if (value !== undefined && value !== null) body.append(key, value);
+  }
+  for (const file of files) body.append("attachments", file);
+  return body;
+}
+
 function ticketUpdatePatch(issue, data) {
   const next = {
     title: String(data.title || "").trim(),
@@ -1429,16 +1465,43 @@ function ticketCommentPayload(issue, data) {
   };
 }
 
-async function saveTicketChanges(issue, data, { editable, canComment }) {
+async function saveTicketChanges(issue, data, { editable, canComment }, form) {
   const patch = editable ? ticketUpdatePatch(issue, data) : {};
   const comment = canComment ? ticketCommentPayload(issue, data) : null;
-  if (Object.keys(patch).length === 0 && !comment) return;
-  if (editable) {
+  const files = selectedTicketFiles(form);
+  if (Object.keys(patch).length === 0 && !comment && files.length === 0) return;
+  if (files.length > 0) {
+    const body = ticketUpdateRequestBody(patch, comment, data, files);
+    const path = editable ? `/api/tickets/${issue.id}` : `/api/tickets/${issue.id}/comments`;
+    await request(path, { method: editable ? "PATCH" : "POST", body });
+  } else if (editable) {
     await request(`/api/tickets/${issue.id}`, { method: "PATCH", body: JSON.stringify({ ...patch, comment }) });
   } else if (comment) {
     await request(`/api/tickets/${issue.id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   }
   await loadIssues();
+}
+
+function ticketUpdateRequestBody(patch, comment, data, files) {
+  const body = new FormData();
+  for (const [key, value] of Object.entries(patch)) {
+    body.append(key, value);
+  }
+  if (comment || files.length > 0) {
+    body.append("body", comment?.body || "");
+    body.append("visibility", comment?.visibility || String(data.visibility || "public"));
+  }
+  for (const file of files) body.append("attachments", file);
+  return body;
+}
+
+function selectedTicketFiles(form) {
+  if (!form) return [];
+  const files = [];
+  form.querySelectorAll("input[type='file']").forEach((input) => {
+    files.push(...Array.from(input.files || []));
+  });
+  return files;
 }
 
 function bindTicketSaveState({ issue, creating, projectId, editable, canComment }) {
@@ -1450,7 +1513,8 @@ function bindTicketSaveState({ issue, creating, projectId, editable, canComment 
       return;
     }
     const hasTicketChanges = editable && Object.keys(ticketUpdatePatch(issue, data)).length > 0;
-    const hasComment = canComment && String(data.body || "").trim() !== "";
+    const hasFiles = selectedTicketFiles(els.modalHost.form).length > 0;
+    const hasComment = canComment && (String(data.body || "").trim() !== "" || hasFiles);
     els.modalHost.submitButton.disabled = (editable && !hasTitle) || (!hasTicketChanges && !hasComment);
   };
   els.modalHost.bodyNode.querySelectorAll("[data-ticket-control]").forEach((control) => {
@@ -1487,14 +1551,18 @@ function comments(issue) {
   for (const comment of issue.comments || []) {
     const item = el("div", { className: "comment" });
     item.classList.toggle("internal", comment.visibility === "internal");
-    item.append(
+    const nodes = [
       el("div", { className: "comment-head" }, [
         el("strong", {}, comment.author),
         el("span", { className: "comment-time" }, relativeTime(comment.created_at)),
         comment.visibility === "internal" ? badge("internal", "priority-normal") : el("span")
-      ]),
-      el("p", {}, comment.body)
-    );
+      ])
+    ];
+    if (String(comment.body || "").trim() !== "") {
+      nodes.push(el("p", {}, comment.body));
+    }
+    nodes.push(attachmentList(comment.attachments || []));
+    item.append(...nodes);
     list.append(item);
   }
   return list;
@@ -1513,12 +1581,36 @@ function commentComposer(issue) {
   visibility.dataset.ticketControl = "true";
   visibility.append(new Option("Public reply", "public"), new Option("Internal note", "internal"));
   visibility.value = "public";
+  const attachments = ticketAttachmentField("Attachments", "attachments");
   if (canEditTicket(issue)) {
-    wrap.append(body, el("div", { className: "comment-actions" }, [visibility]));
+    wrap.append(body, attachments, el("div", { className: "comment-actions" }, [visibility]));
     return wrap;
   }
-  wrap.append(body);
+  wrap.append(body, attachments);
   return wrap;
+}
+
+function attachmentList(attachments) {
+  if (!attachments || attachments.length === 0) return el("div", { className: "attachment-list empty" });
+  const list = el("div", { className: "attachment-list" });
+  for (const attachment of attachments) {
+    list.append(el("a", {
+      className: "attachment-link",
+      href: `/api/attachments/${attachment.id}`,
+      download: attachment.filename
+    }, [
+      el("span", { className: "attachment-name" }, attachment.filename || "Attachment"),
+      el("span", { className: "attachment-size" }, formatBytes(attachment.size_bytes || 0))
+    ]));
+  }
+  return list;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function updateUser(id, patch) {
