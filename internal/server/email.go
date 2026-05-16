@@ -318,21 +318,23 @@ func writeEmailBlocksHTML(out *strings.Builder, blocks []emailBlock) {
 	if !hasBlocks {
 		return
 	}
-	out.WriteString(`<tr><td style="padding:0 28px 20px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border-top:1px solid #e5ebf1;">`)
+	out.WriteString(`<tr><td style="padding:0 28px 20px;">`)
 	for _, block := range blocks {
 		body := strings.TrimSpace(block.Body)
 		if body == "" {
 			continue
 		}
 		title := defaultString(block.Title, "Details")
-		fmt.Fprintf(out, `<tr><td valign="top" style="padding:12px 12px 12px 0;border-bottom:1px solid #e5ebf1;color:#64748b;font-size:13px;font-weight:700;width:34%%;">%s</td><td style="padding:12px 0;border-bottom:1px solid #e5ebf1;">`, html.EscapeString(strings.TrimSpace(title)))
+		out.WriteString(`<div style="border-top:1px solid #e5ebf1;padding:14px 0;">`)
+		fmt.Fprintf(out, `<div style="margin:0 0 8px;color:#64748b;font-size:13px;line-height:1.4;"><span style="font-weight:700;">%s</span>`, html.EscapeString(strings.TrimSpace(title)))
 		if strings.TrimSpace(block.Meta) != "" {
-			fmt.Fprintf(out, `<div style="margin:0 0 8px;color:#64748b;font-size:13px;">%s</div>`, html.EscapeString(strings.TrimSpace(block.Meta)))
+			fmt.Fprintf(out, ` <span>%s</span>`, html.EscapeString(strings.TrimSpace(block.Meta)))
 		}
+		out.WriteString(`</div>`)
 		fmt.Fprintf(out, `<div style="margin:0;padding:14px 16px;background:#f8fafc;border:1px solid #dfe7ef;border-radius:6px;color:#1f2933;white-space:pre-wrap;">%s</div>`, emailHTMLLines(body))
-		out.WriteString(`</td></tr>`)
+		out.WriteString(`</div>`)
 	}
-	out.WriteString(`</table></td></tr>`)
+	out.WriteString(`</td></tr>`)
 }
 
 func emailHTMLLines(value string) string {

@@ -54,6 +54,9 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 	if strings.Contains(htmlBody, "Need <help>") {
 		t.Fatalf("html body did not escape title:\n%s", htmlBody)
 	}
+	if strings.Contains(htmlBody, `width:34%;">Latest public reply`) {
+		t.Fatalf("latest public reply block is still split into a detached label column:\n%s", htmlBody)
+	}
 }
 
 func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
