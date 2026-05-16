@@ -81,6 +81,21 @@ type AddComment struct {
 	Visibility string `json:"visibility"`
 }
 
+type SaveIssueInput struct {
+	IssueID int64
+	Patch   UpdateIssue
+	Comment *AddComment
+}
+
+type SaveIssueResult struct {
+	Previous          Issue
+	Issue             Issue
+	HasPatch          bool
+	HasComment        bool
+	PublicComment     bool
+	AssignmentChanged bool
+}
+
 type Filter struct {
 	Query     string
 	Status    string

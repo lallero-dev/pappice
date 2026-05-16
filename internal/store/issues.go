@@ -187,21 +187,7 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 }
 
 func (s *Store) GetIssue(id int64) (Issue, error) {
-	row := s.db.QueryRow(`
-		SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
-		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
-		       i.created_at, i.updated_at, i.closed_at
-		FROM issues i
-		JOIN projects p ON p.id = i.project_id
-		WHERE i.id = ?`, id)
-	issue, err := scanIssue(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Issue{}, ErrNotFound
-	}
-	if err != nil {
-		return Issue{}, err
-	}
-	return issue, s.hydrateIssue(&issue)
+	return s.getIssue(id)
 }
 
 func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
@@ -231,14 +217,89 @@ func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
 }
 
 func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
-	current, err := s.GetIssue(id)
+	result, err := s.SaveIssue(SaveIssueInput{IssueID: id, Patch: patch})
 	if err != nil {
 		return Issue{}, err
 	}
+	return result.Issue, nil
+}
+
+func (s *Store) SaveIssue(input SaveIssueInput) (SaveIssueResult, error) {
+	hasPatch := issuePatchPresent(input.Patch)
+	hasComment := input.Comment != nil && strings.TrimSpace(input.Comment.Body) != ""
+	if !hasPatch && input.Comment != nil && !hasComment {
+		_, _, err := normalizeComment(*input.Comment)
+		return SaveIssueResult{}, err
+	}
+	if !hasPatch && !hasComment {
+		return SaveIssueResult{}, fmt.Errorf("%w: issue changes or comment are required", ErrValidation)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return SaveIssueResult{}, err
+	}
+	defer tx.Rollback()
+
+	previous, err := getIssueTx(tx, input.IssueID)
+	if err != nil {
+		return SaveIssueResult{}, err
+	}
+
+	now := time.Now().UTC()
+	current := previous
+	result := SaveIssueResult{
+		Previous:   previous,
+		HasPatch:   hasPatch,
+		HasComment: hasComment,
+	}
+	if hasPatch {
+		if err := applyIssuePatch(&current, input.Patch, now); err != nil {
+			return SaveIssueResult{}, err
+		}
+		result.AssignmentChanged = input.Patch.Assignee != nil &&
+			strings.TrimSpace(*input.Patch.Assignee) != "" &&
+			!strings.EqualFold(strings.TrimSpace(*input.Patch.Assignee), strings.TrimSpace(previous.Assignee))
+		if err := updateIssueTx(tx, current); err != nil {
+			return SaveIssueResult{}, err
+		}
+	}
+	if hasComment {
+		comment, publicComment, err := normalizeComment(*input.Comment)
+		if err != nil {
+			return SaveIssueResult{}, err
+		}
+		if err := addCommentTx(tx, input.IssueID, comment, now); err != nil {
+			return SaveIssueResult{}, err
+		}
+		result.PublicComment = publicComment
+		if !hasPatch {
+			current.UpdatedAt = now
+			if err := updateIssueTimestampTx(tx, input.IssueID, now); err != nil {
+				return SaveIssueResult{}, err
+			}
+		}
+	}
+
+	current, err = getIssueTx(tx, input.IssueID)
+	if err != nil {
+		return SaveIssueResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return SaveIssueResult{}, err
+	}
+	result.Issue = current
+	return result, nil
+}
+
+func issuePatchPresent(patch UpdateIssue) bool {
+	return patch.Title != nil || patch.Description != nil || patch.Status != nil || patch.Severity != nil || patch.Priority != nil || patch.Assignee != nil
+}
+
+func applyIssuePatch(current *Issue, patch UpdateIssue, now time.Time) error {
 	if patch.Title != nil {
 		title := strings.TrimSpace(*patch.Title)
 		if title == "" {
-			return Issue{}, fmt.Errorf("%w: title is required", ErrValidation)
+			return fmt.Errorf("%w: title is required", ErrValidation)
 		}
 		current.Title = title
 	}
@@ -248,12 +309,12 @@ func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
 	if patch.Status != nil {
 		status := strings.TrimSpace(*patch.Status)
 		if !isValid(validStatuses, status) {
-			return Issue{}, fmt.Errorf("%w: invalid status %q", ErrValidation, status)
+			return fmt.Errorf("%w: invalid status %q", ErrValidation, status)
 		}
 		current.Status = status
 		if status == "resolved" || status == "rejected" {
-			now := time.Now().UTC()
-			current.ClosedAt = &now
+			closedAt := now
+			current.ClosedAt = &closedAt
 		} else {
 			current.ClosedAt = nil
 		}
@@ -261,67 +322,79 @@ func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
 	if patch.Severity != nil {
 		severity := defaultString(*patch.Severity, "support")
 		if !isValid(validSeverities, severity) {
-			return Issue{}, fmt.Errorf("%w: invalid severity %q", ErrValidation, severity)
+			return fmt.Errorf("%w: invalid severity %q", ErrValidation, severity)
 		}
 		current.Severity = severity
 	}
 	if patch.Priority != nil {
 		priority := defaultString(*patch.Priority, "normal")
 		if !isValid(validPriorities, priority) {
-			return Issue{}, fmt.Errorf("%w: invalid priority %q", ErrValidation, priority)
+			return fmt.Errorf("%w: invalid priority %q", ErrValidation, priority)
 		}
 		current.Priority = priority
 	}
 	if patch.Assignee != nil {
 		current.Assignee = strings.TrimSpace(*patch.Assignee)
 	}
-	current.UpdatedAt = time.Now().UTC()
+	current.UpdatedAt = now
+	return nil
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return Issue{}, err
-	}
-	defer tx.Rollback()
-	_, err = tx.Exec(`
+func updateIssueTx(tx *sql.Tx, issue Issue) error {
+	_, err := tx.Exec(`
 		UPDATE issues
 		SET title = ?, description = ?, status = ?, severity = ?, priority = ?, assignee = ?, updated_at = ?, closed_at = ?
 		WHERE id = ?`,
-		current.Title, current.Description, current.Status, current.Severity, current.Priority, current.Assignee,
-		formatTime(current.UpdatedAt), formatTimePtr(current.ClosedAt), current.ID,
+		issue.Title, issue.Description, issue.Status, issue.Severity, issue.Priority, issue.Assignee,
+		formatTime(issue.UpdatedAt), formatTimePtr(issue.ClosedAt), issue.ID,
 	)
-	if err != nil {
-		return Issue{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Issue{}, err
-	}
-	return s.GetIssue(id)
+	return err
 }
 
 func (s *Store) AddComment(id int64, input AddComment) (Issue, error) {
+	result, err := s.SaveIssue(SaveIssueInput{IssueID: id, Comment: &input})
+	if err != nil {
+		return Issue{}, err
+	}
+	return result.Issue, nil
+}
+
+func normalizeComment(input AddComment) (AddComment, bool, error) {
 	body := strings.TrimSpace(input.Body)
 	if body == "" {
-		return Issue{}, fmt.Errorf("%w: comment body is required", ErrValidation)
+		return AddComment{}, false, fmt.Errorf("%w: comment body is required", ErrValidation)
 	}
 	author := defaultString(input.Author, "anonymous")
 	visibility := defaultString(input.Visibility, "public")
 	if !isValid(validCommentVisibility, visibility) {
-		return Issue{}, fmt.Errorf("%w: invalid comment visibility %q", ErrValidation, visibility)
+		return AddComment{}, false, fmt.Errorf("%w: invalid comment visibility %q", ErrValidation, visibility)
 	}
-	now := time.Now().UTC()
+	return AddComment{Author: author, Body: body, Visibility: visibility}, visibility == "public", nil
+}
 
-	result, err := s.db.Exec(
+func addCommentTx(tx *sql.Tx, id int64, input AddComment, now time.Time) error {
+	result, err := tx.Exec(
 		`INSERT INTO comments (issue_id, author, body, visibility, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, author, body, visibility, formatTime(now),
+		id, input.Author, input.Body, input.Visibility, formatTime(now),
 	)
 	if err != nil {
-		return Issue{}, normalizeSQLError(err)
+		return normalizeSQLError(err)
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
-		return Issue{}, ErrNotFound
+		return ErrNotFound
 	}
-	_, _ = s.db.Exec(`UPDATE issues SET updated_at = ? WHERE id = ?`, formatTime(now), id)
-	return s.GetIssue(id)
+	return nil
+}
+
+func updateIssueTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
+	result, err := tx.Exec(`UPDATE issues SET updated_at = ? WHERE id = ?`, formatTime(now), id)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) IssueIDByProjectNumber(projectID, number int64) (int64, bool) {
@@ -330,14 +403,51 @@ func (s *Store) IssueIDByProjectNumber(projectID, number int64) (int64, bool) {
 	return id, err == nil
 }
 
+func (s *Store) getIssue(id int64) (Issue, error) {
+	row := s.db.QueryRow(issueSelectSQL+` WHERE i.id = ?`, id)
+	issue, err := scanIssue(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Issue{}, ErrNotFound
+	}
+	if err != nil {
+		return Issue{}, err
+	}
+	return issue, s.hydrateIssue(&issue)
+}
+
+func getIssueTx(tx *sql.Tx, id int64) (Issue, error) {
+	row := tx.QueryRow(issueSelectSQL+` WHERE i.id = ?`, id)
+	issue, err := scanIssue(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Issue{}, ErrNotFound
+	}
+	if err != nil {
+		return Issue{}, err
+	}
+	return issue, hydrateIssueTx(tx, &issue)
+}
+
 func (s *Store) hydrateIssue(issue *Issue) error {
+	return hydrateIssueWithQuery(s.db, issue)
+}
+
+func hydrateIssueTx(tx *sql.Tx, issue *Issue) error {
+	return hydrateIssueWithQuery(tx, issue)
+}
+
+type issueQueryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 	issue.Key = fmt.Sprintf("%s-%d", issue.ProjectKey, issue.Number)
 	issue.Project = issue.ProjectKey
 
-	commentRows, err := s.db.Query(`SELECT id, author, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
+	commentRows, err := queryer.Query(`SELECT id, author, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
 	if err != nil {
 		return err
 	}
+	defer commentRows.Close()
 	for commentRows.Next() {
 		var comment Comment
 		var created string
@@ -349,10 +459,15 @@ func (s *Store) hydrateIssue(issue *Issue) error {
 			issue.Comments = append(issue.Comments, comment)
 		}
 	}
-	commentRows.Close()
-
-	return nil
+	return commentRows.Err()
 }
+
+const issueSelectSQL = `
+	SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+	       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
+	       i.created_at, i.updated_at, i.closed_at
+	FROM issues i
+	JOIN projects p ON p.id = i.project_id`
 
 func scanIssue(rows scanner) (Issue, error) {
 	var issue Issue

@@ -118,6 +118,88 @@ func TestStoreValidation(t *testing.T) {
 	}
 }
 
+func TestMetadataAndPublicViews(t *testing.T) {
+	if got, want := Priorities(), []string{"low", "normal", "high", "urgent"}; !slices.Equal(got, want) {
+		t.Fatalf("priorities = %#v, want %#v", got, want)
+	}
+	if got, want := Roles(), []string{"admin", "staff", "customer"}; !slices.Equal(got, want) {
+		t.Fatalf("roles = %#v, want %#v", got, want)
+	}
+	if got, want := ProjectRoles(), []string{"owner", "agent", "customer", "viewer"}; !slices.Equal(got, want) {
+		t.Fatalf("project roles = %#v, want %#v", got, want)
+	}
+	if got, want := Events(), []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}; !slices.Equal(got, want) {
+		t.Fatalf("events = %#v, want %#v", got, want)
+	}
+
+	publicUser := ToPublicUser(User{ID: 7, Username: "bob", DisplayName: "Bob", Email: "bob@example.test", Role: "user", Disabled: true})
+	if publicUser.Role != "staff" || publicUser.Username != "bob" || !publicUser.Disabled {
+		t.Fatalf("public user = %#v", publicUser)
+	}
+	projectID := int64(3)
+	hook := Webhook{ID: 9, ProjectID: &projectID, Name: "hook", URL: "https://example.test/hook", Secret: "secret", Events: []string{"ticket.created"}}
+	publicHook := ToPublicWebhook(hook)
+	hook.Events[0] = "ticket.updated"
+	if !publicHook.HasSecret || publicHook.Events[0] != "ticket.created" || publicHook.ProjectID == nil || *publicHook.ProjectID != projectID {
+		t.Fatalf("public hook = %#v", publicHook)
+	}
+}
+
+func TestSaveIssueIsTransactional(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	projectID := tracker.ListProjects(admin)[0].ID
+	issue, err := tracker.CreateIssue(CreateIssue{ProjectID: projectID, Title: "Original", Priority: "normal"})
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	title := "Changed"
+	status := "assigned"
+	_, err = tracker.SaveIssue(SaveIssueInput{
+		IssueID: issue.ID,
+		Patch:   UpdateIssue{Title: &title, Status: &status},
+		Comment: &AddComment{
+			Author:     "Admin",
+			Body:       "This should not be stored",
+			Visibility: "private",
+		},
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("save issue error = %v, want ErrValidation", err)
+	}
+	unchanged, err := tracker.GetIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("get issue after failed save: %v", err)
+	}
+	if unchanged.Title != "Original" || unchanged.Status != "new" || len(unchanged.Comments) != 0 {
+		t.Fatalf("failed save was not rolled back: %#v", unchanged)
+	}
+
+	comment := AddComment{Author: "Admin", Body: "Now assigned", Visibility: "public"}
+	assignee := "alice"
+	saved, err := tracker.SaveIssue(SaveIssueInput{
+		IssueID: issue.ID,
+		Patch:   UpdateIssue{Status: &status, Assignee: &assignee},
+		Comment: &comment,
+	})
+	if err != nil {
+		t.Fatalf("save issue: %v", err)
+	}
+	if !saved.HasPatch || !saved.HasComment || !saved.PublicComment || !saved.AssignmentChanged {
+		t.Fatalf("save metadata = %#v", saved)
+	}
+	if saved.Previous.Status != "new" || saved.Issue.Status != "assigned" || len(saved.Issue.Comments) != 1 {
+		t.Fatalf("saved issue = %#v", saved)
+	}
+}
+
 func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.json"))
 	if err != nil {
@@ -156,6 +238,12 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if user, gotCSRF, ok := tracker.UserBySession(session); !ok || user.ID != admin.ID || gotCSRF != csrf {
 		t.Fatalf("session user = %#v, %v", user, ok)
 	}
+	if err := tracker.DeleteSession(session); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+	if _, _, ok := tracker.UserBySession(session); ok {
+		t.Fatal("deleted session should not authenticate")
+	}
 
 	token, raw, err := tracker.CreateAPIToken(admin.ID, CreateAPIToken{Name: "cli"})
 	if err != nil {
@@ -166,6 +254,22 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	}
 	if user, ok := tracker.UserByAPIToken(raw); !ok || user.ID != admin.ID {
 		t.Fatalf("API token user = %#v, %v", user, ok)
+	}
+	tokens := tracker.ListAPITokens(admin.ID)
+	if len(tokens) != 1 || tokens[0].ID != token.ID || tokens[0].Prefix != token.Prefix {
+		t.Fatalf("API tokens = %#v", tokens)
+	}
+	if err := tracker.DeleteAPIToken(admin.ID, token.ID+100); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing API token error = %v, want ErrNotFound", err)
+	}
+	if err := tracker.DeleteAPIToken(admin.ID, token.ID); err != nil {
+		t.Fatalf("delete API token: %v", err)
+	}
+	if tokens := tracker.ListAPITokens(admin.ID); len(tokens) != 0 {
+		t.Fatalf("API tokens after delete = %#v", tokens)
+	}
+	if user, ok := tracker.UserByAPIToken(raw); ok || user.ID != 0 {
+		t.Fatalf("deleted API token user = %#v, %v", user, ok)
 	}
 
 	enabled := true
@@ -267,6 +371,19 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 	}
 	if hook.Name != "renamed hook" || !hook.Enabled {
 		t.Fatalf("updated hook = %#v", hook)
+	}
+	events := []string{"ticket.updated"}
+	secret := "manual-secret"
+	hook, err = tracker.UpdateWebhook(hook.ID, UpdateWebhook{
+		URL:    strPtr("https://hooks.example.test/renamed"),
+		Secret: &secret,
+		Events: &events,
+	})
+	if err != nil {
+		t.Fatalf("update webhook details: %v", err)
+	}
+	if hook.URL != "https://hooks.example.test/renamed" || hook.Secret != secret || !slices.Equal(hook.Events, events) {
+		t.Fatalf("updated hook details = %#v", hook)
 	}
 	if err := tracker.RecordDelivery(WebhookDelivery{WebhookID: hook.ID, ProjectID: &project.ID, Event: "ticket.created", StatusCode: 204}); err != nil {
 		t.Fatalf("record delivery: %v", err)
@@ -372,7 +489,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 		t.Fatalf("create admin: %v", err)
 	}
 	projectID := tracker.ListProjects(admin)[0].ID
-	customer, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse", Email: "bob@example.test"})
+	customer, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse", Email: "bob@example.test", Role: "customer"})
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
@@ -403,6 +520,10 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	commentRecipients := tracker.IssueEmailRecipients("ticket.commented", issue, customer)
 	if !hasRecipient(commentRecipients, assignee.Email) || hasRecipient(commentRecipients, customer.Email) {
 		t.Fatalf("comment recipients = %#v, want assignee excluding actor customer", commentRecipients)
+	}
+	updateRecipients := tracker.IssueEmailRecipients("ticket.updated", issue, admin)
+	if !hasRecipient(updateRecipients, assignee.Email) || hasRecipient(updateRecipients, customer.Email) {
+		t.Fatalf("update recipients = %#v, want assignee excluding customer reporter", updateRecipients)
 	}
 	assignedRecipients := tracker.IssueEmailRecipients("ticket.assigned", issue, admin)
 	if !hasRecipient(assignedRecipients, assignee.Email) {

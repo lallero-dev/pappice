@@ -159,6 +159,19 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/logout", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusMethodNotAllowed)
+	if allow := resp.Header.Get("Allow"); allow != http.MethodPost {
+		t.Fatalf("logout Allow header = %q, want POST", allow)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/projects", map[string]any{
+		"key":        "BAD",
+		"name":       "Bad payload",
+		"unexpected": true,
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusBadRequest)
+
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/session", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if got := decodeBool(t, body, "authenticated"); !got {
@@ -375,6 +388,21 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 		"status":   "assigned",
 		"assignee": "dev",
 		"comment": map[string]any{
+			"body":       "This should roll back",
+			"visibility": "private",
+		},
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusBadRequest)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("This should roll back")) || bytes.Contains(body, []byte(`"status":"assigned"`)) {
+		t.Fatalf("failed grouped save was not rolled back: %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]any{
+		"status":   "assigned",
+		"assignee": "dev",
+		"comment": map[string]any{
 			"body":       "Taking this now",
 			"visibility": "public",
 		},
@@ -584,7 +612,7 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/support/projects", nil, nil, "", "")
-	requireStatus(t, resp, body, http.StatusUnauthorized)
+	requireStatus(t, resp, body, http.StatusNotFound)
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -603,8 +631,22 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 		"password": "correct horse",
 		"role":     "customer",
 	})
+	noEmailID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "noemail",
+		"password": "correct horse",
+		"role":     "customer",
+	})
 	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, customerID, "customer")
 	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, intruderID, "customer")
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, noEmailID, "customer")
+
+	noEmailCookie, noEmailCSRF := loginUser(t, client, server.URL, "noemail", "correct horse")
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  projectID,
+		"title":       "No email",
+		"description": "Customer accounts need an email for support tickets",
+	}, noEmailCookie, noEmailCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusBadRequest)
 
 	loginResp, loginBody := doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 		"username": "customer",
@@ -720,6 +762,93 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	}
 	if bytes.Contains(body, []byte("Private staff note")) {
 		t.Fatalf("outbox leaked internal note: %s", body)
+	}
+}
+
+func TestRequesterNotificationPolicy(t *testing.T) {
+	tracker, server, client := newTestServer(t, Options{
+		EmailNotifications: true,
+		PublicURL:          "https://tracker.example.test",
+	})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	devID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "dev",
+		"password": "correct horse",
+		"email":    "dev@example.test",
+		"role":     "staff",
+	})
+	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username":     "customer",
+		"display_name": "Customer",
+		"email":        "customer@example.test",
+		"password":     "correct horse",
+		"role":         "customer",
+	})
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, devID, "agent")
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, customerID, "customer")
+
+	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
+	createTicket := func(title string) int64 {
+		t.Helper()
+		resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+			"project_id":  projectID,
+			"title":       title,
+			"description": "Customer needs help",
+		}, customerCookie, customerCSRF, server.URL)
+		requireStatus(t, resp, body, http.StatusCreated)
+		return decodeInt64(t, body, "id")
+	}
+
+	workflowOnlyID := createTicket("Workflow-only change")
+	notification := requireNotificationForIssueEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	if notification.Event != "ticket.created" {
+		t.Fatalf("initial requester notification = %#v", notification)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(workflowOnlyID), map[string]any{
+		"status":   "assigned",
+		"priority": "urgent",
+		"assignee": "dev",
+		"comment": map[string]any{
+			"body":       "Internal triage details",
+			"visibility": "internal",
+		},
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	notification = requireNotificationForIssueEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	if notification.Event != "ticket.created" || strings.Contains(notification.BodyText, "Internal triage details") {
+		t.Fatalf("workflow-only change should not notify requester: %#v", notification)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(workflowOnlyID), map[string]any{
+		"status": "resolved",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	notification = requireNotificationForIssueEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	if notification.Event != "ticket.updated" || !strings.Contains(notification.BodyText, "Current status: Resolved") {
+		t.Fatalf("resolved status should notify requester: %#v", notification)
+	}
+
+	publicReplyID := createTicket("Grouped public reply")
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(publicReplyID), map[string]any{
+		"status":   "assigned",
+		"assignee": "dev",
+		"comment": map[string]any{
+			"body":       "Visible staff reply",
+			"visibility": "public",
+		},
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	notification = requireNotificationForIssueEmail(t, tracker, publicReplyID, "customer@example.test")
+	if notification.Event != "ticket.commented" ||
+		!strings.Contains(notification.BodyText, "Visible staff reply") ||
+		strings.Contains(notification.BodyText, "Current status: Assigned") {
+		t.Fatalf("public reply should be the requester-facing event: %#v", notification)
 	}
 }
 
@@ -907,6 +1036,20 @@ func decodeFirstProjectID(t *testing.T, body []byte) int64 {
 		t.Fatal("no projects returned")
 	}
 	return payload.Projects[0].ID
+}
+
+func requireNotificationForIssueEmail(t *testing.T, tracker *store.Store, issueID int64, email string) store.EmailNotification {
+	t.Helper()
+	var matches []store.EmailNotification
+	for _, notification := range tracker.ListEmailNotifications(100) {
+		if notification.IssueID == issueID && strings.EqualFold(notification.RecipientEmail, email) {
+			matches = append(matches, notification)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("notifications for issue %d and %s = %#v, want exactly one", issueID, email, matches)
+	}
+	return matches[0]
 }
 
 func itoa(value int64) string {

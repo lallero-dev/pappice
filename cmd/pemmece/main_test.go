@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestEnvHelpers(t *testing.T) {
@@ -12,6 +13,8 @@ func TestEnvHelpers(t *testing.T) {
 	t.Setenv("PEMMECE_TEST_FALSE", "off")
 	t.Setenv("PEMMECE_TEST_INT", "42")
 	t.Setenv("PEMMECE_TEST_BAD_INT", "nope")
+	t.Setenv("PEMMECE_TEST_DURATION", "1500ms")
+	t.Setenv("PEMMECE_TEST_BAD_DURATION", "later")
 
 	if got := envOr("PEMMECE_TEST_VALUE", "fallback"); got != "configured" {
 		t.Fatalf("envOr configured = %q", got)
@@ -30,6 +33,15 @@ func TestEnvHelpers(t *testing.T) {
 	}
 	if got := envInt("PEMMECE_TEST_MISSING", 9); got != 9 {
 		t.Fatalf("envInt missing fallback = %d", got)
+	}
+	if got := envDuration("PEMMECE_TEST_DURATION", time.Second); got != 1500*time.Millisecond {
+		t.Fatalf("envDuration parsed = %s", got)
+	}
+	if got := envDuration("PEMMECE_TEST_BAD_DURATION", time.Second); got != time.Second {
+		t.Fatalf("envDuration bad fallback = %s", got)
+	}
+	if got := envDuration("PEMMECE_TEST_MISSING_DURATION", 2*time.Second); got != 2*time.Second {
+		t.Fatalf("envDuration missing fallback = %s", got)
 	}
 }
 
@@ -65,5 +77,27 @@ PEMMECE_ENV_KEEP=file-value
 	}
 	if got := os.Getenv("PEMMECE_ENV_KEEP"); got != "external-value" {
 		t.Fatalf("keep = %q", got)
+	}
+}
+
+func TestLoadDotEnvValidation(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), ".env")
+	if err := loadDotEnv(missing); err != nil {
+		t.Fatalf("missing .env should be ignored: %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("BROKEN\n"), 0o600); err != nil {
+		t.Fatalf("write invalid env: %v", err)
+	}
+	if err := loadDotEnv(path); err == nil {
+		t.Fatal("invalid env line should fail")
+	}
+
+	if err := os.WriteFile(path, []byte("PEMMECE_ENV_BAD=\"unterminated\n"), 0o600); err != nil {
+		t.Fatalf("write unterminated env: %v", err)
+	}
+	if err := loadDotEnv(path); err == nil {
+		t.Fatal("unterminated quoted value should fail")
 	}
 }

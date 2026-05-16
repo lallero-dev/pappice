@@ -14,6 +14,9 @@ func (s *Store) IssueEmailRecipients(event string, issue Issue, actor User) []Em
 		if recipient.UserID == 0 || recipient.UserID == actor.ID || strings.TrimSpace(recipient.Email) == "" {
 			return
 		}
+		if recipient.Role == "customer" {
+			return
+		}
 		recipients[recipient.UserID] = recipient
 	}
 

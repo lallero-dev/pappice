@@ -109,9 +109,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/setup", s.handleSetup)
 	s.mux.HandleFunc("/api/login", s.handleLogin)
 	s.mux.HandleFunc("/api/logout", s.handleLogout)
-	s.mux.HandleFunc("/api/support/projects", s.handleSupportProjects)
-	s.mux.HandleFunc("/api/support/tickets", s.handleSupportTickets)
-	s.mux.HandleFunc("/api/support/tickets/", s.handleSupportTicketByToken)
 	s.mux.HandleFunc("/api/projects", s.handleProjects)
 	s.mux.HandleFunc("/api/projects/", s.handleProjectByID)
 	s.mux.HandleFunc("/api/tickets", s.handleTickets)
@@ -281,136 +278,6 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (s *Server) handleSupportProjects(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
-	if !ok {
-		return
-	}
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w, http.MethodGet)
-		return
-	}
-	projects := s.store.ListProjects(auth.User)
-	writable := make([]store.Project, 0, len(projects))
-	for _, project := range projects {
-		if s.canCreateIssue(auth.User, project.ID) {
-			writable = append(writable, project)
-		}
-	}
-	respondJSON(w, http.StatusOK, map[string]any{"projects": writable})
-}
-
-func (s *Server) handleSupportTickets(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
-	if !ok {
-		return
-	}
-	switch r.Method {
-	case http.MethodPost:
-		var input struct {
-			ProjectID   int64  `json:"project_id"`
-			Title       string `json:"title"`
-			Description string `json:"description"`
-		}
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		if !s.canCreateIssue(auth.User, input.ProjectID) {
-			respondError(w, http.StatusForbidden, "product ticket access is required")
-			return
-		}
-		requesterEmail := strings.TrimSpace(auth.User.Email)
-		if requesterEmail == "" {
-			respondError(w, http.StatusBadRequest, "your account needs an email address before you can open support tickets")
-			return
-		}
-		requesterName := defaultString(auth.User.DisplayName, auth.User.Username)
-		issue, err := s.store.CreateIssue(store.CreateIssue{
-			ProjectID:      input.ProjectID,
-			Title:          input.Title,
-			Description:    input.Description,
-			Priority:       "normal",
-			Reporter:       auth.User.Username,
-			Source:         "portal",
-			RequesterName:  requesterName,
-			RequesterEmail: requesterEmail,
-		})
-		if err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		s.emitIssueEvent("ticket.created", issue, auth.User)
-		s.enqueueRequesterEmail("ticket.created", issue, "Pemmece Support")
-		respondJSON(w, http.StatusCreated, map[string]any{
-			"ticket": publicTicket(issue),
-			"url":    s.ticketURL(issue.CustomerToken),
-		})
-	default:
-		methodNotAllowed(w, http.MethodPost)
-	}
-}
-
-func (s *Server) handleSupportTicketByToken(w http.ResponseWriter, r *http.Request) {
-	auth, ok := s.requireAuth(w, r)
-	if !ok {
-		return
-	}
-	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/support/tickets/"), "/")
-	if rest == "" {
-		http.NotFound(w, r)
-		return
-	}
-	parts := strings.Split(rest, "/")
-	token := parts[0]
-	issue, err := s.store.GetIssueByCustomerToken(token)
-	if err != nil {
-		respondStoreError(w, err)
-		return
-	}
-	if !s.canAccessSupportTicket(auth.User, issue) {
-		respondError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if len(parts) == 1 {
-		if r.Method != http.MethodGet {
-			methodNotAllowed(w, http.MethodGet)
-			return
-		}
-		respondJSON(w, http.StatusOK, map[string]any{"ticket": publicTicket(issue)})
-		return
-	}
-	if len(parts) == 2 && parts[1] == "comments" {
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w, http.MethodPost)
-			return
-		}
-		var input struct {
-			Body string `json:"body"`
-		}
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		author := defaultString(auth.User.DisplayName, auth.User.Username)
-		updated, err := s.store.AddComment(issue.ID, store.AddComment{Author: author, Body: input.Body, Visibility: "public"})
-		if err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		s.emitIssueEvent("ticket.commented", updated, auth.User)
-		if !s.isSupportTicketRequester(auth.User, issue) {
-			s.enqueueRequesterEmail("ticket.commented", updated, author)
-		}
-		publicIssue, err := s.store.GetIssueByCustomerToken(token)
-		if err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		respondJSON(w, http.StatusCreated, map[string]any{"ticket": publicTicket(publicIssue)})
-		return
-	}
-	http.NotFound(w, r)
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -727,49 +594,39 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 		return store.Issue{}, false
 	}
 
-	updated := issue
-	assignmentChanged := false
-	if hasPatch {
-		patch := input.updateIssue()
-		assignmentChanged = patch.Assignee != nil &&
-			strings.TrimSpace(*patch.Assignee) != "" &&
-			!strings.EqualFold(strings.TrimSpace(*patch.Assignee), strings.TrimSpace(issue.Assignee))
-		next, err := s.store.UpdateIssue(issue.ID, patch)
-		if err != nil {
-			respondStoreError(w, err)
-			return store.Issue{}, false
-		}
-		updated = next
-	}
-
-	publicComment := false
+	var comment *store.AddComment
 	if hasComment {
-		comment := *input.Comment
-		comment.Visibility = defaultString(comment.Visibility, "public")
-		if comment.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
+		next := *input.Comment
+		next.Visibility = defaultString(next.Visibility, "public")
+		if next.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
 			respondError(w, http.StatusForbidden, "agent access is required for internal notes")
 			return store.Issue{}, false
 		}
-		comment.Author = defaultString(auth.User.DisplayName, auth.User.Username)
-		next, err := s.store.AddComment(issue.ID, comment)
-		if err != nil {
-			respondStoreError(w, err)
-			return store.Issue{}, false
-		}
-		updated = next
-		publicComment = comment.Visibility == "public"
+		next.Author = defaultString(auth.User.DisplayName, auth.User.Username)
+		comment = &next
 	}
 
-	if hasPatch {
+	result, err := s.store.SaveIssue(store.SaveIssueInput{
+		IssueID: issue.ID,
+		Patch:   input.updateIssue(),
+		Comment: comment,
+	})
+	if err != nil {
+		respondStoreError(w, err)
+		return store.Issue{}, false
+	}
+	updated := result.Issue
+
+	if result.HasPatch {
 		s.emitIssueWebhook("ticket.updated", updated, auth.User)
-		if assignmentChanged {
+		if result.AssignmentChanged {
 			s.emitIssueWebhook("ticket.assigned", updated, auth.User)
 		}
 	}
-	if publicComment {
+	if result.PublicComment {
 		s.emitIssueWebhook("ticket.commented", updated, auth.User)
 	}
-	s.enqueueTicketPatchEmails(input, updated, auth.User, issue, assignmentChanged, publicComment)
+	s.enqueueTicketPatchEmails(input, updated, auth.User, result.Previous, result.AssignmentChanged, result.PublicComment)
 	return updated, true
 }
 
@@ -785,9 +642,19 @@ func (s *Server) enqueueTicketPatchEmails(input ticketPatchInput, updated store.
 		event = "ticket.assigned"
 	}
 	s.enqueueIssueEmails(event, updated, actor)
-	if (input.hasTicketPatch() || publicComment) && !s.isSupportTicketRequester(actor, previous) {
-		s.enqueueRequesterEmail(event, updated, defaultString(actor.DisplayName, actor.Username))
+	if requesterEvent, ok := requesterTicketPatchEmailEvent(input, previous, updated, publicComment); ok && !s.isSupportTicketRequester(actor, previous) {
+		s.enqueueRequesterEmail(requesterEvent, updated, defaultString(actor.DisplayName, actor.Username))
 	}
+}
+
+func requesterTicketPatchEmailEvent(input ticketPatchInput, previous, updated store.Issue, publicComment bool) (string, bool) {
+	if publicComment {
+		return "ticket.commented", true
+	}
+	if input.Status != nil && !strings.EqualFold(strings.TrimSpace(previous.Status), strings.TrimSpace(updated.Status)) && requesterTerminalStatus(updated.Status) {
+		return "ticket.updated", true
+	}
+	return "", false
 }
 
 func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth authContext, issue store.Issue) {
@@ -1336,13 +1203,6 @@ func (s *Server) canEditIssue(user store.User, projectID int64) bool {
 	return s.hasProjectRole(user, projectID, "owner", "agent")
 }
 
-func (s *Server) canAccessSupportTicket(user store.User, issue store.Issue) bool {
-	if isAdmin(user) || s.canEditIssue(user, issue.ProjectID) {
-		return true
-	}
-	return s.isSupportTicketRequester(user, issue)
-}
-
 func (s *Server) isSupportTicketRequester(user store.User, issue store.Issue) bool {
 	email := strings.TrimSpace(user.Email)
 	if email != "" && strings.EqualFold(email, strings.TrimSpace(issue.RequesterEmail)) {
@@ -1445,24 +1305,6 @@ func publicWebhooks(hooks []store.Webhook) []store.PublicWebhook {
 		public = append(public, store.ToPublicWebhook(hook))
 	}
 	return public
-}
-
-func publicTicket(issue store.Issue) map[string]any {
-	return map[string]any{
-		"id":              issue.ID,
-		"key":             issue.Key,
-		"project_id":      issue.ProjectID,
-		"project_key":     issue.ProjectKey,
-		"title":           issue.Title,
-		"description":     issue.Description,
-		"status":          issue.Status,
-		"priority":        issue.Priority,
-		"requester_name":  issue.RequesterName,
-		"requester_email": issue.RequesterEmail,
-		"comments":        issue.Comments,
-		"created_at":      issue.CreatedAt,
-		"updated_at":      issue.UpdatedAt,
-	}
 }
 
 func (s *Server) ticketURL(token string) string {
