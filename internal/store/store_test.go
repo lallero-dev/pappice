@@ -289,6 +289,142 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	}
 }
 
+func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	_ = admin
+
+	user, link, setupToken, err := tracker.CreateUserWithSetupLink(CreateUser{
+		Username: "Pending",
+		Email:    "pending@example.test",
+		Role:     "staff",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("create pending user: %v", err)
+	}
+	if !user.PasswordResetRequired || link.Purpose != "setup" || setupToken == "" {
+		t.Fatalf("pending account = %#v link=%#v token=%q", user, link, setupToken)
+	}
+	if _, err := tracker.Authenticate("pending", "correct horse"); !errors.Is(err, ErrPasswordResetRequired) {
+		t.Fatalf("pending authenticate error = %v, want ErrPasswordResetRequired", err)
+	}
+	if _, _, _, err := tracker.CreateSession(user.ID); !errors.Is(err, ErrPasswordResetRequired) {
+		t.Fatalf("pending create session error = %v, want ErrPasswordResetRequired", err)
+	}
+
+	foundLink, foundUser, err := tracker.GetAccountLink(setupToken)
+	if err != nil {
+		t.Fatalf("get setup link: %v", err)
+	}
+	if foundLink.ID != link.ID || foundUser.ID != user.ID || foundUser.PasswordHash != "" {
+		t.Fatalf("setup link lookup = %#v user=%#v", foundLink, foundUser)
+	}
+	activated, err := tracker.ConsumeAccountLink(setupToken, "correct horse")
+	if err != nil {
+		t.Fatalf("consume setup link: %v", err)
+	}
+	if activated.PasswordResetRequired {
+		t.Fatalf("activated user still requires password reset: %#v", activated)
+	}
+	if _, _, err := tracker.GetAccountLink(setupToken); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("used setup link error = %v, want ErrNotFound", err)
+	}
+	if _, err := tracker.Authenticate("pending", "correct horse"); err != nil {
+		t.Fatalf("authenticate activated user: %v", err)
+	}
+	session, _, _, err := tracker.CreateSession(user.ID)
+	if err != nil {
+		t.Fatalf("create activated session: %v", err)
+	}
+	extraSession, _, _, err := tracker.CreateSession(user.ID)
+	if err != nil {
+		t.Fatalf("create extra activated session: %v", err)
+	}
+	if _, err := tracker.ChangePassword(user.ID, "wrong password", "changed password", session); !errors.Is(err, ErrValidation) {
+		t.Fatalf("wrong current password error = %v, want ErrValidation", err)
+	}
+	changedUser, err := tracker.ChangePassword(user.ID, "correct horse", "changed password", session)
+	if err != nil {
+		t.Fatalf("change password: %v", err)
+	}
+	if changedUser.PasswordResetRequired {
+		t.Fatalf("changed user requires reset: %#v", changedUser)
+	}
+	if _, err := tracker.Authenticate("pending", "changed password"); err != nil {
+		t.Fatalf("authenticate changed password: %v", err)
+	}
+	if _, _, ok := tracker.UserBySession(session); !ok {
+		t.Fatal("change password should keep current session")
+	}
+	if _, _, ok := tracker.UserBySession(extraSession); ok {
+		t.Fatal("change password should remove other sessions")
+	}
+	extraSession, _, _, err = tracker.CreateSession(user.ID)
+	if err != nil {
+		t.Fatalf("create session before delete user sessions: %v", err)
+	}
+	if err := tracker.DeleteUserSessions(user.ID, session); err != nil {
+		t.Fatalf("delete user sessions: %v", err)
+	}
+	if _, _, ok := tracker.UserBySession(session); !ok {
+		t.Fatal("delete user sessions should keep requested session")
+	}
+	if _, _, ok := tracker.UserBySession(extraSession); ok {
+		t.Fatal("delete user sessions should remove other sessions")
+	}
+
+	resetUser, resetLink, resetToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour)
+	if err != nil {
+		t.Fatalf("create reset link: %v", err)
+	}
+	if !resetUser.PasswordResetRequired || resetLink.Purpose != "reset" || resetToken == "" {
+		t.Fatalf("reset link = %#v user=%#v token=%q", resetLink, resetUser, resetToken)
+	}
+	if _, _, ok := tracker.UserBySession(session); ok {
+		t.Fatal("password reset should invalidate existing sessions")
+	}
+	if _, err := tracker.Authenticate("pending", "changed password"); !errors.Is(err, ErrPasswordResetRequired) {
+		t.Fatalf("reset-required authenticate error = %v, want ErrPasswordResetRequired", err)
+	}
+	if _, newerLink, newerToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour); err != nil {
+		t.Fatalf("create newer reset link: %v", err)
+	} else {
+		if newerLink.ID == resetLink.ID || newerToken == resetToken {
+			t.Fatalf("new reset link did not rotate: %#v %q", newerLink, newerToken)
+		}
+		if _, _, err := tracker.GetAccountLink(resetToken); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("old reset link error = %v, want ErrNotFound", err)
+		}
+		resetToken = newerToken
+	}
+
+	resetComplete, err := tracker.ConsumeAccountLink(resetToken, "better password")
+	if err != nil {
+		t.Fatalf("consume reset link: %v", err)
+	}
+	if resetComplete.PasswordResetRequired {
+		t.Fatalf("reset user still requires password reset: %#v", resetComplete)
+	}
+	if _, err := tracker.Authenticate("pending", "better password"); err != nil {
+		t.Fatalf("authenticate reset user: %v", err)
+	}
+
+	_, _, expiringToken, err := tracker.CreatePasswordResetLink(user.ID, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("create expiring reset link: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if _, _, err := tracker.GetAccountLink(expiringToken); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired reset link error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {

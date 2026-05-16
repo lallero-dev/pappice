@@ -22,14 +22,15 @@ func Events() []string {
 
 func ToPublicUser(user User) PublicUser {
 	return PublicUser{
-		ID:          user.ID,
-		Username:    user.Username,
-		DisplayName: user.DisplayName,
-		Email:       user.Email,
-		Role:        normalizeGlobalRole(user.Role),
-		Disabled:    user.Disabled,
-		CreatedAt:   user.CreatedAt,
-		UpdatedAt:   user.UpdatedAt,
+		ID:                    user.ID,
+		Username:              user.Username,
+		DisplayName:           user.DisplayName,
+		Email:                 user.Email,
+		Role:                  normalizeGlobalRole(user.Role),
+		Disabled:              user.Disabled,
+		PasswordResetRequired: user.PasswordResetRequired,
+		CreatedAt:             user.CreatedAt,
+		UpdatedAt:             user.UpdatedAt,
 	}
 }
 

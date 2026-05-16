@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	ErrNotFound   = errors.New("not found")
-	ErrValidation = errors.New("validation failed")
-	ErrConflict   = errors.New("conflict")
+	ErrNotFound              = errors.New("not found")
+	ErrValidation            = errors.New("validation failed")
+	ErrConflict              = errors.New("conflict")
+	ErrPasswordResetRequired = errors.New("password setup or reset is required")
 )
 
 type Issue struct {
@@ -105,26 +106,28 @@ type Filter struct {
 }
 
 type User struct {
-	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
-	DisplayName  string    `json:"display_name"`
-	Email        string    `json:"email"`
-	Role         string    `json:"role"`
-	PasswordHash string    `json:"password_hash,omitempty"`
-	Disabled     bool      `json:"disabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                    int64     `json:"id"`
+	Username              string    `json:"username"`
+	DisplayName           string    `json:"display_name"`
+	Email                 string    `json:"email"`
+	Role                  string    `json:"role"`
+	PasswordHash          string    `json:"password_hash,omitempty"`
+	Disabled              bool      `json:"disabled"`
+	PasswordResetRequired bool      `json:"password_reset_required"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type PublicUser struct {
-	ID          int64     `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	Email       string    `json:"email"`
-	Role        string    `json:"role"`
-	Disabled    bool      `json:"disabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                    int64     `json:"id"`
+	Username              string    `json:"username"`
+	DisplayName           string    `json:"display_name"`
+	Email                 string    `json:"email"`
+	Role                  string    `json:"role"`
+	Disabled              bool      `json:"disabled"`
+	PasswordResetRequired bool      `json:"password_reset_required"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type CreateUser struct {
@@ -141,6 +144,15 @@ type UpdateUser struct {
 	Password    *string `json:"password"`
 	Role        *string `json:"role"`
 	Disabled    *bool   `json:"disabled"`
+}
+
+type AccountLink struct {
+	ID        int64      `json:"id"`
+	UserID    int64      `json:"user_id"`
+	Purpose   string     `json:"purpose"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type Session struct {
@@ -381,7 +393,14 @@ var validEmailEvents = map[string]struct{}{
 	"ticket.updated":   {},
 	"ticket.commented": {},
 	"ticket.assigned":  {},
+	"account.setup":    {},
+	"account.reset":    {},
 	"email.test":       {},
+}
+
+var validAccountLinkPurposes = map[string]struct{}{
+	"setup": {},
+	"reset": {},
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,46}[a-z0-9]$`)
@@ -437,6 +456,13 @@ func (s *Store) migrate() error {
 		return err
 	} else if !ok {
 		if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN email TEXT`); err != nil {
+			return err
+		}
+	}
+	if ok, err := s.columnExists("users", "password_reset_required"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN password_reset_required INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return err
 		}
 	}
@@ -621,14 +647,15 @@ func (s *Store) rebuildUsersRoleConstraint() error {
 			role TEXT NOT NULL,
 			password_hash TEXT NOT NULL,
 			disabled INTEGER NOT NULL DEFAULT 0,
+			password_reset_required INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO users_new (id, username, display_name, email, role, password_hash, disabled, created_at, updated_at)
-		SELECT id, username, display_name, email, role, password_hash, disabled, created_at, updated_at
+		INSERT INTO users_new (id, username, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at)
+		SELECT id, username, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at
 		FROM users`); err != nil {
 		return err
 	}
@@ -919,6 +946,7 @@ CREATE TABLE IF NOT EXISTS users (
 	role TEXT NOT NULL,
 	password_hash TEXT NOT NULL,
 	disabled INTEGER NOT NULL DEFAULT 0,
+	password_reset_required INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -939,6 +967,16 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 	token_hash TEXT NOT NULL UNIQUE,
 	created_at TEXT NOT NULL,
 	last_used_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS account_links (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	purpose TEXT NOT NULL,
+	token_hash TEXT NOT NULL UNIQUE,
+	expires_at TEXT NOT NULL,
+	used_at TEXT,
+	created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -1039,6 +1077,7 @@ CREATE INDEX IF NOT EXISTS idx_issues_project_updated ON issues(project_id, upda
 CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(project_id);
+CREATE INDEX IF NOT EXISTS idx_account_links_user_purpose ON account_links(user_id, purpose, used_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_pending ON email_notifications(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_issue ON email_notifications(issue_id);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_user ON email_notifications(user_id);

@@ -34,6 +34,8 @@
               <strong id="profileMenuName"></strong>
               <span id="profileEmail"></span>
             </div>
+            <button class="profile-menu-item" id="profileEditButton" type="button" role="menuitem">Profile</button>
+            <button class="profile-menu-item" id="changePasswordButton" type="button" role="menuitem">Change Password</button>
             <button class="profile-menu-item" id="logoutButton" type="button" role="menuitem">Logout</button>
           </div>
         </div>
@@ -73,6 +75,17 @@
           <input name="password" required type="password" autocomplete="current-password">
         </label>
         <button class="primary-button" type="submit">Sign In</button>
+      </form>
+
+      <form class="auth-panel" id="accountLinkForm" hidden>
+        <h1 id="accountLinkTitle">Set Password</h1>
+        <p class="auth-note" id="accountLinkHelp">Enter a password to finish account setup.</p>
+        <div class="account-summary" id="accountLinkUser"></div>
+        <label>
+          Password
+          <input name="password" required minlength="8" type="password" autocomplete="new-password">
+        </label>
+        <button class="primary-button" id="accountLinkSubmit" type="submit">Set Password</button>
       </form>
     </section>
 

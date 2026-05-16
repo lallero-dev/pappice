@@ -58,6 +58,49 @@ func (s *Server) enqueueRequesterEmail(event string, issue store.Issue, actorNam
 	}})
 }
 
+func (s *Server) enqueueAccountLinkEmail(event string, user store.User, token string, expiresAt time.Time) bool {
+	if !s.options.EmailNotifications || strings.TrimSpace(user.Email) == "" || strings.TrimSpace(token) == "" {
+		return false
+	}
+	subject, textBody, htmlBody := s.accountLinkEmailContent(event, user, token, expiresAt)
+	_, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
+		UserID:         user.ID,
+		RecipientEmail: user.Email,
+		RecipientName:  defaultString(user.DisplayName, user.Username),
+		Event:          event,
+		Subject:        subject,
+		BodyText:       textBody,
+		BodyHTML:       htmlBody,
+		Coalesce:       true,
+	}})
+	return err == nil
+}
+
+func (s *Server) accountLinkEmailContent(event string, user store.User, token string, expiresAt time.Time) (string, string, string) {
+	action := "Set your Pemmece password"
+	intro := "An account has been created for you in Pemmece."
+	if event == "account.reset" {
+		action = "Reset your Pemmece password"
+		intro = "A password reset was requested for your Pemmece account."
+	}
+	link := s.accountLinkURL(accountLinkPurpose(event), token)
+	subject := action
+	layout := emailLayout{
+		Kicker: "Pemmece account",
+		Title:  subject,
+		Intro:  intro,
+		Fields: []emailField{
+			{Label: "Account", Value: defaultString(user.DisplayName, user.Username)},
+			{Label: "Username", Value: user.Username},
+			{Label: "Expires", Value: expiresAt.Format("2006-01-02 15:04 MST")},
+		},
+		ActionLabel: action,
+		ActionURL:   link,
+		Footer:      "This is a one-time link. If you did not expect this email, contact your Pemmece administrator.",
+	}
+	return subject, renderEmailText(layout), renderEmailHTML(layout)
+}
+
 func (s *Server) requesterEmailContent(event string, issue store.Issue, actorName string) (string, string, string) {
 	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, requesterEmailSubjectAction(event), issue.Title)
 	link := s.ticketURL(issue.CustomerToken)
@@ -348,4 +391,11 @@ func requesterEmailSubjectAction(event string) string {
 		return "Ticket received"
 	}
 	return "Ticket update"
+}
+
+func accountLinkPurpose(event string) string {
+	if event == "account.reset" {
+		return "reset"
+	}
+	return "setup"
 }

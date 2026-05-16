@@ -26,6 +26,7 @@ const state = {
   deliveries: [],
   tokens: [],
   user: null,
+  accountLink: null,
   csrf: "",
   view: "issues",
   selectedProjectId: null,
@@ -61,11 +62,18 @@ const els = {
   profileMenuName: document.querySelector("#profileMenuName"),
   profileEmail: document.querySelector("#profileEmail"),
   profilePopover: document.querySelector("#profilePopover"),
+  profileEditButton: document.querySelector("#profileEditButton"),
+  changePasswordButton: document.querySelector("#changePasswordButton"),
   logoutButton: document.querySelector("#logoutButton"),
   newIssueButton: document.querySelector("#newIssueButton"),
   authView: document.querySelector("#authView"),
   setupForm: document.querySelector("#setupForm"),
   loginForm: document.querySelector("#loginForm"),
+  accountLinkForm: document.querySelector("#accountLinkForm"),
+  accountLinkTitle: document.querySelector("#accountLinkTitle"),
+  accountLinkHelp: document.querySelector("#accountLinkHelp"),
+  accountLinkUser: document.querySelector("#accountLinkUser"),
+  accountLinkSubmit: document.querySelector("#accountLinkSubmit"),
   appView: document.querySelector("#appView"),
   issueView: document.querySelector("#issueView"),
   adminView: document.querySelector("#adminView"),
@@ -144,6 +152,11 @@ async function request(path, options = {}) {
 
 async function boot() {
   bindEvents();
+  const route = accountLinkRoute();
+  if (route) {
+    await loadAccountLinkRoute(route);
+    return;
+  }
   await loadSession();
 }
 
@@ -160,6 +173,63 @@ async function loadSession() {
   }
   state.user = session.user;
   await enterApp();
+}
+
+function accountLinkRoute() {
+  const match = window.location.pathname.match(/^\/account\/(setup|reset)\/([^/]+)\/?$/);
+  if (!match) return null;
+  return {
+    purpose: match[1],
+    token: decodeURIComponent(match[2])
+  };
+}
+
+async function loadAccountLinkRoute(route) {
+  state.accountLink = { ...route, user: null };
+  showAuth("account");
+  renderAccountLinkForm({
+    purpose: route.purpose,
+    loading: true
+  });
+  try {
+    const payload = await request(`/api/account-links/${encodeURIComponent(route.token)}`);
+    state.accountLink = { ...route, user: payload.user, expiresAt: payload.expires_at };
+    renderAccountLinkForm({
+      purpose: payload.purpose || route.purpose,
+      user: payload.user,
+      expiresAt: payload.expires_at
+    });
+  } catch (error) {
+    state.accountLink = null;
+    renderAccountLinkForm({
+      purpose: route.purpose,
+      error: "This link is invalid or has expired. Contact an administrator for a new one."
+    });
+  }
+}
+
+function renderAccountLinkForm({ purpose, user = null, expiresAt = "", loading = false, error = "" }) {
+  const reset = purpose === "reset";
+  els.accountLinkTitle.textContent = reset ? "Reset Password" : "Set Password";
+  els.accountLinkSubmit.textContent = reset ? "Reset Password" : "Set Password";
+  els.accountLinkHelp.textContent = error || (loading
+    ? "Checking this one-time link..."
+    : reset
+      ? "Enter a new password for this Pemmece account."
+      : "Enter a password to finish account setup.");
+  els.accountLinkHelp.classList.toggle("status-error", Boolean(error));
+  els.accountLinkSubmit.disabled = loading || Boolean(error);
+  els.accountLinkUser.replaceChildren();
+  if (user) {
+    els.accountLinkUser.hidden = false;
+    els.accountLinkUser.append(
+      el("strong", {}, user.display_name || user.username),
+      el("span", {}, user.email || user.username),
+      expiresAt ? el("span", {}, `Expires ${fullDateFormatter.format(new Date(expiresAt))}`) : el("span")
+    );
+  } else {
+    els.accountLinkUser.hidden = true;
+  }
 }
 
 async function enterApp() {
@@ -194,6 +264,7 @@ function showAuth(mode) {
   els.newIssueButton.hidden = true;
   els.setupForm.hidden = mode !== "setup";
   els.loginForm.hidden = mode !== "login";
+  els.accountLinkForm.hidden = mode !== "account";
 }
 
 function showApp() {
@@ -804,6 +875,9 @@ function renderUsers() {
   els.userList.replaceChildren();
   for (const user of state.users) {
     const row = el("div", { className: "admin-row" });
+    const reset = el("button", { className: "ghost-button", type: "button" }, "Reset");
+    reset.disabled = user.id === state.user.id || user.disabled;
+    reset.addEventListener("click", () => resetUserPassword(user).catch(showError));
     const edit = el("button", { className: "ghost-button", type: "button" }, "Edit");
     edit.addEventListener("click", () => openUserModal(user));
     const remove = el("button", { className: "ghost-button", type: "button" }, "Delete");
@@ -816,7 +890,8 @@ function renderUsers() {
     row.append(
       el("div", { className: "admin-row-main" }, label),
       badge(user.role, "priority-normal"),
-      el("span", { className: user.disabled ? "muted" : "status-ok" }, user.disabled ? "Disabled" : "Active"),
+      el("span", { className: user.disabled || user.password_reset_required ? "muted" : "status-ok" }, user.disabled ? "Disabled" : user.password_reset_required ? "Password pending" : "Active"),
+      reset,
       edit,
       remove
     );
@@ -1220,7 +1295,6 @@ function openUserModal(user = null) {
       { name: "email", label: "Email", type: "email", autocomplete: "email" }
     ] },
     { group: [
-      { name: "password", label: "New password", type: "password", minlength: 8, autocomplete: "new-password" },
       { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), disabled: user.id === state.user.id }
     ] },
     { name: "disabled", label: "Disabled", type: "checkbox", disabled: user.id === state.user.id }
@@ -1230,33 +1304,145 @@ function openUserModal(user = null) {
       { name: "display_name", label: "Display name", autocomplete: "off" }
     ] },
     { name: "email", label: "Email", type: "email", autocomplete: "email" },
-    { group: [
-      { name: "password", label: "Password", type: "password", required: true, minlength: 8 },
-      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "staff" }
-    ] }
+    { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "staff" }
   ];
 
   els.modalHost.open({
     title: editing ? `Edit ${user.username}` : "New Account",
-    submitText: editing ? "Save" : "Create",
+    submitText: editing ? "Save" : "Create & Send Setup",
     values,
     fields,
     onSubmit: async (data) => {
       if (!editing) {
-        await request("/api/users", { method: "POST", body: JSON.stringify(data) });
+        const created = await request("/api/users", { method: "POST", body: JSON.stringify(data) });
         await loadUsers();
+        window.setTimeout(() => openAccountLinkResult(created, "setup"), 0);
         return;
       }
       const patch = {
         display_name: data.display_name || "",
         email: data.email || ""
       };
-      if (data.password) patch.password = data.password;
       if (user.id !== state.user.id) {
         patch.role = data.role;
         patch.disabled = Boolean(data.disabled);
       }
       await updateUser(user.id, patch);
+    }
+  });
+}
+
+async function resetUserPassword(user) {
+  const payload = await request(`/api/users/${user.id}/password-reset`, { method: "POST" });
+  await loadUsers();
+  openAccountLinkResult(payload, "reset");
+}
+
+function openAccountLinkResult(payload, purpose = "setup") {
+  const link = payload.account_link || {};
+  const userLabel = payload.display_name || payload.username || "Account";
+  const title = purpose === "reset" ? `Password Reset for ${userLabel}` : `Setup Link for ${userLabel}`;
+  const linkInput = el("input", {
+    readonly: "readonly",
+    value: link.url || ""
+  });
+  const copy = el("button", { type: "button" }, "Copy");
+  copy.addEventListener("click", async () => {
+    await copyText(link.url || "");
+    copy.textContent = "Copied";
+    window.setTimeout(() => {
+      copy.textContent = "Copy";
+    }, 1200);
+  });
+  const hasEmail = Boolean(payload.email);
+  const statusText = !hasEmail
+    ? "This account has no email address. Share this one-time link manually."
+    : link.email_enabled
+    ? link.email_queued
+      ? "Pemmece queued the email. Keep this link as a fallback for manual delivery."
+      : "Email is configured, but the message could not be queued. Use the link below."
+    : "Email is not configured. Share this one-time link manually.";
+  const content = el("div", { className: "link-result" }, [
+    el("p", {}, statusText),
+    el("div", { className: "copy-row" }, [linkInput, copy]),
+    el("div", { className: "link-meta" }, [
+      el("span", {}, ["Account: ", el("strong", {}, userLabel)]),
+      el("span", {}, ["Username: ", el("strong", {}, payload.username || "")]),
+      link.expires_at ? el("span", {}, ["Expires: ", el("strong", {}, fullDateFormatter.format(new Date(link.expires_at)))]) : el("span")
+    ])
+  ]);
+  els.modalHost.open({
+    title,
+    content,
+    hideFooter: true
+  });
+}
+
+async function copyText(value) {
+  if (!value) return;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  document.execCommand("copy");
+  area.remove();
+}
+
+function openProfileModal() {
+  els.modalHost.open({
+    title: "Profile",
+    submitText: "Save",
+    values: {
+      display_name: state.user?.display_name || "",
+      email: state.user?.email || ""
+    },
+    fields: [
+      { name: "display_name", label: "Display name", autocomplete: "name" },
+      { name: "email", label: "Email", type: "email", autocomplete: "email" }
+    ],
+    onSubmit: async (data) => {
+      state.user = await request("/api/me", {
+        method: "PATCH",
+        body: JSON.stringify({
+          display_name: data.display_name || "",
+          email: data.email || ""
+        })
+      });
+      renderProfileMenu();
+      if (!isCustomer()) await loadUsers();
+    }
+  });
+}
+
+function openPasswordModal() {
+  els.modalHost.open({
+    title: "Change Password",
+    submitText: "Update Password",
+    fields: [
+      { name: "current_password", label: "Current password", type: "password", required: true, autocomplete: "current-password" },
+      { name: "new_password", label: "New password", type: "password", required: true, minlength: 8, autocomplete: "new-password" },
+      { name: "confirm_password", label: "Confirm new password", type: "password", required: true, minlength: 8, autocomplete: "new-password" }
+    ],
+    onSubmit: async (data) => {
+      if (data.new_password !== data.confirm_password) {
+        throw new Error("New passwords do not match");
+      }
+      const payload = await request("/api/me/password", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: data.current_password,
+          new_password: data.new_password
+        })
+      });
+      state.user = payload.user || state.user;
+      state.csrf = payload.csrf_token || state.csrf;
+      renderProfileMenu();
     }
   });
 }
@@ -1354,10 +1540,34 @@ function bindEvents() {
     await loadSession();
   });
 
+  els.accountLinkForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.accountLink?.token) return;
+    const form = new FormData(els.accountLinkForm);
+    const payload = await request(`/api/account-links/${encodeURIComponent(state.accountLink.token)}`, {
+      method: "POST",
+      body: JSON.stringify(formObject(form))
+    });
+    state.csrf = payload.csrf_token || "";
+    state.user = payload.user || null;
+    state.accountLink = null;
+    els.accountLinkForm.reset();
+    window.history.replaceState(null, "", "/");
+    await enterApp();
+  });
+
   els.logoutButton.addEventListener("click", async () => {
     closeProfileMenu();
     await request("/api/logout", { method: "POST" });
     showAuth("login");
+  });
+  els.profileEditButton.addEventListener("click", () => {
+    closeProfileMenu();
+    openProfileModal();
+  });
+  els.changePasswordButton.addEventListener("click", () => {
+    closeProfileMenu();
+    openPasswordModal();
   });
   els.profileButton.addEventListener("click", (event) => {
     event.stopPropagation();

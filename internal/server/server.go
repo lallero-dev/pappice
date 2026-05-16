@@ -22,6 +22,7 @@ var assets embed.FS
 const (
 	sessionCookieName      = "pemmece_session"
 	defaultEmailBatchDelay = 20 * time.Second
+	accountLinkExpiry      = 24 * time.Hour
 )
 
 type Options struct {
@@ -41,9 +42,10 @@ type Server struct {
 }
 
 type authContext struct {
-	User     store.User
-	CSRF     string
-	ViaToken bool
+	User         store.User
+	CSRF         string
+	SessionToken string
+	ViaToken     bool
 }
 
 type ticketPatchInput struct {
@@ -101,14 +103,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleIndex)
 	s.mux.HandleFunc("/support", s.handleSupportIndex)
 	s.mux.HandleFunc("/support/", s.handleSupportIndex)
+	s.mux.HandleFunc("/account/", s.handleAccountIndex)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles))))
 
 	s.mux.HandleFunc("/api/health", s.handleHealth)
 	s.mux.HandleFunc("/api/session", s.handleSession)
-	s.mux.HandleFunc("/api/me", s.handleSession)
+	s.mux.HandleFunc("/api/me", s.handleMe)
+	s.mux.HandleFunc("/api/me/password", s.handleMePassword)
 	s.mux.HandleFunc("/api/setup", s.handleSetup)
 	s.mux.HandleFunc("/api/login", s.handleLogin)
 	s.mux.HandleFunc("/api/logout", s.handleLogout)
+	s.mux.HandleFunc("/api/account-links/", s.handleAccountLinkByToken)
 	s.mux.HandleFunc("/api/projects", s.handleProjects)
 	s.mux.HandleFunc("/api/projects/", s.handleProjectByID)
 	s.mux.HandleFunc("/api/tickets", s.handleTickets)
@@ -166,6 +171,27 @@ func (s *Server) handleSupportIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
+func (s *Server) handleAccountIndex(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.URL.Path, "/account/setup/") && !strings.HasPrefix(r.URL.Path, "/account/reset/") {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		methodNotAllowed(w, http.MethodGet, http.MethodHead)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if r.Method == http.MethodHead {
+		return
+	}
+	content, err := assets.ReadFile("web/index.html")
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "index asset not found")
+		return
+	}
+	_, _ = w.Write(content)
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
@@ -195,6 +221,68 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		"needs_setup":   s.store.SetupRequired(),
 		"user":          nullableUser(auth.User, ok),
 		"csrf_token":    nullableString(auth.CSRF, ok && !auth.ViaToken),
+	})
+}
+
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s.handleSession(w, r)
+		return
+	}
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPatch {
+		methodNotAllowed(w, http.MethodGet, http.MethodPatch)
+		return
+	}
+	var input struct {
+		DisplayName *string `json:"display_name"`
+		Email       *string `json:"email"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	updated, err := s.store.UpdateUser(auth.User.ID, store.UpdateUser{
+		DisplayName: input.DisplayName,
+		Email:       input.Email,
+	})
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, store.ToPublicUser(updated))
+}
+
+func (s *Server) handleMePassword(w http.ResponseWriter, r *http.Request) {
+	auth, ok := s.requireAuth(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if auth.ViaToken || strings.TrimSpace(auth.SessionToken) == "" {
+		respondError(w, http.StatusForbidden, "browser session is required")
+		return
+	}
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	updated, err := s.store.ChangePassword(auth.User.ID, input.CurrentPassword, input.NewPassword, auth.SessionToken)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"user":       store.ToPublicUser(updated),
+		"csrf_token": auth.CSRF,
 	})
 }
 
@@ -242,6 +330,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := s.store.Authenticate(input.Username, input.Password)
 	if err != nil {
+		if errors.Is(err, store.ErrPasswordResetRequired) {
+			respondError(w, http.StatusUnauthorized, "password setup or reset is required; use the emailed link or contact an admin")
+			return
+		}
 		respondError(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
@@ -278,6 +370,52 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request) {
+	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/account-links/"), "/")
+	if token == "" || strings.Contains(token, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		link, user, err := s.store.GetAccountLink(token)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"purpose":    link.Purpose,
+			"expires_at": link.ExpiresAt,
+			"user":       store.ToPublicUser(user),
+		})
+	case http.MethodPost:
+		if !s.requireHTTPS(w, r) {
+			return
+		}
+		var input struct {
+			Password string `json:"password"`
+		}
+		if !decodeJSON(w, r, &input) {
+			return
+		}
+		user, err := s.store.ConsumeAccountLink(token, input.Password)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		csrf, ok := s.issueSession(w, user.ID)
+		if !ok {
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"user":       store.ToPublicUser(user),
+			"csrf_token": csrf,
+		})
+	default:
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
+	}
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -712,12 +850,13 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		created, err := s.store.CreateUser(input)
+		created, link, token, err := s.store.CreateUserWithSetupLink(input, accountLinkExpiry)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		respondJSON(w, http.StatusCreated, store.ToPublicUser(created))
+		queued := s.enqueueAccountLinkEmail("account.setup", created, token, link.ExpiresAt)
+		respondJSON(w, http.StatusCreated, userAccountLinkResponse(created, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
@@ -728,14 +867,32 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, ok := parseTrailingID(w, r.URL.Path, "/api/users/")
-	if !ok {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/users/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || id < 1 {
+		respondError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	if len(parts) == 2 && parts[1] == "password-reset" {
+		s.handleUserPasswordReset(w, r, id)
+		return
+	}
+	if len(parts) != 1 {
+		http.NotFound(w, r)
 		return
 	}
 	switch r.Method {
 	case http.MethodPatch:
 		var patch store.UpdateUser
 		if !decodeJSON(w, r, &patch) {
+			return
+		}
+		if patch.Password != nil {
+			respondError(w, http.StatusBadRequest, "use password reset")
 			return
 		}
 		user, err := s.store.UpdateUser(id, patch)
@@ -753,6 +910,20 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w, http.MethodPatch, http.MethodDelete)
 	}
+}
+
+func (s *Server) handleUserPasswordReset(w http.ResponseWriter, r *http.Request, userID int64) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	user, link, token, err := s.store.CreatePasswordResetLink(userID, accountLinkExpiry)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	queued := s.enqueueAccountLinkEmail("account.reset", user, token, link.ExpiresAt)
+	respondJSON(w, http.StatusCreated, userAccountLinkResponse(user, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 }
 
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
@@ -1079,7 +1250,7 @@ func (s *Server) issueSession(w http.ResponseWriter, userID int64) (string, bool
 func (s *Server) currentAuth(r *http.Request) (authContext, bool) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
 		if user, csrf, ok := s.store.UserBySession(cookie.Value); ok {
-			return authContext{User: user, CSRF: csrf}, true
+			return authContext{User: user, CSRF: csrf, SessionToken: cookie.Value}, true
 		}
 	}
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
@@ -1307,6 +1478,30 @@ func publicWebhooks(hooks []store.Webhook) []store.PublicWebhook {
 	return public
 }
 
+type accountLinkResponse struct {
+	URL          string    `json:"url"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	EmailQueued  bool      `json:"email_queued"`
+	EmailEnabled bool      `json:"email_enabled"`
+}
+
+type userAccountLinkPayload struct {
+	store.PublicUser
+	AccountLink accountLinkResponse `json:"account_link"`
+}
+
+func userAccountLinkResponse(user store.User, url string, expiresAt time.Time, emailQueued, emailEnabled bool) userAccountLinkPayload {
+	return userAccountLinkPayload{
+		PublicUser: store.ToPublicUser(user),
+		AccountLink: accountLinkResponse{
+			URL:          url,
+			ExpiresAt:    expiresAt,
+			EmailQueued:  emailQueued,
+			EmailEnabled: emailEnabled,
+		},
+	}
+}
+
 func (s *Server) ticketURL(token string) string {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -1317,6 +1512,20 @@ func (s *Server) ticketURL(token string) string {
 		return "/"
 	}
 	return base + "/"
+}
+
+func (s *Server) accountLinkURL(purpose, token string) string {
+	purpose = strings.TrimSpace(purpose)
+	token = strings.TrimSpace(token)
+	if purpose == "" || token == "" {
+		return ""
+	}
+	base := strings.TrimRight(s.options.PublicURL, "/")
+	path := "/account/" + purpose + "/" + token
+	if base == "" {
+		return path
+	}
+	return base + path
 }
 
 func nullableUser(user store.User, ok bool) any {
@@ -1411,6 +1620,8 @@ func respondStoreError(w http.ResponseWriter, err error) {
 		respondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, store.ErrConflict):
 		respondError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, store.ErrPasswordResetRequired):
+		respondError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, store.ErrValidation):
 		respondError(w, http.StatusBadRequest, err.Error())
 	default:

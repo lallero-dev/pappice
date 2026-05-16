@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -68,14 +69,12 @@ func TestProjectRBACAndCSRF(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 	projectID := decodeFirstProjectID(t, body)
 
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
+	bobID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
 		"username": "bob",
 		"email":    "bob@example.test",
 		"password": "correct horse",
 		"role":     "staff",
-	}, adminCookie, adminCSRF, server.URL)
-	requireStatus(t, resp, body, http.StatusCreated)
-	bobID := decodeInt64(t, body, "id")
+	})
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/projects/"+itoa(projectID)+"/members", map[string]any{
 		"user_id": bobID,
@@ -209,6 +208,148 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	if got := decodeBool(t, body, "authenticated"); got {
 		t.Fatalf("session authenticated after logout: %s", body)
 	}
+}
+
+func TestAccountSetupAndResetLinks(t *testing.T) {
+	tracker, server, client := newTestServer(t, Options{
+		EmailNotifications: true,
+		PublicURL:          "https://tracker.example.test",
+	})
+	_ = tracker
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
+		"username":     "pending",
+		"display_name": "Pending User",
+		"email":        "pending@example.test",
+		"role":         "staff",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	userID := decodeInt64(t, body, "id")
+	setupURL := decodeNestedString(t, body, "account_link", "url")
+	if !strings.HasPrefix(setupURL, "https://tracker.example.test/account/setup/") ||
+		!bytes.Contains(body, []byte(`"email_queued":true`)) ||
+		!bytes.Contains(body, []byte(`"password_reset_required":true`)) {
+		t.Fatalf("create user account link response = %s", body)
+	}
+	setupToken := accountLinkTokenFromURL(t, setupURL)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
+		"username": "pending",
+		"password": "correct horse",
+	}, nil, "", "")
+	requireStatus(t, resp, body, http.StatusUnauthorized)
+	if !bytes.Contains(body, []byte("password setup or reset is required")) {
+		t.Fatalf("pending login error = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/account/setup/"+setupToken, nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Pemmece")) {
+		t.Fatalf("account setup route should serve app: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/account-links/"+setupToken, nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte(`"purpose":"setup"`)) || !bytes.Contains(body, []byte(`"username":"pending"`)) {
+		t.Fatalf("account setup link lookup = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+setupToken, map[string]any{
+		"password": "correct horse",
+	}, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if len(resp.Cookies()) == 0 {
+		t.Fatalf("setup link did not issue session: %s", body)
+	}
+	userCookie := resp.Cookies()[0]
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+setupToken, map[string]any{
+		"password": "correct horse",
+	}, nil, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+	loginUser(t, client, server.URL, "pending", "correct horse")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users/"+itoa(userID)+"/password-reset", nil, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	resetURL := decodeNestedString(t, body, "account_link", "url")
+	if !strings.Contains(resetURL, "/account/reset/") ||
+		!bytes.Contains(body, []byte(`"email_queued":true`)) ||
+		!bytes.Contains(body, []byte(`"password_reset_required":true`)) {
+		t.Fatalf("password reset response = %s", body)
+	}
+	resetToken := accountLinkTokenFromURL(t, resetURL)
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/session", nil, userCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeBool(t, body, "authenticated") {
+		t.Fatalf("old session still authenticated after reset: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
+		"username": "pending",
+		"password": "correct horse",
+	}, nil, "", "")
+	requireStatus(t, resp, body, http.StatusUnauthorized)
+	if !bytes.Contains(body, []byte("password setup or reset is required")) {
+		t.Fatalf("old password reset-required error = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+resetToken, map[string]any{
+		"password": "new correct horse",
+	}, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	loginUser(t, client, server.URL, "pending", "new correct horse")
+}
+
+func TestProfileAndPasswordChangeFlow(t *testing.T) {
+	_, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	staffID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username":     "staffer",
+		"display_name": "Staffer",
+		"email":        "staffer@example.test",
+		"password":     "correct horse",
+		"role":         "staff",
+	})
+	if staffID == 0 {
+		t.Fatal("created staff id is zero")
+	}
+
+	staffCookie1, staffCSRF1 := loginUser(t, client, server.URL, "staffer", "correct horse")
+	staffCookie2, _ := loginUser(t, client, server.URL, "staffer", "correct horse")
+
+	resp, body := doJSON(t, client, http.MethodPatch, server.URL+"/api/me", map[string]any{
+		"display_name": "Staff Person",
+		"email":        "person@example.test",
+	}, staffCookie1, staffCSRF1, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte(`"display_name":"Staff Person"`)) || !bytes.Contains(body, []byte(`"email":"person@example.test"`)) {
+		t.Fatalf("profile patch response = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/me/password", map[string]any{
+		"current_password": "wrong password",
+		"new_password":     "better password",
+	}, staffCookie1, staffCSRF1, server.URL)
+	requireStatus(t, resp, body, http.StatusBadRequest)
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/me/password", map[string]any{
+		"current_password": "correct horse",
+		"new_password":     "better password",
+	}, staffCookie1, staffCSRF1, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if got := decodeString(t, body, "csrf_token"); got == "" {
+		t.Fatalf("password change csrf missing: %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/session", nil, staffCookie1, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !decodeBool(t, body, "authenticated") {
+		t.Fatalf("current session not kept after password change: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/session", nil, staffCookie2, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeBool(t, body, "authenticated") {
+		t.Fatalf("other session still authenticated after password change: %s", body)
+	}
+	loginUser(t, client, server.URL, "staffer", "better password")
 }
 
 func TestAdminProjectIssueCommentAndNotificationFlow(t *testing.T) {
@@ -414,8 +555,7 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte(`"pending":1`)) ||
-		!bytes.Contains(body, []byte("ticket.updated")) ||
+	if !bytes.Contains(body, []byte("ticket.updated")) ||
 		!bytes.Contains(body, []byte("Ticket update")) ||
 		!bytes.Contains(body, []byte("dev@example.test")) ||
 		!bytes.Contains(body, []byte("Taking this now")) {
@@ -898,9 +1038,19 @@ func loginUser(t *testing.T, client *http.Client, baseURL, username, password st
 
 func createUser(t *testing.T, client *http.Client, baseURL string, cookie *http.Cookie, csrf string, payload map[string]any) int64 {
 	t.Helper()
+	password, hasPassword := payload["password"].(string)
 	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/users", payload, cookie, csrf, baseURL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	return decodeInt64(t, body, "id")
+	id := decodeInt64(t, body, "id")
+	if hasPassword && strings.TrimSpace(password) != "" {
+		link := decodeNestedString(t, body, "account_link", "url")
+		token := accountLinkTokenFromURL(t, link)
+		resp, body = doJSON(t, client, http.MethodPost, baseURL+"/api/account-links/"+token, map[string]any{
+			"password": password,
+		}, nil, "", "")
+		requireStatus(t, resp, body, http.StatusOK)
+	}
+	return id
 }
 
 func addProjectMember(t *testing.T, client *http.Client, baseURL string, cookie *http.Cookie, csrf string, projectID, userID int64, role string) {
@@ -1022,6 +1172,33 @@ func decodeNestedInt64(t *testing.T, body []byte, parent, key string) int64 {
 	nested, _ := payload[parent].(map[string]any)
 	value, _ := nested[key].(float64)
 	return int64(value)
+}
+
+func decodeNestedString(t *testing.T, body []byte, parent, key string) string {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	nested, _ := payload[parent].(map[string]any)
+	value, _ := nested[key].(string)
+	if value == "" {
+		t.Fatalf("body missing %s.%s: %s", parent, key, body)
+	}
+	return value
+}
+
+func accountLinkTokenFromURL(t *testing.T, rawURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse account link url %q: %v", rawURL, err)
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "account" || (parts[1] != "setup" && parts[1] != "reset") || parts[2] == "" {
+		t.Fatalf("invalid account link url %q", rawURL)
+	}
+	return parts[2]
 }
 
 func decodeFirstProjectID(t *testing.T, body []byte) int64 {
