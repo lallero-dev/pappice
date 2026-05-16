@@ -9,6 +9,8 @@
   --border-soft: #dde4ec;
   --blue: #2367a4;
   --blue-dark: #194d7b;
+  --brand-color: #5bb974;
+  --brand-contrast: #102417;
   --green: #2f855a;
   --amber: #b7791f;
   --red: #b42318;
@@ -46,6 +48,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .topbar {
   align-items: center;
   background: #253746;
@@ -67,9 +74,9 @@ button {
 
 .brand-mark {
   align-items: center;
-  background: #5bb974;
+  background: var(--brand-color);
   border-radius: 6px;
-  color: #102417;
+  color: var(--brand-contrast);
   display: inline-flex;
   font-weight: 800;
   height: 34px;
@@ -263,9 +270,45 @@ button {
   background: #f4f7fa;
 }
 
+.app-alert {
+  align-items: start;
+  background: #fff4f4;
+  border: 1px solid #f0b6b6;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  color: #8f1d1d;
+  display: flex;
+  gap: 10px;
+  max-width: min(620px, calc(100vw - 24px));
+  padding: 10px 12px;
+  position: fixed;
+  right: 12px;
+  top: 72px;
+  z-index: 30;
+}
+
+.app-alert-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  display: inline-flex;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.app-alert-close:hover {
+  background: rgb(143 29 29 / 10%);
+}
+
 .auth-wrap {
   align-items: center;
   display: grid;
+  gap: 10px;
   justify-content: center;
   min-height: calc(100vh - 60px);
   padding: 18px;
@@ -291,6 +334,17 @@ button {
 .auth-note {
   color: var(--muted);
   margin: 0;
+}
+
+.auth-error {
+  background: #fff4f4;
+  border: 1px solid #f0b6b6;
+  border-radius: 8px;
+  color: #8f1d1d;
+  margin: 0;
+  max-width: 420px;
+  padding: 10px 12px;
+  width: min(420px, calc(100vw - 36px));
 }
 
 .account-summary {
@@ -737,11 +791,110 @@ button:focus-visible {
 .empty-state {
   align-items: center;
   color: var(--muted);
-  display: flex;
+  display: grid;
+  gap: 10px;
   justify-content: center;
-  min-height: 220px;
+  justify-items: center;
+  min-height: 260px;
   padding: 24px;
   text-align: center;
+}
+
+.empty-state h3,
+.empty-inline h3 {
+  color: var(--text);
+  font-size: 17px;
+  margin: 0;
+}
+
+.empty-state p,
+.empty-inline p {
+  margin: 0;
+  max-width: 460px;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.onboarding-panel {
+  align-items: start;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.4fr) auto;
+  margin-bottom: 10px;
+  padding: 14px;
+}
+
+.onboarding-panel h2 {
+  font-size: 18px;
+  margin: 2px 0 4px;
+}
+
+.onboarding-panel p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.eyebrow {
+  color: var(--blue-dark);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.onboarding-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.onboarding-step {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 22px minmax(0, 1fr);
+}
+
+.step-dot {
+  align-items: center;
+  background: #eef2f6;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.onboarding-step.done .step-dot {
+  background: #e8f6ee;
+  border-color: #b9dfc9;
+  color: var(--green);
+}
+
+.step-copy,
+.step-copy strong,
+.step-copy span {
+  display: block;
+}
+
+.step-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.step-action {
+  margin-top: 6px;
 }
 
 .admin-grid {
@@ -921,7 +1074,9 @@ button:focus-visible {
 
 .empty-inline {
   color: var(--muted);
-  font-size: 12px;
+  display: grid;
+  gap: 5px;
+  padding: 8px 2px;
 }
 
 @media (max-width: 1050px) {
@@ -961,6 +1116,16 @@ button:focus-visible {
 
   .email-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-alert {
+    left: 8px;
+    right: 8px;
+    top: 8px;
+  }
+
+  .onboarding-panel {
+    grid-template-columns: 1fr;
   }
 
   .admin-row {

@@ -1,169 +1,134 @@
 # Pemmece
 
-Pemmece is a small self-hosted customer support ticketing system. It is a
-single Go binary with SQLite persistence, embedded web assets, staff tools, and
-registered customer access.
+Pemmece is a small self-hosted customer support ticketing system for small
+teams. It is one Go binary with SQLite storage, embedded web assets, registered
+customers, staff tools, no-reply email notifications, webhooks, and an audit log.
 
-Current focus:
+The project is intentionally simple: no external database, no separate frontend
+build, and no inbound email processing.
 
-- First-run admin setup, secure login sessions, staff/customer roles, product
-  roles, and API tokens.
-- Customer tickets with statuses, priorities, assignees, requesters,
-  public replies, internal notes, and filtering.
-- Registered customers use the same ticket UI as staff with restricted actions.
-- SQLite-backed local persistence for multiuser deployments.
-- Global and product webhooks with `X-Pemmece-Signature`.
-- SQLite-backed no-reply email notification outbox with SMTP delivery.
-- One-time account setup/reset links, configurable session lifetime, basic
-  abuse rate limiting, and an admin audit log.
+## Features
 
-## Run
+- Products group tickets by service, customer, or team.
+- Customers and staff use the same UI with role-based actions.
+- Ticket workflow: New, Assigned, Resolved, Rejected.
+- Public replies, internal notes, assignees, priorities, filtering, and sorting.
+- Admin-created accounts with one-time setup/reset links.
+- SMTP-backed no-reply notifications with a durable SQLite outbox.
+- API tokens, webhooks, and admin audit events.
 
-Browser sessions require HTTPS because session cookies are always marked
-`Secure`. For local development, run with a certificate:
+## Requirements
 
-```sh
-go run ./cmd/pemmece -tls-cert ./localhost.pem -tls-key ./localhost-key.pem
-```
+- Go 1.26+
+- SQLite is embedded through the Go driver; no database server is required.
+- Optional for E2E tests: Node, OpenSSL, and Chromium.
 
-Open `https://127.0.0.1:8388` and create the first admin account. Admins can
-create customer accounts, add them to products as customers, and those customers
-can submit and follow support tickets from the main ticket UI.
+## Run Locally
 
-Useful flags:
+Browser sessions require HTTPS because cookies are marked `Secure`.
 
 ```sh
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout localhost-key.pem \
+  -out localhost.pem \
+  -days 365 \
+  -subj /CN=127.0.0.1 \
+  -addext subjectAltName=IP:127.0.0.1,DNS:localhost
+
 go run ./cmd/pemmece \
-  -addr 0.0.0.0:8388 \
-  -db ./pemmece.db \
   -tls-cert ./localhost.pem \
   -tls-key ./localhost-key.pem
 ```
 
-The same values can be supplied with `PEMMECE_ADDR`, `PEMMECE_DB`,
-`PEMMECE_TLS_CERT`, and `PEMMECE_TLS_KEY`. At startup, Pemmece also loads a
-repo-local `.env` file when present; existing process environment variables take
-precedence over `.env` values.
+Open `https://127.0.0.1:8388` and create the first admin account.
 
-Browser sessions default to 14 days. Set `PEMMECE_SESSION_TTL` with a Go
-duration such as `8h`, `72h`, or `336h`. Login and account setup/reset link
-attempts are rate limited per remote IP and username/token. Defaults are 10
-attempts per minute; tune with `PEMMECE_LOGIN_RATE_LIMIT`,
-`PEMMECE_LOGIN_RATE_WINDOW`, `PEMMECE_ACCOUNT_LINK_RATE_LIMIT`, and
-`PEMMECE_ACCOUNT_LINK_RATE_WINDOW`.
-
-Admins can inspect the audit log from the admin page. It records security and
-administrative actions such as setup completion, account creation, password
-reset requests, user changes, product membership changes, token changes,
-webhook changes, and email retry/test actions.
-
-## Tests
-
-Run the Go unit and integration tests with:
+For persistent local configuration:
 
 ```sh
-go test ./...
+cp .env.example .env
+go run ./cmd/pemmece
 ```
 
-Run the end-to-end browser smoke test with:
+## Configuration
 
-```sh
-npm run test:e2e
+Every runtime option is available as a flag and as an environment variable.
+Pemmece loads a repo-local `.env` file when present; existing process
+environment variables take precedence.
+
+Important values:
+
+- `PEMMECE_ADDR`: listen address, default `127.0.0.1:8388`
+- `PEMMECE_DB`: SQLite database path, default `./pemmece.db`
+- `PEMMECE_TLS_CERT` / `PEMMECE_TLS_KEY`: HTTPS certificate and key
+- `PEMMECE_PUBLIC_URL`: public HTTPS URL used in emails
+- `PEMMECE_SESSION_TTL`: browser session lifetime, default `336h`
+- `PEMMECE_BRAND_NAME`: display name for the deployed instance
+
+Use [.env.example](./.env.example) as the complete reference.
+
+## Branding
+
+Set `PEMMECE_BRAND_NAME`, `PEMMECE_BRAND_SUBTITLE`, `PEMMECE_BRAND_MARK`, and
+`PEMMECE_BRAND_COLOR` to brand a deployment, for example `lallero.dev`.
+Branding changes the visible instance identity without changing the software
+name or requiring a custom build.
+
+## Email
+
+Pemmece only sends no-reply email. It does not receive or parse replies.
+
+Enable SMTP with:
+
+```env
+PEMMECE_EMAIL_NOTIFICATIONS=true
+PEMMECE_PUBLIC_URL=https://support.example.com
+PEMMECE_SMTP_HOST=smtp.example.com
+PEMMECE_SMTP_PORT=587
+PEMMECE_SMTP_USER=pemmece
+PEMMECE_SMTP_PASSWORD=secret
+PEMMECE_SMTP_FROM=no-reply@example.com
+PEMMECE_SMTP_TLS_MODE=starttls
 ```
 
-The E2E smoke test is dependency-free. It starts Pemmece against a temporary
-SQLite database, generates a temporary self-signed HTTPS certificate, runs a
-local fake SMTP server, and drives Chromium through the first admin setup,
-customer account setup, ticket creation, staff reply/resolve, email outbox, and
-audit-log flows. It requires `go`, `node`, `openssl`, and Chromium. Set
-`PEMMECE_E2E_CHROMIUM=/path/to/chromium` if Chromium is not at
-`/usr/bin/chromium`.
+Ticket notifications are queued in SQLite and coalesced for
+`PEMMECE_EMAIL_BATCH_DELAY` before sending. Admins can inspect the outbox, send a
+test email, and retry failures from the admin page.
 
-Email notifications are enabled when SMTP is configured. The app enqueues email
-jobs durably in SQLite when ticket events happen, then a background worker sends
-them with retry/backoff. Ticket update emails are delayed briefly and coalesced
-per ticket and recipient, so a save with status, assignee, and reply changes
-produces one no-reply "Ticket update" email instead of several.
+## Webhooks And API
 
-```sh
-go run ./cmd/pemmece \
-  -public-url https://support.example.test \
-  -smtp-host smtp.example.test \
-  -smtp-port 587 \
-  -smtp-user pemmece \
-  -smtp-password secret \
-  -smtp-from noreply@example.test
-```
-
-Equivalent environment variables are `PEMMECE_PUBLIC_URL`,
-`PEMMECE_EMAIL_NOTIFICATIONS`, `PEMMECE_SMTP_HOST`, `PEMMECE_SMTP_PORT`,
-`PEMMECE_SMTP_USER`, `PEMMECE_SMTP_PASSWORD`, `PEMMECE_SMTP_FROM`, and
-`PEMMECE_SMTP_TLS_MODE` (`starttls`, `tls`, or `none`). The coalescing window is
-`PEMMECE_EMAIL_BATCH_DELAY` and accepts Go duration values like `20s` or `2m`.
-Admins can inspect the email outbox, queue a test email, and retry failed
-notifications from the admin page.
-
-Webhook delivery defaults are conservative: webhook URLs must be HTTPS and must
-not resolve to private, loopback, or link-local addresses. Development-only
-escape hatches are available with `-allow-insecure-webhooks` and
-`-allow-private-webhooks`.
-
-## API
-
-Authentication works with the web session cookie or an API token. Cookie-backed
-mutating requests must include the `X-Pemmece-CSRF` value returned by login or
-`GET /api/session`.
+API access uses either the web session cookie or an API token:
 
 ```sh
 curl -H "Authorization: Bearer pme_..." https://127.0.0.1:8388/api/tickets
 ```
 
-Core endpoints:
+Cookie-backed mutating requests must include the `X-Pemmece-CSRF` token returned
+by `GET /api/session`.
 
-- `GET /api/health`
-- `GET /api/session`
-- `POST /api/setup`
-- `POST /api/login`
-- `POST /api/logout`
-- `GET /api/projects`
-- `POST /api/projects`
-- `GET /api/projects/{id}`
-- `PATCH /api/projects/{id}`
-- `DELETE /api/projects/{id}`
-- `GET /api/projects/{id}/members`
-- `POST /api/projects/{id}/members`
-- `DELETE /api/projects/{id}/members/{user_id}`
-- `GET /api/projects/{id}/tickets`
-- `POST /api/projects/{id}/tickets`
-- `GET /api/tickets`
-- `POST /api/tickets`
-- `GET /api/tickets/{id}`
-- `PATCH /api/tickets/{id}`
-- `POST /api/tickets/{id}/comments`
-- `GET /api/users`
-- `POST /api/users`
-- `PATCH /api/users/{id}`
-- `DELETE /api/users/{id}`
-- `GET /api/tokens`
-- `POST /api/tokens`
-- `DELETE /api/tokens/{id}`
-- `GET /api/webhooks`
-- `POST /api/webhooks`
-- `GET /api/projects/{id}/webhooks`
-- `POST /api/projects/{id}/webhooks`
-- `PATCH /api/webhooks/{id}`
-- `DELETE /api/webhooks/{id}`
-- `POST /api/webhooks/{id}/test`
-- `GET /api/webhook-deliveries`
-- `GET /api/projects/{id}/webhook-deliveries`
-- `GET /api/email-notifications`
-- `POST /api/email-notifications/test`
-- `POST /api/email-notifications/{id}/retry`
-- `GET /api/audit-events`
-
-Webhook events:
+Webhook payloads are signed with `X-Pemmece-Signature`. Supported ticket events:
 
 - `ticket.created`
 - `ticket.updated`
 - `ticket.commented`
 - `ticket.assigned`
+
+Webhook URLs must be HTTPS and public by default. Development-only escape
+hatches are available with `PEMMECE_ALLOW_INSECURE_WEBHOOKS` and
+`PEMMECE_ALLOW_PRIVATE_WEBHOOKS`.
+
+## Tests
+
+```sh
+go test ./...
+npm run test:e2e
+```
+
+The E2E smoke test starts an isolated HTTPS Pemmece instance with a temporary
+SQLite database and fake SMTP server, then drives Chromium through the core
+customer/staff ticket flow. Set `PEMMECE_E2E_CHROMIUM=/path/to/chromium` if
+Chromium is not at `/usr/bin/chromium`.
+
+## Contributing
+
+Keep changes small and focused. Run the tests above before opening a pull
+request. Do not commit `.env`, SQLite databases, certificates, or SMTP secrets.

@@ -31,6 +31,10 @@ func main() {
 	allowInsecureWebhooks := flag.Bool("allow-insecure-webhooks", envBool("PEMMECE_ALLOW_INSECURE_WEBHOOKS"), "allow http webhook URLs")
 	allowPrivateWebhooks := flag.Bool("allow-private-webhooks", envBool("PEMMECE_ALLOW_PRIVATE_WEBHOOKS"), "allow private/link-local webhook targets")
 	publicURL := flag.String("public-url", envOr("PEMMECE_PUBLIC_URL", ""), "public base URL used in email notifications")
+	brandName := flag.String("brand-name", envOr("PEMMECE_BRAND_NAME", ""), "display name for this Pemmece instance")
+	brandSubtitle := flag.String("brand-subtitle", envOr("PEMMECE_BRAND_SUBTITLE", ""), "short subtitle shown under the brand name")
+	brandMark := flag.String("brand-mark", envOr("PEMMECE_BRAND_MARK", ""), "short mark shown in the header")
+	brandColor := flag.String("brand-color", envOr("PEMMECE_BRAND_COLOR", ""), "hex color for the brand mark")
 	emailNotifications := flag.Bool("email-notifications", envBool("PEMMECE_EMAIL_NOTIFICATIONS"), "enable email notification enqueueing and delivery")
 	smtpHost := flag.String("smtp-host", envOr("PEMMECE_SMTP_HOST", ""), "SMTP host for email notifications")
 	smtpPort := flag.Int("smtp-port", envInt("PEMMECE_SMTP_PORT", 0), "SMTP port for email notifications")
@@ -90,12 +94,18 @@ func main() {
 		Handler: server.New(tracker, server.Options{
 			AllowInsecureWebhooks: *allowInsecureWebhooks,
 			AllowPrivateWebhooks:  *allowPrivateWebhooks,
-			EmailNotifications:    emailEnabled,
-			EmailBatchDelay:       *emailBatchDelay,
-			PublicURL:             *publicURL,
-			SessionTTL:            *sessionTTL,
-			LoginRateLimit:        server.RateLimit{Limit: *loginRateLimit, Window: *loginRateWindow},
-			AccountLinkRateLimit:  server.RateLimit{Limit: *accountLinkRateLimit, Window: *accountLinkRateWindow},
+			Branding: server.Branding{
+				Name:     *brandName,
+				Subtitle: *brandSubtitle,
+				Mark:     *brandMark,
+				Color:    *brandColor,
+			},
+			EmailNotifications:   emailEnabled,
+			EmailBatchDelay:      *emailBatchDelay,
+			PublicURL:            *publicURL,
+			SessionTTL:           *sessionTTL,
+			LoginRateLimit:       server.RateLimit{Limit: *loginRateLimit, Window: *loginRateWindow},
+			AccountLinkRateLimit: server.RateLimit{Limit: *accountLinkRateLimit, Window: *accountLinkRateWindow},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

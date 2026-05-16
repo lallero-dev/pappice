@@ -26,6 +26,12 @@ const state = {
   emailBatchDelaySeconds: 0,
   deliveries: [],
   tokens: [],
+  branding: {
+    name: "Pemmece",
+    subtitle: "customer support",
+    mark: "P",
+    color: "#5bb974"
+  },
   user: null,
   accountLink: null,
   csrf: "",
@@ -51,6 +57,12 @@ const state = {
 };
 
 const els = {
+  appAlert: document.querySelector("#appAlert"),
+  appAlertText: document.querySelector("#appAlertText"),
+  appAlertClose: document.querySelector("#appAlertClose"),
+  brandMark: document.querySelector("#brandMark"),
+  brandName: document.querySelector("#brandName"),
+  brandSubtitle: document.querySelector("#brandSubtitle"),
   topNav: document.querySelector("#topNav"),
   issuesTab: document.querySelector("#issuesTab"),
   projectTab: document.querySelector("#projectTab"),
@@ -68,6 +80,7 @@ const els = {
   logoutButton: document.querySelector("#logoutButton"),
   newIssueButton: document.querySelector("#newIssueButton"),
   authView: document.querySelector("#authView"),
+  authError: document.querySelector("#authError"),
   setupForm: document.querySelector("#setupForm"),
   loginForm: document.querySelector("#loginForm"),
   accountLinkForm: document.querySelector("#accountLinkForm"),
@@ -78,6 +91,9 @@ const els = {
   appView: document.querySelector("#appView"),
   issueView: document.querySelector("#issueView"),
   adminView: document.querySelector("#adminView"),
+  adminGuide: document.querySelector("#adminGuide"),
+  adminGuideSteps: document.querySelector("#adminGuideSteps"),
+  adminGuideDismiss: document.querySelector("#adminGuideDismiss"),
   projectView: document.querySelector("#projectView"),
   issueList: document.querySelector("#issueList"),
   searchInput: document.querySelector("#searchInput"),
@@ -117,6 +133,9 @@ const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short"
 });
 
+const adminGuideDismissedKey = "pemmece.adminGuideDismissed";
+let appAlertTimer = 0;
+
 function formatSeconds(seconds) {
   const value = Number(seconds || 0);
   if (!Number.isFinite(value) || value <= 0) return "-";
@@ -125,6 +144,44 @@ function formatSeconds(seconds) {
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.round(minutes / 60);
   return `${hours}h`;
+}
+
+function normalizeBranding(input = {}) {
+  const name = String(input.name || "").trim() || "Pemmece";
+  const subtitle = String(input.subtitle || "").trim() || "customer support";
+  const mark = String(input.mark || "").trim() || name.slice(0, 1).toUpperCase() || "P";
+  const color = isHexColor(input.color) ? input.color : "#5bb974";
+  return {
+    name,
+    subtitle,
+    mark: [...mark].slice(0, 3).join(""),
+    color
+  };
+}
+
+function applyBranding() {
+  const branding = state.branding;
+  els.brandName.textContent = branding.name;
+  els.brandSubtitle.textContent = branding.subtitle;
+  els.brandMark.textContent = branding.mark;
+  document.title = branding.name;
+  document.documentElement.style.setProperty("--brand-color", branding.color);
+  document.documentElement.style.setProperty("--brand-contrast", contrastColor(branding.color));
+}
+
+function isHexColor(value) {
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(value || "").trim());
+}
+
+function contrastColor(hex) {
+  const expanded = hex.length === 4
+    ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
+    : hex;
+  const red = parseInt(expanded.slice(1, 3), 16);
+  const green = parseInt(expanded.slice(3, 5), 16);
+  const blue = parseInt(expanded.slice(5, 7), 16);
+  const brightness = (red * 299 + green * 587 + blue * 114) / 1000;
+  return brightness > 145 ? "#102417" : "#ffffff";
 }
 
 async function request(path, options = {}) {
@@ -142,9 +199,16 @@ async function request(path, options = {}) {
     ...options
   });
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { error: text };
+    }
+  }
   if (!response.ok) {
-    const error = new Error(payload.error || "Request failed");
+    const error = new Error(payload.error || response.statusText || "Request failed");
     error.status = response.status;
     error.payload = payload;
     throw error;
@@ -257,6 +321,8 @@ async function enterApp() {
 function showAuth(mode) {
   state.user = null;
   state.csrf = "";
+  clearAppAlert();
+  clearAuthError();
   els.authView.hidden = false;
   els.appView.hidden = true;
   els.topNav.hidden = true;
@@ -270,6 +336,7 @@ function showAuth(mode) {
 }
 
 function showApp() {
+  clearAuthError();
   els.authView.hidden = true;
   els.appView.hidden = false;
   els.topNav.hidden = false;
@@ -307,6 +374,8 @@ async function loadHealth() {
   state.meta.roles = meta.roles || [];
   state.meta.projectRoles = meta.project_roles || [];
   state.meta.webhookEvents = meta.webhook_events || [];
+  state.branding = normalizeBranding(meta.branding);
+  applyBranding();
   state.filters.statuses = state.filters.statuses.filter((status) => state.meta.statuses.includes(status));
   if (state.filters.statuses.length === 0) state.filters.statuses = defaultStatusFilters();
 }
@@ -319,6 +388,7 @@ async function loadProjects() {
   }
   renderProductFilter();
   renderProjectList();
+  renderAdminGuide();
   updateProjectActions();
   await loadIssues();
 }
@@ -356,6 +426,7 @@ async function loadIssues() {
 
 async function loadAdmin() {
   await Promise.all([loadUsers(), loadGlobalWebhooks(), loadEmailNotifications(), loadAuditEvents()]);
+  renderAdminGuide();
 }
 
 async function loadProjectAdmin() {
@@ -368,6 +439,7 @@ async function loadUsers() {
   state.users = payload.users || [];
   renderAssigneeFilter();
   renderUsers();
+  renderAdminGuide();
 }
 
 async function loadTokens() {
@@ -401,12 +473,14 @@ async function loadEmailNotifications() {
   state.emailEnabled = Boolean(payload.enabled);
   state.emailBatchDelaySeconds = Number(payload.batch_delay_seconds || 0);
   renderEmailNotifications();
+  renderAdminGuide();
 }
 
 async function loadAuditEvents() {
   const payload = await request("/api/audit-events");
   state.auditEvents = payload.events || [];
   renderAuditEvents();
+  renderAdminGuide();
 }
 
 async function loadProjectDeliveries() {
@@ -500,14 +574,84 @@ function countIssues(issues) {
   return counts;
 }
 
+function emptyState({ title, body, actionLabel = "", onAction = null }) {
+  const node = el("div", { className: "empty-state" }, [
+    el("h3", {}, title),
+    el("p", {}, body)
+  ]);
+  const actions = emptyActions(actionLabel, onAction);
+  if (actions) node.append(actions);
+  return node;
+}
+
+function emptyInline({ title, body, actionLabel = "", onAction = null }) {
+  const node = el("div", { className: "empty-inline" }, [
+    el("h3", {}, title),
+    el("p", {}, body)
+  ]);
+  const actions = emptyActions(actionLabel, onAction);
+  if (actions) node.append(actions);
+  return node;
+}
+
+function emptyActions(actionLabel, onAction) {
+  if (!actionLabel || !onAction) return null;
+  const button = el("button", { className: "ghost-button", type: "button" }, actionLabel);
+  button.addEventListener("click", onAction);
+  return el("div", { className: "empty-actions" }, [button]);
+}
+
+function hasActiveTicketFilters() {
+  return Boolean(state.filters.q || state.filters.assignee || !sameStatuses(state.filters.statuses, defaultStatusFilters()));
+}
+
+function sameStatuses(left, right) {
+  if (left.length !== right.length) return false;
+  const values = new Set(left);
+  return right.every((status) => values.has(status));
+}
+
+function clearTicketFilters() {
+  state.filters.q = "";
+  state.filters.assignee = "";
+  state.filters.statuses = defaultStatusFilters();
+  els.searchInput.value = "";
+  els.assigneeFilter.value = "";
+  renderCounts();
+  loadIssues().catch(showError);
+}
+
 function renderIssueList() {
   els.issueList.replaceChildren();
   if (state.projects.length === 0) {
-    els.issueList.append(el("div", { className: "empty-state" }, "No products yet."));
+    els.issueList.append(emptyState({
+      title: isAdmin() ? "Create a product to start" : "No products available",
+      body: isAdmin()
+        ? "Products group tickets by the customer, service, or team you support."
+        : "Ask an administrator to add your account to a product before opening tickets.",
+      actionLabel: isAdmin() ? "New Product" : "",
+      onAction: isAdmin() ? openProjectModal : null
+    }));
     return;
   }
   if (state.issues.length === 0) {
-    els.issueList.append(document.querySelector("#emptyTemplate").content.cloneNode(true));
+    if (hasActiveTicketFilters()) {
+      els.issueList.append(emptyState({
+        title: "No tickets match these filters",
+        body: "Clear the filters to return to the default queue.",
+        actionLabel: "Clear Filters",
+        onAction: clearTicketFilters
+      }));
+      return;
+    }
+    els.issueList.append(emptyState({
+      title: "No tickets yet",
+      body: canCreateIssue()
+        ? "Create the first ticket for this view."
+        : "Tickets will appear here when customers or staff open them.",
+      actionLabel: canCreateIssue() ? "New Ticket" : "",
+      onAction: canCreateIssue() ? openIssueModal : null
+    }));
     return;
   }
   for (const issue of sortedIssues()) {
@@ -861,6 +1005,15 @@ function factBlock(label, value) {
 
 function renderProjectList() {
   els.projectList.replaceChildren();
+  if (state.projects.length === 0) {
+    els.projectList.append(emptyInline({
+      title: "No products",
+      body: "Create a product before inviting customers.",
+      actionLabel: "New Product",
+      onAction: openProjectModal
+    }));
+    return;
+  }
   for (const project of state.projects) {
     const row = el("div", { className: "admin-row" });
     const select = el("button", { className: "ghost-button", type: "button" }, "Open");
@@ -868,6 +1021,7 @@ function renderProjectList() {
       state.selectedProjectId = project.id;
       renderProductFilter();
       updateProjectActions();
+      switchView(canManageProject(project.id) ? "project" : "issues");
       await loadIssues();
     });
     row.append(
@@ -909,6 +1063,15 @@ function renderUsers() {
 
 function renderTokens() {
   els.tokenList.replaceChildren();
+  if (state.tokens.length === 0) {
+    els.tokenList.append(emptyInline({
+      title: "No API tokens",
+      body: "Create a token when an integration needs API access.",
+      actionLabel: "Create Token",
+      onAction: openTokenModal
+    }));
+    return;
+  }
   for (const token of state.tokens) {
     const row = el("div", { className: "admin-row" });
     const remove = el("button", { className: "ghost-button", type: "button" }, "Delete");
@@ -924,6 +1087,15 @@ function renderTokens() {
 
 function renderMembers() {
   els.memberList.replaceChildren();
+  if (state.members.length === 0) {
+    els.memberList.append(emptyInline({
+      title: "No product members",
+      body: "Add staff and customers who should access this product.",
+      actionLabel: "Add Member",
+      onAction: openMemberModal
+    }));
+    return;
+  }
   for (const member of state.members) {
     const row = el("div", { className: "admin-row" });
     const remove = el("button", { className: "ghost-button", type: "button" }, "Remove");
@@ -939,6 +1111,16 @@ function renderMembers() {
 
 function renderWebhooks(list, hooks) {
   list.replaceChildren();
+  if (hooks.length === 0) {
+    const global = list === els.globalWebhookList;
+    list.append(emptyInline({
+      title: "No webhooks",
+      body: global ? "Global webhooks receive events from every product." : "Product webhooks only receive events for this product.",
+      actionLabel: "New Webhook",
+      onAction: () => openWebhookModal(global ? "global" : "project")
+    }));
+    return;
+  }
   for (const hook of hooks) {
     const row = el("div", { className: "admin-row" });
     const test = el("button", { className: "ghost-button", type: "button" }, "Test");
@@ -959,7 +1141,10 @@ function renderWebhooks(list, hooks) {
 function renderDeliveries() {
   els.deliveryList.replaceChildren();
   if (state.deliveries.length === 0) {
-    els.deliveryList.append(el("div", { className: "empty-inline" }, "No deliveries."));
+    els.deliveryList.append(emptyInline({
+      title: "No deliveries",
+      body: "Webhook delivery attempts will appear here after events are sent."
+    }));
     return;
   }
   for (const delivery of state.deliveries) {
@@ -978,11 +1163,17 @@ function renderEmailNotifications() {
   els.sendTestEmailButton.disabled = !state.emailEnabled;
   els.emailList.replaceChildren();
   if (!state.emailEnabled && state.emailNotifications.length === 0) {
-    els.emailList.append(el("div", { className: "empty-inline" }, "Email is not configured."));
+    els.emailList.append(emptyInline({
+      title: "Email is not configured",
+      body: "Set SMTP environment variables to send no-reply notifications."
+    }));
     return;
   }
   if (state.emailNotifications.length === 0) {
-    els.emailList.append(el("div", { className: "empty-inline" }, "No email notifications."));
+    els.emailList.append(emptyInline({
+      title: "No email notifications",
+      body: "Queued, sent, and failed email notifications will appear here."
+    }));
     return;
   }
   for (const notification of state.emailNotifications) {
@@ -1084,7 +1275,10 @@ function openEmailNotificationModal(notification) {
 function renderAuditEvents() {
   els.auditList.replaceChildren();
   if (state.auditEvents.length === 0) {
-    els.auditList.append(el("div", { className: "empty-inline" }, "No audit events."));
+    els.auditList.append(emptyInline({
+      title: "No audit events",
+      body: "Security and admin actions will appear here."
+    }));
     return;
   }
   for (const event of state.auditEvents) {
@@ -1097,6 +1291,89 @@ function renderAuditEvents() {
       el("span", { className: "muted" }, relativeTime(event.created_at))
     );
     els.auditList.append(row);
+  }
+}
+
+function renderAdminGuide() {
+  if (!els.adminGuide) return;
+  if (!isAdmin() || safeStorageGet(adminGuideDismissedKey) === "1") {
+    els.adminGuide.hidden = true;
+    return;
+  }
+  const customers = state.users.filter((user) => user.role === "customer" && !user.disabled);
+  const staff = state.users.filter((user) => ["admin", "staff"].includes(user.role) && !user.disabled);
+  const steps = [
+    {
+      done: state.projects.length > 0,
+      title: "Product ready",
+      body: state.projects.length > 0
+        ? `${state.projects.length} product${state.projects.length === 1 ? "" : "s"} available.`
+        : "Create a product before customers open tickets.",
+      actionLabel: state.projects.length === 0 ? "New Product" : "",
+      onAction: state.projects.length === 0 ? openProjectModal : null
+    },
+    {
+      done: customers.length > 0,
+      title: "Customer accounts",
+      body: customers.length > 0
+        ? `${customers.length} active customer${customers.length === 1 ? "" : "s"}.`
+        : "Create customer accounts and send setup links.",
+      actionLabel: customers.length === 0 ? "New Account" : "",
+      onAction: customers.length === 0 ? () => openUserModal() : null
+    },
+    {
+      done: staff.length > 1,
+      title: "Staff access",
+      body: staff.length > 1
+        ? `${staff.length} active staff accounts.`
+        : "Invite at least one more staff member before relying on the desk.",
+      actionLabel: staff.length <= 1 ? "New Account" : "",
+      onAction: staff.length <= 1 ? () => openUserModal() : null
+    },
+    {
+      done: state.emailEnabled,
+      title: "No-reply email",
+      body: state.emailEnabled
+        ? "SMTP is configured for account links and ticket notifications."
+        : "Configure SMTP so setup links and ticket notifications leave Pemmece.",
+      actionLabel: state.emailEnabled ? "Send Test" : "",
+      onAction: state.emailEnabled ? openTestEmailModal : null
+    }
+  ];
+  els.adminGuideSteps.replaceChildren(...steps.map(onboardingStep));
+  els.adminGuide.hidden = false;
+}
+
+function onboardingStep(step, index) {
+  const node = el("div", { className: "onboarding-step" }, [
+    el("span", { className: "step-dot" }, step.done ? "OK" : String(index + 1)),
+    el("span", { className: "step-copy" }, [
+      el("strong", {}, step.title),
+      el("span", {}, step.body)
+    ])
+  ]);
+  node.classList.toggle("done", step.done);
+  if (step.actionLabel && step.onAction) {
+    const action = el("button", { className: "ghost-button step-action", type: "button" }, step.actionLabel);
+    action.addEventListener("click", step.onAction);
+    node.lastChild.append(action);
+  }
+  return node;
+}
+
+function safeStorageGet(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return "";
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage errors.
   }
 }
 
@@ -1548,45 +1825,68 @@ function openWebhookModal(scope) {
   });
 }
 
+async function submitAuthForm(form, action) {
+  clearAuthError();
+  const submit = form.querySelector("button[type='submit']");
+  if (submit) submit.disabled = true;
+  try {
+    await action();
+  } catch (error) {
+    showAuthError(error);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
 function bindEvents() {
   els.setupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = new FormData(els.setupForm);
-    const payload = await request("/api/setup", { method: "POST", body: JSON.stringify(formObject(form)) });
-    state.csrf = payload.csrf_token || "";
-    els.setupForm.reset();
-    await loadSession();
+    await submitAuthForm(els.setupForm, async () => {
+      const form = new FormData(els.setupForm);
+      const payload = await request("/api/setup", { method: "POST", body: JSON.stringify(formObject(form)) });
+      state.csrf = payload.csrf_token || "";
+      els.setupForm.reset();
+      await loadSession();
+    });
   });
 
   els.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = new FormData(els.loginForm);
-    const payload = await request("/api/login", { method: "POST", body: JSON.stringify(formObject(form)) });
-    state.csrf = payload.csrf_token || "";
-    els.loginForm.reset();
-    await loadSession();
+    await submitAuthForm(els.loginForm, async () => {
+      const form = new FormData(els.loginForm);
+      const payload = await request("/api/login", { method: "POST", body: JSON.stringify(formObject(form)) });
+      state.csrf = payload.csrf_token || "";
+      els.loginForm.reset();
+      await loadSession();
+    });
   });
 
   els.accountLinkForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.accountLink?.token) return;
-    const form = new FormData(els.accountLinkForm);
-    const payload = await request(`/api/account-links/${encodeURIComponent(state.accountLink.token)}`, {
-      method: "POST",
-      body: JSON.stringify(formObject(form))
+    await submitAuthForm(els.accountLinkForm, async () => {
+      const form = new FormData(els.accountLinkForm);
+      const payload = await request(`/api/account-links/${encodeURIComponent(state.accountLink.token)}`, {
+        method: "POST",
+        body: JSON.stringify(formObject(form))
+      });
+      state.csrf = payload.csrf_token || "";
+      state.user = payload.user || null;
+      state.accountLink = null;
+      els.accountLinkForm.reset();
+      window.history.replaceState(null, "", "/");
+      await enterApp();
     });
-    state.csrf = payload.csrf_token || "";
-    state.user = payload.user || null;
-    state.accountLink = null;
-    els.accountLinkForm.reset();
-    window.history.replaceState(null, "", "/");
-    await enterApp();
   });
 
   els.logoutButton.addEventListener("click", async () => {
     closeProfileMenu();
-    await request("/api/logout", { method: "POST" });
-    showAuth("login");
+    try {
+      await request("/api/logout", { method: "POST" });
+      showAuth("login");
+    } catch (error) {
+      showError(error);
+    }
   });
   els.profileEditButton.addEventListener("click", () => {
     closeProfileMenu();
@@ -1639,6 +1939,11 @@ function bindEvents() {
   els.addMemberButton.addEventListener("click", () => openMemberModal());
   els.addGlobalWebhookButton.addEventListener("click", () => openWebhookModal("global"));
   els.addWebhookButton.addEventListener("click", () => openWebhookModal("project"));
+  els.appAlertClose.addEventListener("click", clearAppAlert);
+  els.adminGuideDismiss.addEventListener("click", () => {
+    safeStorageSet(adminGuideDismissedKey, "1");
+    renderAdminGuide();
+  });
 }
 
 function switchView(view) {
@@ -1707,9 +2012,56 @@ function canEditTicket(issue = null) {
   return Boolean(projectId) && !isCustomer() && (isAdmin() || ["owner", "agent"].includes(projectRole(projectId)));
 }
 
+function showAuthError(error) {
+  const message = userMessage(error);
+  els.authError.textContent = message;
+  els.authError.hidden = false;
+}
+
+function clearAuthError() {
+  els.authError.textContent = "";
+  els.authError.hidden = true;
+}
+
+function showAppAlert(message) {
+  window.clearTimeout(appAlertTimer);
+  els.appAlertText.textContent = message;
+  els.appAlert.hidden = false;
+  appAlertTimer = window.setTimeout(clearAppAlert, 8000);
+}
+
+function clearAppAlert() {
+  window.clearTimeout(appAlertTimer);
+  appAlertTimer = 0;
+  els.appAlert.hidden = true;
+  els.appAlertText.textContent = "";
+}
+
+function userMessage(error) {
+  if (typeof error === "string") return error;
+  const raw = String(error?.message || "Request failed").trim();
+  if (!raw || raw === "Failed to fetch") {
+    return "Pemmece could not be reached. Check the connection and try again.";
+  }
+  if (raw.startsWith("validation failed: ")) {
+    return raw.replace("validation failed: ", "");
+  }
+  if (error?.status === 403) return raw || "You do not have permission to do that.";
+  if (error?.status === 404) return "The requested item was not found. Refresh the page and try again.";
+  if (error?.status === 409) return raw || "This action conflicts with the current state.";
+  if (error?.status === 429) return raw || "Too many attempts. Try again later.";
+  if (error?.status >= 500) return "Pemmece hit an internal error. Try again, then check the server logs if it persists.";
+  return raw;
+}
+
 function showError(error) {
   console.error(error);
-  if (error.status === 401) showAuth("login");
+  if (error.status === 401) {
+    showAuth("login");
+    showAuthError("Your session expired. Sign in again.");
+    return;
+  }
+  showAppAlert(userMessage(error));
 }
 
 boot().catch(showError);

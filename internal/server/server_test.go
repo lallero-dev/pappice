@@ -211,6 +211,30 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	}
 }
 
+func TestHealthExposesBranding(t *testing.T) {
+	_, server, client := newTestServer(t, Options{Branding: Branding{
+		Name:     "lallero.dev",
+		Subtitle: "support desk",
+		Mark:     "LD",
+		Color:    "#111827",
+	}})
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/health", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if got := decodeNestedString(t, body, "branding", "name"); got != "lallero.dev" {
+		t.Fatalf("branding.name = %q body=%s", got, body)
+	}
+	if got := decodeNestedString(t, body, "branding", "subtitle"); got != "support desk" {
+		t.Fatalf("branding.subtitle = %q body=%s", got, body)
+	}
+	if got := decodeNestedString(t, body, "branding", "mark"); got != "LD" {
+		t.Fatalf("branding.mark = %q body=%s", got, body)
+	}
+	if got := decodeNestedString(t, body, "branding", "color"); got != "#111827" {
+		t.Fatalf("branding.color = %q body=%s", got, body)
+	}
+}
+
 func TestAccountSetupAndResetLinks(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{
 		EmailNotifications: true,

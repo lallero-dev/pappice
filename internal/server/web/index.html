@@ -9,10 +9,10 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">P</span>
+        <span class="brand-mark" id="brandMark">P</span>
         <div>
-          <strong>Pemmece</strong>
-          <span>customer support</span>
+          <strong id="brandName">Pemmece</strong>
+          <span id="brandSubtitle">customer support</span>
         </div>
       </div>
       <nav class="topnav" id="topNav" hidden>
@@ -42,9 +42,17 @@
       </div>
     </header>
 
+    <div class="app-alert" id="appAlert" role="alert" hidden>
+      <span id="appAlertText"></span>
+      <button class="app-alert-close" id="appAlertClose" type="button" aria-label="Dismiss">x</button>
+    </div>
+
     <section class="auth-wrap" id="authView" hidden>
+      <p class="auth-error" id="authError" role="alert" hidden></p>
+
       <form class="auth-panel" id="setupForm">
         <h1>Set Up Pemmece</h1>
+        <p class="auth-note">Create the first administrator account. Customers and staff can be invited after setup.</p>
         <label>
           Username
           <input name="username" required minlength="3" maxlength="48" autocomplete="username">
@@ -129,6 +137,16 @@
       </section>
 
       <section class="admin-view" id="adminView" hidden>
+        <section class="onboarding-panel" id="adminGuide" hidden>
+          <div>
+            <span class="eyebrow">Admin setup</span>
+            <h2>Prepare the support desk</h2>
+            <p>Complete the essentials for a small support team.</p>
+          </div>
+          <div class="onboarding-steps" id="adminGuideSteps"></div>
+          <button class="ghost-button" id="adminGuideDismiss" type="button">Dismiss</button>
+        </section>
+
         <div class="admin-grid">
           <section class="admin-panel">
             <div class="panel-head">
