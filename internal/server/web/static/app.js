@@ -1651,6 +1651,7 @@ function switchView(view) {
   els.issuesTab.classList.toggle("active", view === "issues");
   els.adminTab.classList.toggle("active", view === "admin");
   els.projectTab.classList.toggle("active", view === "project");
+  if (view === "admin") loadAdmin().catch(showError);
   if (view === "project") loadProjectAdmin().catch(showError);
 }
 

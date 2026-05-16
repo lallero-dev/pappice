@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "scripts": {
+    "test:e2e": "node scripts/e2e-smoke.mjs"
+  }
+}

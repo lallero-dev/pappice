@@ -57,6 +57,28 @@ administrative actions such as setup completion, account creation, password
 reset requests, user changes, product membership changes, token changes,
 webhook changes, and email retry/test actions.
 
+## Tests
+
+Run the Go unit and integration tests with:
+
+```sh
+go test ./...
+```
+
+Run the end-to-end browser smoke test with:
+
+```sh
+npm run test:e2e
+```
+
+The E2E smoke test is dependency-free. It starts Pemmece against a temporary
+SQLite database, generates a temporary self-signed HTTPS certificate, runs a
+local fake SMTP server, and drives Chromium through the first admin setup,
+customer account setup, ticket creation, staff reply/resolve, email outbox, and
+audit-log flows. It requires `go`, `node`, `openssl`, and Chromium. Set
+`PEMMECE_E2E_CHROMIUM=/path/to/chromium` if Chromium is not at
+`/usr/bin/chromium`.
+
 Email notifications are enabled when SMTP is configured. The app enqueues email
 jobs durably in SQLite when ticket events happen, then a background worker sends
 them with retry/backoff. Ticket update emails are delayed briefly and coalesced
