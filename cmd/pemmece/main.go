@@ -39,6 +39,11 @@ func main() {
 	smtpFrom := flag.String("smtp-from", envOr("PEMMECE_SMTP_FROM", ""), "sender address for email notifications")
 	smtpTLSMode := flag.String("smtp-tls-mode", envOr("PEMMECE_SMTP_TLS_MODE", "starttls"), "SMTP TLS mode: starttls, tls, or none")
 	emailBatchDelay := flag.Duration("email-batch-delay", envDuration("PEMMECE_EMAIL_BATCH_DELAY", 20*time.Second), "delay before sending coalesced ticket notification emails")
+	sessionTTL := flag.Duration("session-ttl", envDuration("PEMMECE_SESSION_TTL", 14*24*time.Hour), "browser session lifetime")
+	loginRateLimit := flag.Int("login-rate-limit", envInt("PEMMECE_LOGIN_RATE_LIMIT", 10), "login attempts allowed per rate window and user/IP")
+	loginRateWindow := flag.Duration("login-rate-window", envDuration("PEMMECE_LOGIN_RATE_WINDOW", time.Minute), "login rate limit window")
+	accountLinkRateLimit := flag.Int("account-link-rate-limit", envInt("PEMMECE_ACCOUNT_LINK_RATE_LIMIT", 10), "account link attempts allowed per rate window and token/IP")
+	accountLinkRateWindow := flag.Duration("account-link-rate-window", envDuration("PEMMECE_ACCOUNT_LINK_RATE_WINDOW", time.Minute), "account link rate limit window")
 	flag.Parse()
 
 	tracker, err := store.Open(*dbPath)
@@ -88,6 +93,9 @@ func main() {
 			EmailNotifications:    emailEnabled,
 			EmailBatchDelay:       *emailBatchDelay,
 			PublicURL:             *publicURL,
+			SessionTTL:            *sessionTTL,
+			LoginRateLimit:        server.RateLimit{Limit: *loginRateLimit, Window: *loginRateWindow},
+			AccountLinkRateLimit:  server.RateLimit{Limit: *accountLinkRateLimit, Window: *accountLinkRateWindow},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

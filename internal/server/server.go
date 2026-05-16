@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -23,7 +24,13 @@ const (
 	sessionCookieName      = "pemmece_session"
 	defaultEmailBatchDelay = 20 * time.Second
 	accountLinkExpiry      = 24 * time.Hour
+	defaultSessionTTL      = 14 * 24 * time.Hour
 )
+
+type RateLimit struct {
+	Limit  int
+	Window time.Duration
+}
 
 type Options struct {
 	AllowInsecureWebhooks bool
@@ -31,14 +38,19 @@ type Options struct {
 	EmailNotifications    bool
 	EmailBatchDelay       time.Duration
 	PublicURL             string
+	SessionTTL            time.Duration
+	LoginRateLimit        RateLimit
+	AccountLinkRateLimit  RateLimit
 }
 
 type Server struct {
-	store   *store.Store
-	started time.Time
-	mux     *http.ServeMux
-	client  *http.Client
-	options Options
+	store              *store.Store
+	started            time.Time
+	mux                *http.ServeMux
+	client             *http.Client
+	options            Options
+	loginLimiter       *requestLimiter
+	accountLinkLimiter *requestLimiter
 }
 
 type authContext struct {
@@ -83,11 +95,18 @@ func New(tracker *store.Store, opts ...Options) http.Handler {
 	if options.EmailBatchDelay <= 0 {
 		options.EmailBatchDelay = defaultEmailBatchDelay
 	}
+	if options.SessionTTL <= 0 {
+		options.SessionTTL = defaultSessionTTL
+	}
+	options.LoginRateLimit = withDefaultRateLimit(options.LoginRateLimit, 10, time.Minute)
+	options.AccountLinkRateLimit = withDefaultRateLimit(options.AccountLinkRateLimit, 10, time.Minute)
 	s := &Server{
-		store:   tracker,
-		started: time.Now().UTC(),
-		mux:     http.NewServeMux(),
-		options: options,
+		store:              tracker,
+		started:            time.Now().UTC(),
+		mux:                http.NewServeMux(),
+		options:            options,
+		loginLimiter:       newRequestLimiter(options.LoginRateLimit),
+		accountLinkLimiter: newRequestLimiter(options.AccountLinkRateLimit),
 	}
 	s.client = s.newWebhookClient()
 	s.routes()
@@ -127,6 +146,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/webhook-deliveries", s.handleWebhookDeliveries)
 	s.mux.HandleFunc("/api/email-notifications", s.handleEmailNotifications)
 	s.mux.HandleFunc("/api/email-notifications/", s.handleEmailNotificationByID)
+	s.mux.HandleFunc("/api/audit-events", s.handleAuditEvents)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +300,7 @@ func (s *Server) handleMePassword(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
+	s.audit(r, auth.User, "password.changed", "user", auth.User.ID, auth.User.Username, nil)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"user":       store.ToPublicUser(updated),
 		"csrf_token": auth.CSRF,
@@ -307,6 +328,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.audit(r, user, "setup.completed", "user", user.ID, user.Username, nil)
 	respondJSON(w, http.StatusCreated, map[string]any{
 		"user":       store.ToPublicUser(user),
 		"csrf_token": csrf,
@@ -328,6 +350,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	limitKey := "login|" + clientIP(r) + "|" + strings.ToLower(strings.TrimSpace(input.Username))
+	if !s.loginLimiter.Allow(limitKey, time.Now().UTC()) {
+		respondRateLimited(w)
+		return
+	}
 	user, err := s.store.Authenticate(input.Username, input.Password)
 	if err != nil {
 		if errors.Is(err, store.ErrPasswordResetRequired) {
@@ -341,6 +368,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.loginLimiter.Reset(limitKey)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"user":       store.ToPublicUser(user),
 		"csrf_token": csrf,
@@ -378,8 +406,13 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		http.NotFound(w, r)
 		return
 	}
+	limitKey := "account-link|" + clientIP(r) + "|" + security.HashToken(token)
 	switch r.Method {
 	case http.MethodGet:
+		if !s.accountLinkLimiter.Allow(limitKey, time.Now().UTC()) {
+			respondRateLimited(w)
+			return
+		}
 		link, user, err := s.store.GetAccountLink(token)
 		if err != nil {
 			respondStoreError(w, err)
@@ -392,6 +425,10 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		})
 	case http.MethodPost:
 		if !s.requireHTTPS(w, r) {
+			return
+		}
+		if !s.accountLinkLimiter.Allow(limitKey, time.Now().UTC()) {
+			respondRateLimited(w)
 			return
 		}
 		var input struct {
@@ -409,6 +446,7 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		if !ok {
 			return
 		}
+		s.accountLinkLimiter.Reset(limitKey)
 		respondJSON(w, http.StatusOK, map[string]any{
 			"user":       store.ToPublicUser(user),
 			"csrf_token": csrf,
@@ -440,6 +478,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "product.created", "product", project.ID, project.Key, map[string]any{"name": project.Name})
 		respondJSON(w, http.StatusCreated, project)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -512,16 +551,23 @@ func (s *Server) handleSingleProject(w http.ResponseWriter, r *http.Request, aut
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "product.updated", "product", project.ID, project.Key, map[string]any{"name": project.Name})
 		respondJSON(w, http.StatusOK, project)
 	case http.MethodDelete:
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
+		project, err := s.store.GetProject(projectID)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
 		if err := s.store.DeleteProject(projectID); err != nil {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "product.deleted", "product", project.ID, project.Key, map[string]any{"name": project.Name})
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch, http.MethodDelete)
@@ -547,6 +593,10 @@ func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request, au
 				respondStoreError(w, err)
 				return
 			}
+			s.audit(r, auth.User, "product_member.upserted", "user", member.UserID, member.Username, map[string]any{
+				"project_id": projectID,
+				"role":       member.Role,
+			})
 			respondJSON(w, http.StatusCreated, member)
 		default:
 			methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -559,10 +609,16 @@ func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request, au
 			respondError(w, http.StatusBadRequest, "invalid user id")
 			return
 		}
+		user, _ := s.store.GetUser(userID)
 		if err := s.store.DeleteProjectMember(projectID, userID); err != nil {
 			respondStoreError(w, err)
 			return
 		}
+		targetName := user.Username
+		if targetName == "" {
+			targetName = strconv.FormatInt(userID, 10)
+		}
+		s.audit(r, auth.User, "product_member.removed", "user", userID, targetName, map[string]any{"project_id": projectID})
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
@@ -856,6 +912,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		queued := s.enqueueAccountLinkEmail("account.setup", created, token, link.ExpiresAt)
+		s.audit(r, auth.User, "user.created", "user", created.ID, created.Username, map[string]any{"role": created.Role, "email": created.Email != ""})
 		respondJSON(w, http.StatusCreated, userAccountLinkResponse(created, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -863,7 +920,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireAdmin(w, r)
+	auth, ok := s.requireAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -878,7 +935,7 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "password-reset" {
-		s.handleUserPasswordReset(w, r, id)
+		s.handleUserPasswordReset(w, r, auth, id)
 		return
 	}
 	if len(parts) != 1 {
@@ -887,6 +944,11 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPatch:
+		before, err := s.store.GetUser(id)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
 		var patch store.UpdateUser
 		if !decodeJSON(w, r, &patch) {
 			return
@@ -900,19 +962,26 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "user.updated", "user", user.ID, user.Username, userPatchAuditDetails(before, user, patch))
 		respondJSON(w, http.StatusOK, store.ToPublicUser(user))
 	case http.MethodDelete:
+		user, err := s.store.GetUser(id)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
 		if err := s.store.DeleteUser(id); err != nil {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "user.deleted", "user", user.ID, user.Username, map[string]any{"role": user.Role})
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodPatch, http.MethodDelete)
 	}
 }
 
-func (s *Server) handleUserPasswordReset(w http.ResponseWriter, r *http.Request, userID int64) {
+func (s *Server) handleUserPasswordReset(w http.ResponseWriter, r *http.Request, auth authContext, userID int64) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
@@ -923,6 +992,7 @@ func (s *Server) handleUserPasswordReset(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	queued := s.enqueueAccountLinkEmail("account.reset", user, token, link.ExpiresAt)
+	s.audit(r, auth.User, "user.password_reset_requested", "user", user.ID, user.Username, map[string]any{"email_queued": queued})
 	respondJSON(w, http.StatusCreated, userAccountLinkResponse(user, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 }
 
@@ -944,6 +1014,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "api_token.created", "api_token", token.ID, token.Name, nil)
 		respondJSON(w, http.StatusCreated, map[string]any{"token": token, "value": raw})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -967,11 +1038,12 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
+	s.audit(r, auth.User, "api_token.deleted", "api_token", id, strconv.FormatInt(id, 10), nil)
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
-	_, ok := s.requireAdmin(w, r)
+	auth, ok := s.requireAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -992,6 +1064,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "webhook.created", "webhook", hook.ID, hook.Name, map[string]any{"scope": "global"})
 		respondJSON(w, http.StatusCreated, map[string]any{"webhook": store.ToPublicWebhook(hook), "secret": hook.Secret})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1020,6 +1093,7 @@ func (s *Server) handleProjectWebhooks(w http.ResponseWriter, r *http.Request, a
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "webhook.created", "webhook", hook.ID, hook.Name, map[string]any{"project_id": projectID})
 		respondJSON(w, http.StatusCreated, map[string]any{"webhook": store.ToPublicWebhook(hook), "secret": hook.Secret})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1074,12 +1148,14 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "webhook.updated", "webhook", updated.ID, updated.Name, map[string]any{"enabled": updated.Enabled})
 		respondJSON(w, http.StatusOK, store.ToPublicWebhook(updated))
 	case http.MethodDelete:
 		if err := s.store.DeleteWebhook(id); err != nil {
 			respondStoreError(w, err)
 			return
 		}
+		s.audit(r, auth.User, "webhook.deleted", "webhook", hook.ID, hook.Name, nil)
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodPatch, http.MethodDelete)
@@ -1160,6 +1236,7 @@ func (s *Server) handleEmailNotificationByID(w http.ResponseWriter, r *http.Requ
 		respondStoreError(w, err)
 		return
 	}
+	s.audit(r, auth.User, "email_notification.retried", "email_notification", notification.ID, notification.Subject, map[string]any{"recipient": notification.RecipientEmail})
 	respondJSON(w, http.StatusOK, map[string]any{"notification": notification})
 }
 
@@ -1203,7 +1280,20 @@ func (s *Server) handleEmailNotificationTest(w http.ResponseWriter, r *http.Requ
 		respondStoreError(w, err)
 		return
 	}
+	s.audit(r, auth.User, "email_notification.test_queued", "email_notification", created[0].ID, created[0].Subject, map[string]any{"recipient": recipientEmail})
 	respondJSON(w, http.StatusCreated, map[string]any{"notification": created[0]})
+}
+
+func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"events": s.store.ListAuditEvents(100)})
 }
 
 func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
@@ -1229,7 +1319,7 @@ func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) issueSession(w http.ResponseWriter, userID int64) (string, bool) {
-	token, csrf, expires, err := s.store.CreateSession(userID)
+	token, csrf, expires, err := s.store.CreateSessionFor(userID, s.options.SessionTTL)
 	if err != nil {
 		respondStoreError(w, err)
 		return "", false
@@ -1452,6 +1542,46 @@ func (s *Server) hasProjectRole(user store.User, projectID int64, allowed ...str
 	return false
 }
 
+func (s *Server) audit(r *http.Request, actor store.User, action, targetType string, targetID int64, targetName string, details map[string]any) {
+	var detailsJSON string
+	if len(details) > 0 {
+		if data, err := json.Marshal(details); err == nil {
+			detailsJSON = string(data)
+		}
+	}
+	_, _ = s.store.RecordAuditEvent(store.CreateAuditEvent{
+		ActorUserID:   actor.ID,
+		ActorUsername: actor.Username,
+		Action:        action,
+		TargetType:    targetType,
+		TargetID:      targetID,
+		TargetName:    targetName,
+		IP:            clientIP(r),
+		DetailsJSON:   detailsJSON,
+	})
+}
+
+func userPatchAuditDetails(before, after store.User, patch store.UpdateUser) map[string]any {
+	details := make(map[string]any)
+	if patch.DisplayName != nil && before.DisplayName != after.DisplayName {
+		details["display_name_changed"] = true
+	}
+	if patch.Email != nil && before.Email != after.Email {
+		details["email_changed"] = true
+	}
+	if patch.Role != nil && before.Role != after.Role {
+		details["role_from"] = before.Role
+		details["role_to"] = after.Role
+	}
+	if patch.Disabled != nil && before.Disabled != after.Disabled {
+		details["disabled"] = after.Disabled
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return details
+}
+
 func (s *Server) emitIssueEvent(event string, issue store.Issue, actor store.User) {
 	s.emitIssueWebhook(event, issue, actor)
 	s.enqueueIssueEmails(event, issue, actor)
@@ -1579,6 +1709,14 @@ func originMatches(raw, host string) bool {
 	return parsed.Scheme == "https" && strings.EqualFold(parsed.Host, host)
 }
 
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
 func parseTrailingID(w http.ResponseWriter, path, prefix string) (int64, bool) {
 	raw := strings.Trim(strings.TrimPrefix(path, prefix), "/")
 	if raw == "" || strings.Contains(raw, "/") {
@@ -1637,6 +1775,11 @@ func respondJSON(w http.ResponseWriter, status int, payload any) {
 
 func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]string{"error": message})
+}
+
+func respondRateLimited(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "60")
+	respondError(w, http.StatusTooManyRequests, "too many attempts; try again later")
 }
 
 func methodNotAllowed(w http.ResponseWriter, methods ...string) {

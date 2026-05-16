@@ -20,6 +20,7 @@ const state = {
   webhooks: [],
   globalWebhooks: [],
   emailNotifications: [],
+  auditEvents: [],
   emailStats: null,
   emailEnabled: false,
   emailBatchDelaySeconds: 0,
@@ -99,6 +100,7 @@ const els = {
   sendTestEmailButton: document.querySelector("#sendTestEmailButton"),
   emailOverview: document.querySelector("#emailOverview"),
   emailList: document.querySelector("#emailList"),
+  auditList: document.querySelector("#auditList"),
   deliveryList: document.querySelector("#deliveryList"),
   modalHost: document.querySelector("#modalHost")
 };
@@ -353,7 +355,7 @@ async function loadIssues() {
 }
 
 async function loadAdmin() {
-  await Promise.all([loadUsers(), loadGlobalWebhooks(), loadEmailNotifications()]);
+  await Promise.all([loadUsers(), loadGlobalWebhooks(), loadEmailNotifications(), loadAuditEvents()]);
 }
 
 async function loadProjectAdmin() {
@@ -399,6 +401,12 @@ async function loadEmailNotifications() {
   state.emailEnabled = Boolean(payload.enabled);
   state.emailBatchDelaySeconds = Number(payload.batch_delay_seconds || 0);
   renderEmailNotifications();
+}
+
+async function loadAuditEvents() {
+  const payload = await request("/api/audit-events");
+  state.auditEvents = payload.events || [];
+  renderAuditEvents();
 }
 
 async function loadProjectDeliveries() {
@@ -1071,6 +1079,25 @@ function openEmailNotificationModal(notification) {
       await retryEmailNotification(notification.id);
     } : null
   });
+}
+
+function renderAuditEvents() {
+  els.auditList.replaceChildren();
+  if (state.auditEvents.length === 0) {
+    els.auditList.append(el("div", { className: "empty-inline" }, "No audit events."));
+    return;
+  }
+  for (const event of state.auditEvents) {
+    const row = el("div", { className: "admin-row" });
+    row.append(
+      el("div", { className: "admin-row-main" }, [
+        el("strong", {}, labelize(event.action)),
+        el("span", {}, `${event.actor_username || "system"} / ${event.target_type}${event.target_name ? ` / ${event.target_name}` : ""}`)
+      ]),
+      el("span", { className: "muted" }, relativeTime(event.created_at))
+    );
+    els.auditList.append(row);
+  }
 }
 
 function workflowEditor(issue, { creating = false } = {}) {

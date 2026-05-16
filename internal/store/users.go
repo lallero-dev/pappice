@@ -211,6 +211,10 @@ func (s *Store) Authenticate(username, password string) (User, error) {
 }
 
 func (s *Store) CreateSession(userID int64) (string, string, time.Time, error) {
+	return s.CreateSessionFor(userID, 14*24*time.Hour)
+}
+
+func (s *Store) CreateSessionFor(userID int64, ttl time.Duration) (string, string, time.Time, error) {
 	token, err := security.RandomToken()
 	if err != nil {
 		return "", "", time.Time{}, err
@@ -219,8 +223,11 @@ func (s *Store) CreateSession(userID int64) (string, string, time.Time, error) {
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
+	if ttl <= 0 {
+		ttl = 14 * 24 * time.Hour
+	}
 	now := time.Now().UTC()
-	expires := now.Add(14 * 24 * time.Hour)
+	expires := now.Add(ttl)
 
 	user, err := s.GetUser(userID)
 	if err != nil || user.Disabled {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"pemmece/internal/store"
 )
@@ -350,6 +351,65 @@ func TestProfileAndPasswordChangeFlow(t *testing.T) {
 		t.Fatalf("other session still authenticated after password change: %s", body)
 	}
 	loginUser(t, client, server.URL, "staffer", "better password")
+}
+
+func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
+	_, ttlServer, ttlClient := newTestServer(t, Options{SessionTTL: 20 * time.Millisecond})
+	adminCookie, _ := setupAdmin(t, ttlClient, ttlServer.URL, "admin", "admin@example.test")
+	time.Sleep(30 * time.Millisecond)
+	resp, body := doJSON(t, ttlClient, http.MethodGet, ttlServer.URL+"/api/session", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeBool(t, body, "authenticated") {
+		t.Fatalf("short-lived session still authenticated: %s", body)
+	}
+
+	_, server, client := newTestServer(t, Options{
+		LoginRateLimit:       RateLimit{Limit: 2, Window: time.Minute},
+		AccountLinkRateLimit: RateLimit{Limit: 2, Window: time.Minute},
+	})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
+			"username": "missing",
+			"password": "wrong password",
+		}, nil, "", "")
+		requireStatus(t, resp, body, http.StatusUnauthorized)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
+		"username": "missing",
+		"password": "wrong password",
+	}, nil, "", "")
+	requireStatus(t, resp, body, http.StatusTooManyRequests)
+	if retry := resp.Header.Get("Retry-After"); retry == "" {
+		t.Fatalf("rate-limited response missing Retry-After: %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
+		"username": "limited",
+		"email":    "limited@example.test",
+		"role":     "staff",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	token := accountLinkTokenFromURL(t, decodeNestedString(t, body, "account_link", "url"))
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+token, map[string]any{
+			"password": "short",
+		}, nil, "", "")
+		requireStatus(t, resp, body, http.StatusBadRequest)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+token, map[string]any{
+		"password": "short",
+	}, nil, "", "")
+	requireStatus(t, resp, body, http.StatusTooManyRequests)
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("setup.completed")) ||
+		!bytes.Contains(body, []byte("user.created")) ||
+		!bytes.Contains(body, []byte("limited")) {
+		t.Fatalf("audit log missing setup/user events: %s", body)
+	}
 }
 
 func TestAdminProjectIssueCommentAndNotificationFlow(t *testing.T) {

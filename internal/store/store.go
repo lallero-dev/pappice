@@ -155,6 +155,30 @@ type AccountLink struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+type AuditEvent struct {
+	ID            int64     `json:"id"`
+	ActorUserID   int64     `json:"actor_user_id"`
+	ActorUsername string    `json:"actor_username"`
+	Action        string    `json:"action"`
+	TargetType    string    `json:"target_type"`
+	TargetID      int64     `json:"target_id"`
+	TargetName    string    `json:"target_name"`
+	IP            string    `json:"ip"`
+	DetailsJSON   string    `json:"details_json,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type CreateAuditEvent struct {
+	ActorUserID   int64
+	ActorUsername string
+	Action        string
+	TargetType    string
+	TargetID      int64
+	TargetName    string
+	IP            string
+	DetailsJSON   string
+}
+
 type Session struct {
 	TokenHash string    `json:"token_hash"`
 	CSRFToken string    `json:"-"`
@@ -439,6 +463,9 @@ func (s *Store) Close() error {
 
 func (s *Store) init() error {
 	if _, err := s.db.Exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`PRAGMA synchronous = NORMAL;`); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`PRAGMA journal_mode = WAL;`); err != nil && !strings.Contains(err.Error(), "memory") {
@@ -979,6 +1006,19 @@ CREATE TABLE IF NOT EXISTS account_links (
 	created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS audit_events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+	actor_username TEXT NOT NULL,
+	action TEXT NOT NULL,
+	target_type TEXT NOT NULL,
+	target_id INTEGER,
+	target_name TEXT NOT NULL DEFAULT '',
+	ip TEXT NOT NULL DEFAULT '',
+	details_json TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS projects (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	key TEXT NOT NULL UNIQUE,
@@ -1078,6 +1118,8 @@ CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(project_id);
 CREATE INDEX IF NOT EXISTS idx_account_links_user_purpose ON account_links(user_id, purpose, used_at);
+CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_pending ON email_notifications(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_issue ON email_notifications(issue_id);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_user ON email_notifications(user_id);

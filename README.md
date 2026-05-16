@@ -14,6 +14,8 @@ Current focus:
 - SQLite-backed local persistence for multiuser deployments.
 - Global and product webhooks with `X-Pemmece-Signature`.
 - SQLite-backed no-reply email notification outbox with SMTP delivery.
+- One-time account setup/reset links, configurable session lifetime, basic
+  abuse rate limiting, and an admin audit log.
 
 ## Run
 
@@ -42,6 +44,18 @@ The same values can be supplied with `PEMMECE_ADDR`, `PEMMECE_DB`,
 `PEMMECE_TLS_CERT`, and `PEMMECE_TLS_KEY`. At startup, Pemmece also loads a
 repo-local `.env` file when present; existing process environment variables take
 precedence over `.env` values.
+
+Browser sessions default to 14 days. Set `PEMMECE_SESSION_TTL` with a Go
+duration such as `8h`, `72h`, or `336h`. Login and account setup/reset link
+attempts are rate limited per remote IP and username/token. Defaults are 10
+attempts per minute; tune with `PEMMECE_LOGIN_RATE_LIMIT`,
+`PEMMECE_LOGIN_RATE_WINDOW`, `PEMMECE_ACCOUNT_LINK_RATE_LIMIT`, and
+`PEMMECE_ACCOUNT_LINK_RATE_WINDOW`.
+
+Admins can inspect the audit log from the admin page. It records security and
+administrative actions such as setup completion, account creation, password
+reset requests, user changes, product membership changes, token changes,
+webhook changes, and email retry/test actions.
 
 Email notifications are enabled when SMTP is configured. The app enqueues email
 jobs durably in SQLite when ticket events happen, then a background worker sends
@@ -123,6 +137,7 @@ Core endpoints:
 - `GET /api/email-notifications`
 - `POST /api/email-notifications/test`
 - `POST /api/email-notifications/{id}/retry`
+- `GET /api/audit-events`
 
 Webhook events:
 

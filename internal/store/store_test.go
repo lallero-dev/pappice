@@ -244,6 +244,17 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if _, _, ok := tracker.UserBySession(session); ok {
 		t.Fatal("deleted session should not authenticate")
 	}
+	shortSession, _, expires, err := tracker.CreateSessionFor(admin.ID, 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("create short session: %v", err)
+	}
+	if time.Until(expires) > time.Second {
+		t.Fatalf("short session expires too late: %s", expires)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if _, _, ok := tracker.UserBySession(shortSession); ok {
+		t.Fatal("expired short session should not authenticate")
+	}
 
 	token, raw, err := tracker.CreateAPIToken(admin.ID, CreateAPIToken{Name: "cli"})
 	if err != nil {
@@ -286,6 +297,24 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	hooks := tracker.ListWebhooksForEvent("ticket.created", projectID)
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
 		t.Fatalf("event hooks = %#v", hooks)
+	}
+
+	event, err := tracker.RecordAuditEvent(CreateAuditEvent{
+		ActorUserID:   admin.ID,
+		ActorUsername: admin.Username,
+		Action:        "user.created",
+		TargetType:    "user",
+		TargetID:      admin.ID,
+		TargetName:    admin.Username,
+		IP:            "127.0.0.1",
+		DetailsJSON:   `{"role":"admin"}`,
+	})
+	if err != nil {
+		t.Fatalf("record audit event: %v", err)
+	}
+	events := tracker.ListAuditEvents(10)
+	if len(events) != 1 || events[0].ID != event.ID || events[0].Action != "user.created" || events[0].DetailsJSON == "" {
+		t.Fatalf("audit events = %#v", events)
 	}
 }
 
