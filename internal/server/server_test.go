@@ -1079,6 +1079,156 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	}
 }
 
+func TestCustomerPermissionBoundaries(t *testing.T) {
+	_, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/projects", map[string]any{
+		"key":  "BILL",
+		"name": "Billing",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	otherProjectID := decodeInt64(t, body, "id")
+
+	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username":     "customer",
+		"display_name": "Customer",
+		"email":        "customer@example.test",
+		"password":     "correct horse",
+		"role":         "customer",
+	})
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, customerID, "customer")
+	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  projectID,
+		"title":       "Customer-owned ticket",
+		"description": "Customer-visible request",
+		"priority":    "urgent",
+		"assignee":    "admin",
+	}, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	customerTicketID := decodeInt64(t, body, "id")
+	var created store.Issue
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode customer ticket: %v", err)
+	}
+	if created.Priority != "normal" || created.Assignee != "" || created.Source != "portal" {
+		t.Fatalf("customer-controlled fields were not normalized: %#v", created)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  otherProjectID,
+		"title":       "Wrong product",
+		"description": "Customer is not a member here",
+	}, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusForbidden)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/projects/"+itoa(otherProjectID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  otherProjectID,
+		"title":       "Other product staff ticket",
+		"description": "Customer must not see this",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	otherTicketID := decodeInt64(t, body, "id")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(otherTicketID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?project_id="+itoa(otherProjectID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Other product staff ticket")) {
+		t.Fatalf("customer ticket list leaked another product: %s", body)
+	}
+
+	for name, patch := range map[string]map[string]any{
+		"status":      {"status": "assigned"},
+		"priority":    {"priority": "urgent"},
+		"assignee":    {"assignee": "admin"},
+		"title":       {"title": "Customer renamed ticket"},
+		"description": {"description": "Customer edited description"},
+		"mixed": {
+			"status": "assigned",
+			"comment": map[string]any{
+				"body":       "Should not persist",
+				"visibility": "public",
+			},
+		},
+	} {
+		resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(customerTicketID), patch, customerCookie, customerCSRF, server.URL)
+		requireStatus(t, resp, body, http.StatusForbidden)
+		t.Logf("blocked customer workflow patch %s", name)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(customerTicketID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Should not persist")) ||
+		bytes.Contains(body, []byte("Customer renamed ticket")) ||
+		bytes.Contains(body, []byte("Customer edited description")) ||
+		bytes.Contains(body, []byte(`"status":"assigned"`)) ||
+		bytes.Contains(body, []byte(`"priority":"urgent"`)) ||
+		bytes.Contains(body, []byte(`"assignee":"admin"`)) {
+		t.Fatalf("blocked customer workflow change persisted: %s", body)
+	}
+}
+
+func TestAdminOnlyEndpointsRejectStaffAndCustomers(t *testing.T) {
+	_, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+	staffID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "staff",
+		"email":    "staff@example.test",
+		"password": "correct horse",
+		"role":     "staff",
+	})
+	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "customer",
+		"email":    "customer@example.test",
+		"password": "correct horse",
+		"role":     "customer",
+	})
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, staffID, "agent")
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, customerID, "customer")
+	staffCookie, staffCSRF := loginUser(t, client, server.URL, "staff", "correct horse")
+	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
+
+	adminOnlyGets := []string{
+		"/api/admin/maintenance",
+		"/api/email-notifications",
+		"/api/audit-events",
+		"/api/webhooks",
+	}
+	for _, path := range adminOnlyGets {
+		resp, body = doJSON(t, client, http.MethodGet, server.URL+path, nil, staffCookie, "", "")
+		requireStatus(t, resp, body, http.StatusForbidden)
+		resp, body = doJSON(t, client, http.MethodGet, server.URL+path, nil, customerCookie, "", "")
+		requireStatus(t, resp, body, http.StatusForbidden)
+	}
+
+	adminOnlyWrites := []struct {
+		path    string
+		payload any
+	}{
+		{"/api/projects", map[string]any{"key": "NOPE", "name": "Nope"}},
+		{"/api/users", map[string]any{"username": "blocked", "email": "blocked@example.test", "role": "staff"}},
+	}
+	for _, item := range adminOnlyWrites {
+		resp, body = doJSON(t, client, http.MethodPost, server.URL+item.path, item.payload, staffCookie, staffCSRF, server.URL)
+		requireStatus(t, resp, body, http.StatusForbidden)
+		resp, body = doJSON(t, client, http.MethodPost, server.URL+item.path, item.payload, customerCookie, customerCSRF, server.URL)
+		requireStatus(t, resp, body, http.StatusForbidden)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tokens", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusForbidden)
+}
+
 func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 	_, server, client := newTestServer(t, Options{UploadDir: t.TempDir()})
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
