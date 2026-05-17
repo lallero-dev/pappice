@@ -19,6 +19,8 @@ import (
 	"pemmece/internal/store"
 )
 
+var version = "dev"
+
 func main() {
 	if err := loadDotEnv(".env"); err != nil {
 		log.Fatalf("load .env: %v", err)
@@ -108,6 +110,7 @@ func main() {
 			EmailBatchDelay:      *emailBatchDelay,
 			PublicURL:            *publicURL,
 			SessionTTL:           *sessionTTL,
+			Version:              version,
 			UploadDir:            *uploadDir,
 			MaxUploadSize:        *maxUploadSize,
 			MaxUploadFiles:       *maxUploadFiles,

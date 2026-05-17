@@ -181,6 +181,13 @@ type AccountLink struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+type AccountLinkStatus struct {
+	Purpose      string
+	ExpiresAt    time.Time
+	UsedAt       *time.Time
+	UserDisabled bool
+}
+
 type AuditEvent struct {
 	ID            int64     `json:"id"`
 	ActorUserID   int64     `json:"actor_user_id"`
@@ -203,6 +210,19 @@ type CreateAuditEvent struct {
 	TargetName    string
 	IP            string
 	DetailsJSON   string
+}
+
+type AuditEventFilter struct {
+	Query  string
+	Limit  int
+	Offset int
+}
+
+type AuditEventPage struct {
+	Events []AuditEvent
+	Total  int
+	Limit  int
+	Offset int
 }
 
 type Session struct {
@@ -358,6 +378,20 @@ type EmailNotification struct {
 	SentAt         *time.Time `json:"sent_at,omitempty"`
 }
 
+type EmailNotificationFilter struct {
+	Status string
+	Query  string
+	Limit  int
+	Offset int
+}
+
+type EmailNotificationPage struct {
+	Notifications []EmailNotification
+	Total         int
+	Limit         int
+	Offset        int
+}
+
 type EmailNotificationStats struct {
 	Total      int        `json:"total"`
 	Pending    int        `json:"pending"`
@@ -383,7 +417,8 @@ type CreateEmailNotification struct {
 }
 
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 var validStatuses = map[string]struct{}{
@@ -448,6 +483,32 @@ var validEmailEvents = map[string]struct{}{
 	"email.test":       {},
 }
 
+var validEmailNotificationStatuses = map[string]struct{}{
+	"pending": {},
+	"sending": {},
+	"sent":    {},
+	"failed":  {},
+}
+
+func normalizePage(limit, offset, defaultLimit, maxLimit int) (int, int) {
+	if defaultLimit < 1 {
+		defaultLimit = 25
+	}
+	if maxLimit < defaultLimit {
+		maxLimit = defaultLimit
+	}
+	if limit < 1 {
+		limit = defaultLimit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 var validAccountLinkPurposes = map[string]struct{}{
 	"setup": {},
 	"reset": {},
@@ -472,12 +533,19 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 
-	s := &Store{db: db}
+	s := &Store{db: db, path: path}
 	if err := s.init(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+func (s *Store) Path() string {
+	if s == nil {
+		return ""
+	}
+	return s.path
 }
 
 func (s *Store) Close() error {

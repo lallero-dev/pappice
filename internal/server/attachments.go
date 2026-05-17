@@ -159,7 +159,7 @@ func (s *Server) parseMultipartForm(w http.ResponseWriter, r *http.Request) bool
 	maxBodyBytes := int64(s.options.MaxUploadFiles)*s.options.MaxUploadSize + 1<<20
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if err := r.ParseMultipartForm(maxBodyBytes); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid multipart form or attachments too large")
+		respondError(w, http.StatusBadRequest, "Upload blocked: each file can be up to "+formatUploadBytes(s.options.MaxUploadSize)+", with at most "+strconv.Itoa(s.options.MaxUploadFiles)+" files per request.")
 		return false
 	}
 	return true
@@ -174,10 +174,27 @@ func cleanupMultipartForm(r *http.Request) {
 func (s *Server) saveRequestAttachments(w http.ResponseWriter, r *http.Request) ([]storedUpload, bool) {
 	uploads, err := s.saveMultipartAttachments(r.MultipartForm)
 	if err != nil {
-		respondStoreError(w, err)
+		respondUploadError(w, err)
 		return nil, false
 	}
 	return uploads, true
+}
+
+func respondUploadError(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrValidation) {
+		respondError(w, http.StatusBadRequest, "Upload blocked: "+cleanValidationMessage(err))
+		return
+	}
+	respondError(w, http.StatusInternalServerError, "internal server error")
+}
+
+func cleanValidationMessage(err error) string {
+	message := strings.TrimSpace(err.Error())
+	message = strings.TrimPrefix(message, store.ErrValidation.Error()+": ")
+	if message == "" {
+		return "the selected files are not allowed"
+	}
+	return message
 }
 
 func (s *Server) saveMultipartAttachments(form *multipart.Form) ([]storedUpload, error) {
@@ -458,4 +475,19 @@ func sanitizeAttachmentFilename(value string) string {
 		value = strings.Trim(value, " .")
 	}
 	return value
+}
+
+func formatUploadBytes(bytes int64) string {
+	switch {
+	case bytes >= 1024*1024 && bytes%(1024*1024) == 0:
+		return strconv.FormatInt(bytes/(1024*1024), 10) + " MB"
+	case bytes >= 1024*1024:
+		return strconv.FormatFloat(float64(bytes)/(1024*1024), 'f', 1, 64) + " MB"
+	case bytes >= 1024 && bytes%1024 == 0:
+		return strconv.FormatInt(bytes/1024, 10) + " KB"
+	case bytes >= 1024:
+		return strconv.FormatFloat(float64(bytes)/1024, 'f', 1, 64) + " KB"
+	default:
+		return strconv.FormatInt(bytes, 10) + " B"
+	}
 }

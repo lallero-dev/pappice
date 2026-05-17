@@ -21,6 +21,7 @@ const state = {
   globalWebhooks: [],
   emailNotifications: [],
   auditEvents: [],
+  maintenance: null,
   emailStats: null,
   emailEnabled: false,
   emailBatchDelaySeconds: 0,
@@ -36,6 +37,7 @@ const state = {
   accountLink: null,
   csrf: "",
   view: "issues",
+  adminSection: "products",
   selectedProjectId: null,
   selectedId: null,
   sort: {
@@ -58,6 +60,19 @@ const state = {
     q: "",
     statuses: ["new", "assigned"],
     assignee: ""
+  },
+  emailPage: {
+    q: "",
+    status: "",
+    limit: 25,
+    offset: 0,
+    total: 0
+  },
+  auditPage: {
+    q: "",
+    limit: 25,
+    offset: 0,
+    total: 0
   }
 };
 
@@ -96,9 +111,8 @@ const els = {
   appView: document.querySelector("#appView"),
   issueView: document.querySelector("#issueView"),
   adminView: document.querySelector("#adminView"),
-  adminGuide: document.querySelector("#adminGuide"),
-  adminGuideSteps: document.querySelector("#adminGuideSteps"),
-  adminGuideDismiss: document.querySelector("#adminGuideDismiss"),
+  adminSectionButtons: Array.from(document.querySelectorAll("[data-admin-section]")),
+  adminSectionPanels: Array.from(document.querySelectorAll("[data-admin-panel]")),
   projectView: document.querySelector("#projectView"),
   issueList: document.querySelector("#issueList"),
   searchInput: document.querySelector("#searchInput"),
@@ -119,9 +133,15 @@ const els = {
   addGlobalWebhookButton: document.querySelector("#addGlobalWebhookButton"),
   globalWebhookList: document.querySelector("#globalWebhookList"),
   sendTestEmailButton: document.querySelector("#sendTestEmailButton"),
+  emailSearchInput: document.querySelector("#emailSearchInput"),
+  emailStatusFilter: document.querySelector("#emailStatusFilter"),
   emailOverview: document.querySelector("#emailOverview"),
   emailList: document.querySelector("#emailList"),
+  emailPager: document.querySelector("#emailPager"),
+  maintenanceOverview: document.querySelector("#maintenanceOverview"),
+  auditSearchInput: document.querySelector("#auditSearchInput"),
   auditList: document.querySelector("#auditList"),
+  auditPager: document.querySelector("#auditPager"),
   deliveryList: document.querySelector("#deliveryList"),
   modalHost: document.querySelector("#modalHost")
 };
@@ -138,7 +158,6 @@ const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short"
 });
 
-const adminGuideDismissedKey = "pemmece.adminGuideDismissed";
 let appAlertTimer = 0;
 
 function formatSeconds(seconds) {
@@ -275,9 +294,17 @@ async function loadAccountLinkRoute(route) {
     state.accountLink = null;
     renderAccountLinkForm({
       purpose: route.purpose,
-      error: "This link is invalid or has expired. Contact an administrator for a new one."
+      error: accountLinkErrorMessage(error)
     });
   }
+}
+
+function accountLinkErrorMessage(error) {
+  const message = userMessage(error);
+  if (message && message !== "The requested item was not found. Refresh the page and try again.") {
+    return message;
+  }
+  return "This link is invalid or has expired. Ask an administrator for a new one.";
 }
 
 function renderAccountLinkForm({ purpose, user = null, expiresAt = "", loading = false, error = "" }) {
@@ -313,12 +340,6 @@ async function enterApp() {
     renderAssigneeFilter();
   }
   await loadProjects();
-  if (!isCustomer()) {
-    await loadTokens();
-  }
-  if (isAdmin()) {
-    await loadAdmin();
-  }
   if (canManageProject()) {
     await loadProjectAdmin();
   }
@@ -395,7 +416,6 @@ async function loadProjects() {
   }
   renderProductFilter();
   renderProjectList();
-  renderAdminGuide();
   updateProjectActions();
   await loadIssues();
 }
@@ -432,8 +452,38 @@ async function loadIssues() {
 }
 
 async function loadAdmin() {
-  await Promise.all([loadUsers(), loadGlobalWebhooks(), loadEmailNotifications(), loadAuditEvents()]);
-  renderAdminGuide();
+  renderAdminSections();
+  await loadAdminSection(state.adminSection);
+}
+
+async function loadAdminSection(section) {
+  switch (section) {
+    case "products":
+      renderProjectList();
+      return;
+    case "accounts":
+      await loadUsers();
+      return;
+    case "tokens":
+      await loadTokens();
+      return;
+    case "webhooks":
+      await loadGlobalWebhooks();
+      return;
+    case "email":
+      await loadEmailNotifications();
+      return;
+    case "maintenance":
+      await loadMaintenance();
+      return;
+    case "audit":
+      await loadAuditEvents();
+      return;
+    default:
+      state.adminSection = "products";
+      renderAdminSections();
+      renderProjectList();
+  }
 }
 
 async function loadProjectAdmin() {
@@ -446,7 +496,6 @@ async function loadUsers() {
   state.users = payload.users || [];
   renderAssigneeFilter();
   renderUsers();
-  renderAdminGuide();
 }
 
 async function loadTokens() {
@@ -474,20 +523,41 @@ async function loadGlobalWebhooks() {
 }
 
 async function loadEmailNotifications() {
-  const payload = await request("/api/email-notifications");
+  const params = new URLSearchParams({
+    limit: String(state.emailPage.limit),
+    offset: String(state.emailPage.offset)
+  });
+  if (state.emailPage.status) params.set("status", state.emailPage.status);
+  if (state.emailPage.q) params.set("q", state.emailPage.q);
+  const payload = await request(`/api/email-notifications?${params.toString()}`);
   state.emailNotifications = payload.notifications || [];
+  state.emailPage.total = Number(payload.total || 0);
+  state.emailPage.limit = Number(payload.limit || state.emailPage.limit);
+  state.emailPage.offset = Number(payload.offset || 0);
   state.emailStats = payload.stats || null;
   state.emailEnabled = Boolean(payload.enabled);
   state.emailBatchDelaySeconds = Number(payload.batch_delay_seconds || 0);
   renderEmailNotifications();
-  renderAdminGuide();
 }
 
 async function loadAuditEvents() {
-  const payload = await request("/api/audit-events");
+  const params = new URLSearchParams({
+    limit: String(state.auditPage.limit),
+    offset: String(state.auditPage.offset)
+  });
+  if (state.auditPage.q) params.set("q", state.auditPage.q);
+  const payload = await request(`/api/audit-events?${params.toString()}`);
   state.auditEvents = payload.events || [];
+  state.auditPage.total = Number(payload.total || 0);
+  state.auditPage.limit = Number(payload.limit || state.auditPage.limit);
+  state.auditPage.offset = Number(payload.offset || 0);
   renderAuditEvents();
-  renderAdminGuide();
+}
+
+async function loadMaintenance() {
+  const payload = await request("/api/admin/maintenance");
+  state.maintenance = payload;
+  renderMaintenance();
 }
 
 async function loadProjectDeliveries() {
@@ -1028,6 +1098,28 @@ function factBlock(label, value) {
   return block;
 }
 
+function renderAdminSections() {
+  for (const button of els.adminSectionButtons) {
+    const active = button.getAttribute("data-admin-section") === state.adminSection;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "page" : "false");
+  }
+  for (const panel of els.adminSectionPanels) {
+    panel.hidden = panel.getAttribute("data-admin-panel") !== state.adminSection;
+  }
+}
+
+async function switchAdminSection(section) {
+  if (!isAdmin()) return;
+  state.adminSection = validAdminSection(section) ? section : "products";
+  renderAdminSections();
+  await loadAdminSection(state.adminSection);
+}
+
+function validAdminSection(section) {
+  return ["products", "accounts", "tokens", "webhooks", "email", "maintenance", "audit"].includes(section);
+}
+
 function renderProjectList() {
   els.projectList.replaceChildren();
   if (state.projects.length === 0) {
@@ -1184,6 +1276,12 @@ function renderDeliveries() {
 }
 
 function renderEmailNotifications() {
+  if (els.emailSearchInput && els.emailSearchInput.value !== state.emailPage.q) {
+    els.emailSearchInput.value = state.emailPage.q;
+  }
+  if (els.emailStatusFilter && els.emailStatusFilter.value !== state.emailPage.status) {
+    els.emailStatusFilter.value = state.emailPage.status;
+  }
   renderEmailOverview();
   els.sendTestEmailButton.disabled = !state.emailEnabled;
   els.emailList.replaceChildren();
@@ -1192,6 +1290,10 @@ function renderEmailNotifications() {
       title: "Email is not configured",
       body: "Set SMTP environment variables to send no-reply notifications."
     }));
+    renderPager(els.emailPager, state.emailPage, (offset) => {
+      state.emailPage.offset = offset;
+      loadEmailNotifications().catch(showError);
+    });
     return;
   }
   if (state.emailNotifications.length === 0) {
@@ -1199,11 +1301,19 @@ function renderEmailNotifications() {
       title: "No email notifications",
       body: "Queued, sent, and failed email notifications will appear here."
     }));
+    renderPager(els.emailPager, state.emailPage, (offset) => {
+      state.emailPage.offset = offset;
+      loadEmailNotifications().catch(showError);
+    });
     return;
   }
   for (const notification of state.emailNotifications) {
     els.emailList.append(emailNotificationRow(notification));
   }
+  renderPager(els.emailPager, state.emailPage, (offset) => {
+    state.emailPage.offset = offset;
+    loadEmailNotifications().catch(showError);
+  });
 }
 
 function renderEmailOverview() {
@@ -1217,6 +1327,30 @@ function renderEmailOverview() {
     emailStat("Batch delay", formatSeconds(state.emailBatchDelaySeconds)),
     emailStat("Last sent", stats.last_sent_at ? relativeTime(stats.last_sent_at) : "-")
   );
+}
+
+function renderMaintenance() {
+  if (!els.maintenanceOverview) return;
+  const info = state.maintenance || {};
+  const uploads = info.uploads || state.meta.uploads || {};
+  const email = info.email || {};
+  els.maintenanceOverview.replaceChildren(
+    maintenanceItem("Version", info.version || "dev"),
+    maintenanceItem("Started", info.started_at ? relativeTime(info.started_at) : "-"),
+    maintenanceItem("Database", info.database_path || "-"),
+    maintenanceItem("Uploads", info.upload_path || "-"),
+    maintenanceItem("Upload limit", `${formatBytes(uploads.max_size_bytes || 0)} / ${uploads.max_files || 0} files`),
+    maintenanceItem("Email", email.enabled ? "Enabled" : "Disabled"),
+    maintenanceItem("Public URL", email.public_url || "-"),
+    maintenanceItem("Email delay", formatSeconds(Number(email.batch_delay_seconds || 0)))
+  );
+}
+
+function maintenanceItem(label, value) {
+  return el("div", { className: "maintenance-item" }, [
+    el("span", {}, label),
+    el("strong", {}, String(value))
+  ]);
 }
 
 function emailStat(label, value) {
@@ -1298,12 +1432,19 @@ function openEmailNotificationModal(notification) {
 }
 
 function renderAuditEvents() {
+  if (els.auditSearchInput && els.auditSearchInput.value !== state.auditPage.q) {
+    els.auditSearchInput.value = state.auditPage.q;
+  }
   els.auditList.replaceChildren();
   if (state.auditEvents.length === 0) {
     els.auditList.append(emptyInline({
       title: "No audit events",
       body: "Security and admin actions will appear here."
     }));
+    renderPager(els.auditPager, state.auditPage, (offset) => {
+      state.auditPage.offset = offset;
+      loadAuditEvents().catch(showError);
+    });
     return;
   }
   for (const event of state.auditEvents) {
@@ -1317,89 +1458,30 @@ function renderAuditEvents() {
     );
     els.auditList.append(row);
   }
+  renderPager(els.auditPager, state.auditPage, (offset) => {
+    state.auditPage.offset = offset;
+    loadAuditEvents().catch(showError);
+  });
 }
 
-function renderAdminGuide() {
-  if (!els.adminGuide) return;
-  if (!isAdmin() || safeStorageGet(adminGuideDismissedKey) === "1") {
-    els.adminGuide.hidden = true;
-    return;
-  }
-  const customers = state.users.filter((user) => user.role === "customer" && !user.disabled);
-  const staff = state.users.filter((user) => ["admin", "staff"].includes(user.role) && !user.disabled);
-  const steps = [
-    {
-      done: state.projects.length > 0,
-      title: "Product ready",
-      body: state.projects.length > 0
-        ? `${state.projects.length} product${state.projects.length === 1 ? "" : "s"} available.`
-        : "Create a product before customers open tickets.",
-      actionLabel: state.projects.length === 0 ? "New Product" : "",
-      onAction: state.projects.length === 0 ? openProjectModal : null
-    },
-    {
-      done: customers.length > 0,
-      title: "Customer accounts",
-      body: customers.length > 0
-        ? `${customers.length} active customer${customers.length === 1 ? "" : "s"}.`
-        : "Create customer accounts and send setup links.",
-      actionLabel: customers.length === 0 ? "New Account" : "",
-      onAction: customers.length === 0 ? () => openUserModal() : null
-    },
-    {
-      done: staff.length > 1,
-      title: "Staff access",
-      body: staff.length > 1
-        ? `${staff.length} active staff accounts.`
-        : "Invite at least one more staff member before relying on the desk.",
-      actionLabel: staff.length <= 1 ? "New Account" : "",
-      onAction: staff.length <= 1 ? () => openUserModal() : null
-    },
-    {
-      done: state.emailEnabled,
-      title: "No-reply email",
-      body: state.emailEnabled
-        ? "SMTP is configured for account links and ticket notifications."
-        : "Configure SMTP so setup links and ticket notifications leave Pemmece.",
-      actionLabel: state.emailEnabled ? "Send Test" : "",
-      onAction: state.emailEnabled ? openTestEmailModal : null
-    }
-  ];
-  els.adminGuideSteps.replaceChildren(...steps.map(onboardingStep));
-  els.adminGuide.hidden = false;
-}
-
-function onboardingStep(step, index) {
-  const node = el("div", { className: "onboarding-step" }, [
-    el("span", { className: "step-dot" }, step.done ? "OK" : String(index + 1)),
-    el("span", { className: "step-copy" }, [
-      el("strong", {}, step.title),
-      el("span", {}, step.body)
-    ])
-  ]);
-  node.classList.toggle("done", step.done);
-  if (step.actionLabel && step.onAction) {
-    const action = el("button", { className: "ghost-button step-action", type: "button" }, step.actionLabel);
-    action.addEventListener("click", step.onAction);
-    node.lastChild.append(action);
-  }
-  return node;
-}
-
-function safeStorageGet(key) {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return "";
-  }
-}
-
-function safeStorageSet(key, value) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Ignore storage errors.
-  }
+function renderPager(container, page, onChange) {
+  if (!container) return;
+  const total = Number(page.total || 0);
+  const limit = Number(page.limit || 25);
+  const offset = Number(page.offset || 0);
+  const start = total === 0 ? 0 : Math.min(offset + 1, total);
+  const end = Math.min(offset + limit, total);
+  const previous = el("button", { className: "ghost-button", type: "button" }, "Previous");
+  const next = el("button", { className: "ghost-button", type: "button" }, "Next");
+  previous.disabled = offset <= 0;
+  next.disabled = offset + limit >= total;
+  previous.addEventListener("click", () => onChange(Math.max(0, offset - limit)));
+  next.addEventListener("click", () => onChange(offset + limit));
+  container.replaceChildren(
+    el("span", { className: "pager-summary" }, `${start}-${end} of ${total}`),
+    previous,
+    next
+  );
 }
 
 function workflowEditor(issue, { creating = false } = {}) {
@@ -1931,6 +2013,17 @@ async function submitAuthForm(form, action) {
 }
 
 function bindEvents() {
+  const runEmailSearch = debounce(() => {
+    state.emailPage.q = els.emailSearchInput.value.trim();
+    state.emailPage.offset = 0;
+    loadEmailNotifications().catch(showError);
+  }, 250);
+  const runAuditSearch = debounce(() => {
+    state.auditPage.q = els.auditSearchInput.value.trim();
+    state.auditPage.offset = 0;
+    loadAuditEvents().catch(showError);
+  }, 250);
+
   els.setupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await submitAuthForm(els.setupForm, async () => {
@@ -2002,6 +2095,9 @@ function bindEvents() {
   els.issuesTab.addEventListener("click", () => switchView("issues"));
   els.projectTab.addEventListener("click", () => switchView("project"));
   els.adminTab.addEventListener("click", () => switchView("admin"));
+  for (const button of els.adminSectionButtons) {
+    button.addEventListener("click", () => switchAdminSection(button.getAttribute("data-admin-section")).catch(showError));
+  }
   els.newIssueButton.addEventListener("click", () => openIssueModal());
   els.modalHost.addEventListener("pm-modal-error", (event) => showError(event.detail));
   document.querySelectorAll("[data-sort-key]").forEach((button) => {
@@ -2024,6 +2120,13 @@ function bindEvents() {
     state.filters.assignee = els.assigneeFilter.value.trim();
     loadIssues().catch(showError);
   });
+  els.emailSearchInput.addEventListener("input", runEmailSearch);
+  els.emailStatusFilter.addEventListener("change", () => {
+    state.emailPage.status = els.emailStatusFilter.value;
+    state.emailPage.offset = 0;
+    loadEmailNotifications().catch(showError);
+  });
+  els.auditSearchInput.addEventListener("input", runAuditSearch);
   els.addProjectButton.addEventListener("click", () => openProjectModal());
   els.addUserButton.addEventListener("click", () => openUserModal());
   els.createTokenButton.addEventListener("click", () => openTokenModal());
@@ -2032,10 +2135,6 @@ function bindEvents() {
   els.addGlobalWebhookButton.addEventListener("click", () => openWebhookModal("global"));
   els.addWebhookButton.addEventListener("click", () => openWebhookModal("project"));
   els.appAlertClose.addEventListener("click", clearAppAlert);
-  els.adminGuideDismiss.addEventListener("click", () => {
-    safeStorageSet(adminGuideDismissedKey, "1");
-    renderAdminGuide();
-  });
 }
 
 function switchView(view) {
@@ -2139,7 +2238,7 @@ function userMessage(error) {
     return raw.replace("validation failed: ", "");
   }
   if (error?.status === 403) return raw || "You do not have permission to do that.";
-  if (error?.status === 404) return "The requested item was not found. Refresh the page and try again.";
+  if (error?.status === 404) return raw && raw !== "not found" ? raw : "The requested item was not found. Refresh the page and try again.";
   if (error?.status === 409) return raw || "This action conflicts with the current state.";
   if (error?.status === 429) return raw || "Too many attempts. Try again later.";
   if (error?.status >= 500) return "Pemmece hit an internal error. Try again, then check the server logs if it persists.";

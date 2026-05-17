@@ -137,8 +137,10 @@ async function createCustomerAccount(cdp) {
     document.querySelector("#adminTab").click();
     await waitFor(() => {
       const view = document.querySelector("#adminView");
-      return view && !view.hidden && document.querySelector("#userList")?.textContent.includes("admin");
+      return view && !view.hidden;
     }, "admin view");
+    document.querySelector("[data-admin-section='accounts']").click();
+    await waitFor(() => document.querySelector("#userList")?.textContent.includes("admin"), "accounts admin section");
 
     document.querySelector("#addUserButton").click();
     const root = await waitFor(() => {
@@ -298,6 +300,7 @@ async function verifyEmailOutbox(cdp) {
       const view = document.querySelector("#adminView");
       return view && !view.hidden;
     }, "admin view for email outbox");
+    document.querySelector("[data-admin-section='email']").click();
     const row = await waitFor(() => {
       return [...document.querySelectorAll("#emailList .email-row")].find((candidate) => {
         const text = candidate.textContent;

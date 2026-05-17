@@ -236,12 +236,34 @@ func TestHealthExposesBranding(t *testing.T) {
 	}
 }
 
+func TestAdminMaintenanceEndpoint(t *testing.T) {
+	_, server, client := newTestServer(t, Options{
+		EmailNotifications: true,
+		PublicURL:          "https://tracker.example.test",
+		UploadDir:          filepath.Join(t.TempDir(), "uploads"),
+		Version:            "test-version",
+	})
+	adminCookie, _ := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/admin/maintenance", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte(`"version":"test-version"`)) ||
+		!bytes.Contains(body, []byte(`"database_path"`)) ||
+		!bytes.Contains(body, []byte(`"upload_path"`)) ||
+		!bytes.Contains(body, []byte(`"enabled":true`)) ||
+		!bytes.Contains(body, []byte(`"public_url":"https://tracker.example.test"`)) {
+		t.Fatalf("maintenance response = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/admin/maintenance", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusUnauthorized)
+}
+
 func TestAccountSetupAndResetLinks(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{
 		EmailNotifications: true,
 		PublicURL:          "https://tracker.example.test",
 	})
-	_ = tracker
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
@@ -291,7 +313,10 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+setupToken, map[string]any{
 		"password": "correct horse",
 	}, nil, "", "")
-	requireStatus(t, resp, body, http.StatusNotFound)
+	requireStatus(t, resp, body, http.StatusGone)
+	if !bytes.Contains(body, []byte("already been used")) || !bytes.Contains(body, []byte(`"reason":"used"`)) {
+		t.Fatalf("used setup link response = %s", body)
+	}
 	loginUser(t, client, server.URL, "pending", "correct horse")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users/"+itoa(userID)+"/password-reset", nil, adminCookie, adminCSRF, server.URL)
@@ -323,6 +348,17 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	loginUser(t, client, server.URL, "pending", "new correct horse")
+
+	_, _, expiredToken, err := tracker.CreatePasswordResetLink(userID, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("create expired reset link: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/account-links/"+expiredToken, nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusGone)
+	if !bytes.Contains(body, []byte("expired")) || !bytes.Contains(body, []byte(`"reason":"expired"`)) {
+		t.Fatalf("expired reset link response = %s", body)
+	}
 }
 
 func TestProfileAndPasswordChangeFlow(t *testing.T) {
@@ -583,6 +619,59 @@ func TestEmailNotificationAdminTools(t *testing.T) {
 	}
 	if retried.Notification.Status != "pending" || retried.Notification.Attempts != 0 || retried.Notification.LastError != "" {
 		t.Fatalf("retried notification = %#v", retried.Notification)
+	}
+}
+
+func TestAdminHistoryPaginationAndFilters(t *testing.T) {
+	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	for i := 0; i < 2; i++ {
+		resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/test", map[string]any{}, adminCookie, adminCSRF, server.URL)
+		requireStatus(t, resp, body, http.StatusCreated)
+	}
+	notifications := tracker.ListEmailNotifications(10)
+	if len(notifications) < 2 {
+		t.Fatalf("test notifications = %#v", notifications)
+	}
+	if err := tracker.MarkEmailFailed(notifications[0].ID, errors.New("smtp unavailable"), 1); err != nil {
+		t.Fatalf("mark email failed: %v", err)
+	}
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications?limit=1&status=failed&q=smtp", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	var emailPage struct {
+		Notifications []store.EmailNotification `json:"notifications"`
+		Total         int                       `json:"total"`
+		Limit         int                       `json:"limit"`
+		Offset        int                       `json:"offset"`
+	}
+	if err := json.Unmarshal(body, &emailPage); err != nil {
+		t.Fatalf("decode email page: %v", err)
+	}
+	if emailPage.Total != 1 || emailPage.Limit != 1 || emailPage.Offset != 0 || len(emailPage.Notifications) != 1 {
+		t.Fatalf("email page = %#v body=%s", emailPage, body)
+	}
+	if emailPage.Notifications[0].Status != "failed" || emailPage.Notifications[0].LastError != "smtp unavailable" {
+		t.Fatalf("filtered notification = %#v", emailPage.Notifications[0])
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events?limit=1&q=email_notification.test_queued", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	var auditPage struct {
+		Events []store.AuditEvent `json:"events"`
+		Total  int                `json:"total"`
+		Limit  int                `json:"limit"`
+		Offset int                `json:"offset"`
+	}
+	if err := json.Unmarshal(body, &auditPage); err != nil {
+		t.Fatalf("decode audit page: %v", err)
+	}
+	if auditPage.Total != 2 || auditPage.Limit != 1 || auditPage.Offset != 0 || len(auditPage.Events) != 1 {
+		t.Fatalf("audit page = %#v body=%s", auditPage, body)
+	}
+	if auditPage.Events[0].Action != "email_notification.test_queued" {
+		t.Fatalf("filtered audit event = %#v", auditPage.Events[0])
 	}
 }
 
@@ -1091,6 +1180,31 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("public attachment content")) {
 		t.Fatalf("customer public download body=%s", body)
+	}
+}
+
+func TestBlockedUploadReturnsClearMessage(t *testing.T) {
+	_, server, client := newTestServer(t, Options{
+		UploadDir:     t.TempDir(),
+		MaxUploadSize: 8,
+	})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	resp, body = doMultipart(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]string{
+		"project_id":  itoa(projectID),
+		"title":       "Blocked upload",
+		"description": "This file is too large",
+	}, []testUpload{{
+		Field:    "attachments",
+		Filename: "large.txt",
+		Body:     "this body is too large",
+	}}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusBadRequest)
+	if !bytes.Contains(body, []byte("Upload blocked")) || !bytes.Contains(body, []byte("large.txt")) {
+		t.Fatalf("blocked upload response = %s", body)
 	}
 }
 

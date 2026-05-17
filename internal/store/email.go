@@ -277,28 +277,57 @@ func (s *Store) GetEmailNotification(id int64) (EmailNotification, error) {
 }
 
 func (s *Store) ListEmailNotifications(limit int) []EmailNotification {
-	if limit < 1 || limit > 200 {
-		limit = 50
-	}
+	return s.ListEmailNotificationsPage(EmailNotificationFilter{Limit: limit}).Notifications
+}
+
+func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) EmailNotificationPage {
+	limit, offset := normalizePage(filter.Limit, filter.Offset, 25, 100)
+	where, args := emailNotificationWhere(filter)
+	page := EmailNotificationPage{Limit: limit, Offset: offset}
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM email_notifications `+where, args...).Scan(&page.Total)
+
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, limit, offset)
 	rows, err := s.db.Query(`
 		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications
-		ORDER BY created_at DESC
-		LIMIT ?`, limit)
+		`+where+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
-		return nil
+		return page
 	}
 	defer rows.Close()
 
-	notifications := make([]EmailNotification, 0)
+	page.Notifications = make([]EmailNotification, 0)
 	for rows.Next() {
 		notification, err := scanEmailNotification(rows)
 		if err == nil {
-			notifications = append(notifications, notification)
+			page.Notifications = append(page.Notifications, notification)
 		}
 	}
-	return notifications
+	return page
+}
+
+func emailNotificationWhere(filter EmailNotificationFilter) (string, []any) {
+	clauses := make([]string, 0, 2)
+	args := make([]any, 0)
+	status := strings.ToLower(strings.TrimSpace(filter.Status))
+	if status != "" && isValid(validEmailNotificationStatuses, status) {
+		clauses = append(clauses, "status = ?")
+		args = append(args, status)
+	}
+	query := strings.TrimSpace(filter.Query)
+	if query != "" {
+		like := "%" + query + "%"
+		clauses = append(clauses, `(recipient_email LIKE ? OR recipient_name LIKE ? OR event LIKE ? OR subject LIKE ? OR last_error LIKE ?)`)
+		args = append(args, like, like, like, like, like)
+	}
+	if len(clauses) == 0 {
+		return "", args
+	}
+	return "WHERE " + strings.Join(clauses, " AND "), args
 }
 
 func (s *Store) EmailNotificationStats() EmailNotificationStats {

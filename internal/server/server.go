@@ -31,6 +31,7 @@ const (
 	defaultUploadDir       = "pemmece-uploads"
 	defaultMaxUploadSize   = 10 << 20
 	defaultMaxUploadFiles  = 5
+	defaultVersion         = "dev"
 )
 
 type RateLimit struct {
@@ -46,6 +47,7 @@ type Options struct {
 	EmailBatchDelay       time.Duration
 	PublicURL             string
 	SessionTTL            time.Duration
+	Version               string
 	UploadDir             string
 	MaxUploadSize         int64
 	MaxUploadFiles        int
@@ -116,6 +118,10 @@ func New(tracker *store.Store, opts ...Options) http.Handler {
 	if options.SessionTTL <= 0 {
 		options.SessionTTL = defaultSessionTTL
 	}
+	options.Version = strings.TrimSpace(options.Version)
+	if options.Version == "" {
+		options.Version = defaultVersion
+	}
 	options.Branding = normalizeBranding(options.Branding)
 	options = normalizeUploadOptions(options)
 	options.LoginRateLimit = withDefaultRateLimit(options.LoginRateLimit, 10, time.Minute)
@@ -168,6 +174,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/email-notifications", s.handleEmailNotifications)
 	s.mux.HandleFunc("/api/email-notifications/", s.handleEmailNotificationByID)
 	s.mux.HandleFunc("/api/audit-events", s.handleAuditEvents)
+	s.mux.HandleFunc("/api/admin/maintenance", s.handleAdminMaintenance)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -250,6 +257,29 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"webhook_events": store.Events(),
 		"email_enabled":  s.options.EmailNotifications,
 		"uploads":        s.publicUploadConfig(),
+	})
+}
+
+func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"version":       s.options.Version,
+		"started_at":    s.started,
+		"database_path": s.store.Path(),
+		"upload_path":   s.options.UploadDir,
+		"uploads":       s.publicUploadConfig(),
+		"email": map[string]any{
+			"enabled":             s.options.EmailNotifications,
+			"public_url":          strings.TrimSpace(s.options.PublicURL),
+			"batch_delay_seconds": int(s.options.EmailBatchDelay.Seconds()),
+			"stats":               s.store.EmailNotificationStats(),
+		},
 	})
 }
 
@@ -486,6 +516,10 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		}
 		link, user, err := s.store.GetAccountLink(token)
 		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				s.respondAccountLinkError(w, token)
+				return
+			}
 			respondStoreError(w, err)
 			return
 		}
@@ -510,6 +544,10 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		}
 		user, err := s.store.ConsumeAccountLink(token, input.Password)
 		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				s.respondAccountLinkError(w, token)
+				return
+			}
 			respondStoreError(w, err)
 			return
 		}
@@ -525,6 +563,42 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
+}
+
+func (s *Server) respondAccountLinkError(w http.ResponseWriter, token string) {
+	status, err := s.store.AccountLinkStatus(token)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]any{
+			"error":  "This account link is invalid. Ask an administrator for a new setup or reset link.",
+			"reason": "invalid",
+		})
+		return
+	}
+	reason := "invalid"
+	message := "This account link is no longer valid. Ask an administrator for a new one."
+	code := http.StatusGone
+	action := "account"
+	if status.Purpose == "setup" || status.Purpose == "reset" {
+		action = status.Purpose
+	}
+	switch {
+	case status.UserDisabled:
+		code = http.StatusForbidden
+		reason = "disabled"
+		message = "This account is disabled. Contact an administrator."
+	case status.UsedAt != nil:
+		reason = "used"
+		message = "This " + action + " link has already been used. Sign in or ask an administrator for a new link."
+	case !status.ExpiresAt.After(time.Now().UTC()):
+		reason = "expired"
+		message = "This " + action + " link expired on " + status.ExpiresAt.Format("2006-01-02 15:04 MST") + ". Ask an administrator for a new link."
+	}
+	respondJSON(w, code, map[string]any{
+		"error":      message,
+		"reason":     reason,
+		"purpose":    status.Purpose,
+		"expires_at": status.ExpiresAt,
+	})
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -1342,8 +1416,18 @@ func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	limit, offset := paginationParams(r, 25, 100)
+	page := s.store.ListEmailNotificationsPage(store.EmailNotificationFilter{
+		Status: r.URL.Query().Get("status"),
+		Query:  r.URL.Query().Get("q"),
+		Limit:  limit,
+		Offset: offset,
+	})
 	respondJSON(w, http.StatusOK, map[string]any{
-		"notifications":       s.store.ListEmailNotifications(50),
+		"notifications":       page.Notifications,
+		"total":               page.Total,
+		"limit":               page.Limit,
+		"offset":              page.Offset,
 		"enabled":             s.options.EmailNotifications,
 		"batch_delay_seconds": int(s.options.EmailBatchDelay.Seconds()),
 		"stats":               s.store.EmailNotificationStats(),
@@ -1436,7 +1520,18 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"events": s.store.ListAuditEvents(100)})
+	limit, offset := paginationParams(r, 25, 100)
+	page := s.store.ListAuditEventsPage(store.AuditEventFilter{
+		Query:  r.URL.Query().Get("q"),
+		Limit:  limit,
+		Offset: offset,
+	})
+	respondJSON(w, http.StatusOK, map[string]any{
+		"events": page.Events,
+		"total":  page.Total,
+		"limit":  page.Limit,
+		"offset": page.Offset,
+	})
 }
 
 func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
@@ -1741,6 +1836,22 @@ func queryStatuses(query url.Values) []string {
 		}
 	}
 	return statuses
+}
+
+func paginationParams(r *http.Request, defaultLimit, maxLimit int) (int, int) {
+	query := r.URL.Query()
+	limit, err := strconv.Atoi(query.Get("limit"))
+	if err != nil || limit < 1 {
+		limit = defaultLimit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	offset, err := strconv.Atoi(query.Get("offset"))
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }
 
 func publicWebhooks(hooks []store.Webhook) []store.PublicWebhook {

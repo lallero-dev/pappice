@@ -137,67 +137,121 @@
       </section>
 
       <section class="admin-view" id="adminView" hidden>
-        <section class="onboarding-panel" id="adminGuide" hidden>
-          <div>
-            <span class="eyebrow">Admin setup</span>
-            <h2>Prepare the support desk</h2>
-            <p>Complete the essentials for a small support team.</p>
-          </div>
-          <div class="onboarding-steps" id="adminGuideSteps"></div>
-          <button class="ghost-button" id="adminGuideDismiss" type="button">Dismiss</button>
-        </section>
+        <div class="admin-shell">
+          <aside class="admin-sidebar" aria-label="Admin sections">
+            <button class="admin-side-button" data-admin-section="products" type="button">
+              <strong>Products</strong>
+              <span>Support areas</span>
+            </button>
+            <button class="admin-side-button" data-admin-section="accounts" type="button">
+              <strong>Staff & Customers</strong>
+              <span>Accounts and access</span>
+            </button>
+            <button class="admin-side-button" data-admin-section="tokens" type="button">
+              <strong>API Tokens</strong>
+              <span>Personal tokens</span>
+            </button>
+            <button class="admin-side-button" data-admin-section="webhooks" type="button">
+              <strong>Global Webhooks</strong>
+              <span>Outbound integrations</span>
+            </button>
+            <button class="admin-side-button" data-admin-section="email" type="button">
+              <strong>Email Outbox</strong>
+              <span>No-reply delivery</span>
+            </button>
+            <button class="admin-side-button" data-admin-section="maintenance" type="button">
+              <strong>Maintenance</strong>
+              <span>Runtime overview</span>
+            </button>
+            <button class="admin-side-button" data-admin-section="audit" type="button">
+              <strong>Audit Log</strong>
+              <span>Admin activity</span>
+            </button>
+          </aside>
 
-        <div class="admin-grid">
-          <section class="admin-panel">
-            <div class="panel-head">
-              <h2>Products</h2>
-              <button class="ghost-button" id="addProjectButton" type="button">New</button>
-            </div>
-            <div class="admin-list" id="projectList"></div>
-          </section>
-
-          <section class="admin-panel">
-            <div class="panel-head">
-              <h2>Staff & Customers</h2>
-              <button class="ghost-button" id="addUserButton" type="button">New</button>
-            </div>
-            <div class="admin-list" id="userList"></div>
-          </section>
-
-          <section class="admin-panel">
-            <div class="panel-head">
-              <h2>API Tokens</h2>
-              <button class="ghost-button" id="createTokenButton" type="button">Create</button>
-            </div>
-            <div class="token-result" id="tokenResult"></div>
-            <div class="admin-list" id="tokenList"></div>
-          </section>
-
-          <section class="admin-panel">
-            <div class="panel-head">
-              <h2>Global Webhooks</h2>
-              <button class="ghost-button" id="addGlobalWebhookButton" type="button">New</button>
-            </div>
-            <div class="admin-list" id="globalWebhookList"></div>
-          </section>
-
-          <section class="admin-panel">
-            <div class="panel-head">
-              <h2>Email Outbox</h2>
-              <div class="panel-actions">
-                <button class="ghost-button" id="sendTestEmailButton" type="button">Send Test</button>
+          <div class="admin-section-stage">
+            <section class="admin-panel admin-section-panel" data-admin-panel="products">
+              <div class="panel-head">
+                <h2>Products</h2>
+                <button class="ghost-button" id="addProjectButton" type="button">New</button>
               </div>
-            </div>
-            <div class="email-overview" id="emailOverview"></div>
-            <div class="admin-list" id="emailList"></div>
-          </section>
+              <div class="admin-list" id="projectList"></div>
+            </section>
 
-          <section class="admin-panel">
-            <div class="panel-head">
-              <h2>Audit Log</h2>
-            </div>
-            <div class="admin-list" id="auditList"></div>
-          </section>
+            <section class="admin-panel admin-section-panel" data-admin-panel="accounts" hidden>
+              <div class="panel-head">
+                <h2>Staff & Customers</h2>
+                <button class="ghost-button" id="addUserButton" type="button">New</button>
+              </div>
+              <div class="admin-list" id="userList"></div>
+            </section>
+
+            <section class="admin-panel admin-section-panel" data-admin-panel="tokens" hidden>
+              <div class="panel-head">
+                <h2>API Tokens</h2>
+                <button class="ghost-button" id="createTokenButton" type="button">Create</button>
+              </div>
+              <div class="token-result" id="tokenResult"></div>
+              <div class="admin-list" id="tokenList"></div>
+            </section>
+
+            <section class="admin-panel admin-section-panel" data-admin-panel="webhooks" hidden>
+              <div class="panel-head">
+                <h2>Global Webhooks</h2>
+                <button class="ghost-button" id="addGlobalWebhookButton" type="button">New</button>
+              </div>
+              <div class="admin-list" id="globalWebhookList"></div>
+            </section>
+
+            <section class="admin-panel admin-section-panel" data-admin-panel="email" hidden>
+              <div class="panel-head">
+                <h2>Email Outbox</h2>
+                <div class="panel-actions">
+                  <button class="ghost-button" id="sendTestEmailButton" type="button">Send Test</button>
+                </div>
+              </div>
+              <div class="admin-list-tools">
+                <label>
+                  Search
+                  <input id="emailSearchInput" type="search" placeholder="recipient, subject, event, error">
+                </label>
+                <label>
+                  Status
+                  <select id="emailStatusFilter">
+                    <option value="">All statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="sending">Sending</option>
+                    <option value="failed">Failed</option>
+                    <option value="sent">Sent</option>
+                  </select>
+                </label>
+              </div>
+              <div class="email-overview" id="emailOverview"></div>
+              <div class="admin-list" id="emailList"></div>
+              <div class="pager" id="emailPager"></div>
+            </section>
+
+            <section class="admin-panel admin-section-panel" data-admin-panel="maintenance" hidden>
+              <div class="panel-head">
+                <h2>Maintenance</h2>
+              </div>
+              <div class="maintenance-grid" id="maintenanceOverview"></div>
+            </section>
+
+            <section class="admin-panel admin-section-panel" data-admin-panel="audit" hidden>
+              <div class="panel-head">
+                <h2>Audit Log</h2>
+              </div>
+              <div class="admin-list-tools compact">
+                <label>
+                  Search
+                  <input id="auditSearchInput" type="search" placeholder="actor, action, target, IP">
+                </label>
+              </div>
+              <div class="admin-list" id="auditList"></div>
+              <div class="pager" id="auditPager"></div>
+            </section>
+          </div>
         </div>
       </section>
 

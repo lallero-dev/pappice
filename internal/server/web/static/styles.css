@@ -821,82 +821,58 @@ button:focus-visible {
   margin-top: 2px;
 }
 
-.onboarding-panel {
+.admin-shell {
   align-items: start;
-  background: #ffffff;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+
+.admin-sidebar {
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.4fr) auto;
-  margin-bottom: 10px;
-  padding: 14px;
+  gap: 4px;
+  padding: 8px;
+  position: sticky;
+  top: 70px;
 }
 
-.onboarding-panel h2 {
-  font-size: 18px;
-  margin: 2px 0 4px;
+.admin-side-button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  text-align: left;
 }
 
-.onboarding-panel p {
-  color: var(--muted);
-  margin: 0;
+.admin-side-button:hover,
+.admin-side-button:focus-visible {
+  background: var(--panel-strong);
+  border-color: var(--border-soft);
 }
 
-.eyebrow {
+.admin-side-button.active {
+  background: #e9f2fb;
+  border-color: #9cc4e7;
   color: var(--blue-dark);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
 }
 
-.onboarding-steps {
-  display: grid;
-  gap: 8px;
+.admin-side-button strong {
+  font-size: 13px;
 }
 
-.onboarding-step {
-  align-items: start;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 22px minmax(0, 1fr);
-}
-
-.step-dot {
-  align-items: center;
-  background: #eef2f6;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 800;
-  height: 22px;
-  justify-content: center;
-  width: 22px;
-}
-
-.onboarding-step.done .step-dot {
-  background: #e8f6ee;
-  border-color: #b9dfc9;
-  color: var(--green);
-}
-
-.step-copy,
-.step-copy strong,
-.step-copy span {
-  display: block;
-}
-
-.step-copy span {
+.admin-side-button span {
   color: var(--muted);
   font-size: 12px;
 }
 
-.step-action {
-  margin-top: 6px;
-}
-
+.admin-section-stage,
 .admin-grid {
   display: grid;
   gap: 10px;
@@ -909,7 +885,6 @@ button:focus-visible {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   padding: 12px;
 }
@@ -937,8 +912,24 @@ button:focus-visible {
 .admin-list {
   display: grid;
   gap: 6px;
-  max-height: min(360px, calc(100vh - 260px));
+  max-height: min(560px, calc(100vh - 280px));
   overflow: auto;
+}
+
+.admin-list-tools {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(240px, 1fr) minmax(150px, 220px);
+}
+
+.admin-list-tools.compact {
+  grid-template-columns: minmax(240px, 1fr);
+}
+
+.admin-list-tools label {
+  display: grid;
+  gap: 6px;
 }
 
 .admin-row {
@@ -979,23 +970,34 @@ button:focus-visible {
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
 }
 
-.email-stat {
+.maintenance-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.email-stat,
+.maintenance-item {
   background: var(--panel-strong);
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   display: grid;
   gap: 2px;
   padding: 8px;
+  min-width: 0;
 }
 
-.email-stat span {
+.email-stat span,
+.maintenance-item span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 650;
 }
 
-.email-stat strong {
+.email-stat strong,
+.maintenance-item strong {
   font-size: 15px;
+  overflow-wrap: anywhere;
 }
 
 .email-row {
@@ -1008,6 +1010,21 @@ button:focus-visible {
 .email-row:hover,
 .email-row:focus-visible {
   background: #f8fbfd;
+}
+
+.pager {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.pager-summary {
+  color: var(--muted);
+  font-size: 12px;
+  margin-right: auto;
 }
 
 .email-detail {
@@ -1082,8 +1099,19 @@ button:focus-visible {
 @media (max-width: 1050px) {
   .shell,
   .content-grid,
+  .admin-shell,
   .admin-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-sidebar {
+    display: flex;
+    overflow-x: auto;
+    position: static;
+  }
+
+  .admin-side-button {
+    min-width: 160px;
   }
 
   .detail-pane {
@@ -1110,7 +1138,8 @@ button:focus-visible {
   }
 
   .toolbar,
-  .detail-controls {
+  .detail-controls,
+  .admin-list-tools {
     grid-template-columns: 1fr;
   }
 
@@ -1122,10 +1151,6 @@ button:focus-visible {
     left: 8px;
     right: 8px;
     top: 8px;
-  }
-
-  .onboarding-panel {
-    grid-template-columns: 1fr;
   }
 
   .admin-row {

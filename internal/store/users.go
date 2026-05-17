@@ -374,6 +374,32 @@ func (s *Store) GetAccountLink(token string) (AccountLink, User, error) {
 	return link, publicUserCopy(user), nil
 }
 
+func (s *Store) AccountLinkStatus(token string) (AccountLinkStatus, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return AccountLinkStatus{}, ErrNotFound
+	}
+	row := s.db.QueryRow(`
+		SELECT al.purpose, al.expires_at, al.used_at, u.disabled
+		FROM account_links al
+		JOIN users u ON u.id = al.user_id
+		WHERE al.token_hash = ?`, security.HashToken(token))
+	var status AccountLinkStatus
+	var expires string
+	var used sql.NullString
+	var disabled int
+	if err := row.Scan(&status.Purpose, &expires, &used, &disabled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AccountLinkStatus{}, ErrNotFound
+		}
+		return AccountLinkStatus{}, err
+	}
+	status.ExpiresAt = parseTime(expires)
+	status.UsedAt = parseNullTime(used)
+	status.UserDisabled = disabled != 0
+	return status, nil
+}
+
 func (s *Store) ConsumeAccountLink(token, password string) (User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
