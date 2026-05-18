@@ -3,6 +3,7 @@
 /pemmece.db
 /pemmece.db-*
 /pemmece-uploads/
+/pemmece-backups/
 /localhost.pem
 /localhost-key.pem
 /tmp/

@@ -64,6 +64,7 @@ Important values:
 - `PEMMECE_SESSION_TTL`: browser session lifetime, default `336h`
 - `PEMMECE_BRAND_NAME`: display name for the deployed instance
 - `PEMMECE_UPLOAD_DIR`: directory for ticket attachments
+- `PEMMECE_BACKUP_DIR`: directory where backup snapshots are stored
 
 Use [.env.example](./.env.example) as the complete reference.
 
@@ -79,6 +80,30 @@ name or requiring a custom build.
 Ticket descriptions and replies can include files. Files are stored on disk in
 `PEMMECE_UPLOAD_DIR`; SQLite stores only metadata and access rules. Back up the
 database and upload directory together.
+
+## Backup And Restore
+
+Backups are local snapshots of the SQLite database plus the upload directory.
+The backup script uses SQLite's online backup command, so it can run while
+Pemmece is running.
+
+```sh
+scripts/backup.sh
+```
+
+This creates `PEMMECE_BACKUP_DIR/<timestamp>/` with `pemmece.db`,
+`uploads.tar`, and a small manifest. The admin Maintenance page shows the backup
+directory and latest detected backup.
+
+Stop Pemmece before restoring:
+
+```sh
+scripts/restore.sh pemmece-backups/20260101T120000Z
+```
+
+Use `scripts/restore.sh latest` to restore the newest snapshot. The restore
+script moves the current database, WAL/SHM files, and upload directory into a
+`restore-pre-<timestamp>` folder before replacing them.
 
 ## Email
 

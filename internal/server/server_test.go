@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -237,10 +238,19 @@ func TestHealthExposesBranding(t *testing.T) {
 }
 
 func TestAdminMaintenanceEndpoint(t *testing.T) {
+	backupDir := filepath.Join(t.TempDir(), "backups")
+	latestBackup := filepath.Join(backupDir, "20260101T120000Z")
+	if err := os.MkdirAll(latestBackup, 0o755); err != nil {
+		t.Fatalf("create backup dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(latestBackup, "pemmece.db"), []byte("backup"), 0o600); err != nil {
+		t.Fatalf("write backup db marker: %v", err)
+	}
 	_, server, client := newTestServer(t, Options{
 		EmailNotifications: true,
 		PublicURL:          "https://tracker.example.test",
 		UploadDir:          filepath.Join(t.TempDir(), "uploads"),
+		BackupDir:          backupDir,
 		Version:            "test-version",
 	})
 	adminCookie, _ := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
@@ -250,6 +260,8 @@ func TestAdminMaintenanceEndpoint(t *testing.T) {
 	if !bytes.Contains(body, []byte(`"version":"test-version"`)) ||
 		!bytes.Contains(body, []byte(`"database_path"`)) ||
 		!bytes.Contains(body, []byte(`"upload_path"`)) ||
+		!bytes.Contains(body, []byte(`"path":"`+backupDir+`"`)) ||
+		!bytes.Contains(body, []byte(`"latest_name":"20260101T120000Z"`)) ||
 		!bytes.Contains(body, []byte(`"enabled":true`)) ||
 		!bytes.Contains(body, []byte(`"public_url":"https://tracker.example.test"`)) {
 		t.Fatalf("maintenance response = %s", body)

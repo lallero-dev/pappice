@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +31,7 @@ const (
 	defaultBrandSubtitle   = "customer support"
 	defaultBrandColor      = "#5bb974"
 	defaultUploadDir       = "pemmece-uploads"
+	defaultBackupDir       = "pemmece-backups"
 	defaultMaxUploadSize   = 10 << 20
 	defaultMaxUploadFiles  = 5
 	defaultVersion         = "dev"
@@ -49,6 +52,7 @@ type Options struct {
 	SessionTTL            time.Duration
 	Version               string
 	UploadDir             string
+	BackupDir             string
 	MaxUploadSize         int64
 	MaxUploadFiles        int
 	AllowedUploadTypes    []string
@@ -124,6 +128,10 @@ func New(tracker *store.Store, opts ...Options) http.Handler {
 	}
 	options.Branding = normalizeBranding(options.Branding)
 	options = normalizeUploadOptions(options)
+	options.BackupDir = strings.TrimSpace(options.BackupDir)
+	if options.BackupDir == "" {
+		options.BackupDir = defaultBackupDir
+	}
 	options.LoginRateLimit = withDefaultRateLimit(options.LoginRateLimit, 10, time.Minute)
 	options.AccountLinkRateLimit = withDefaultRateLimit(options.AccountLinkRateLimit, 10, time.Minute)
 	s := &Server{
@@ -273,6 +281,7 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 		"started_at":    s.started,
 		"database_path": s.store.Path(),
 		"upload_path":   s.options.UploadDir,
+		"backup":        backupStatus(s.options.BackupDir),
 		"uploads":       s.publicUploadConfig(),
 		"email": map[string]any{
 			"enabled":             s.options.EmailNotifications,
@@ -281,6 +290,52 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 			"stats":               s.store.EmailNotificationStats(),
 		},
 	})
+}
+
+func backupStatus(dir string) map[string]any {
+	status := map[string]any{
+		"path": strings.TrimSpace(dir),
+	}
+	if status["path"] == "" {
+		status["path"] = defaultBackupDir
+	}
+	entries, err := os.ReadDir(status["path"].(string))
+	if err != nil {
+		if os.IsNotExist(err) {
+			status["latest_name"] = ""
+			return status
+		}
+		status["error"] = err.Error()
+		return status
+	}
+
+	var newestName string
+	var newestPath string
+	var newestTime time.Time
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		candidatePath := filepath.Join(status["path"].(string), entry.Name())
+		if _, err := os.Stat(filepath.Join(candidatePath, "pemmece.db")); err != nil {
+			continue
+		}
+		if newestName == "" || info.ModTime().After(newestTime) {
+			newestName = entry.Name()
+			newestPath = candidatePath
+			newestTime = info.ModTime()
+		}
+	}
+	status["latest_name"] = newestName
+	if newestName != "" {
+		status["latest_path"] = newestPath
+		status["latest_at"] = newestTime.UTC()
+	}
+	return status
 }
 
 func normalizeBranding(branding Branding) Branding {

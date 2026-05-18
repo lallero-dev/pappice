@@ -47,6 +47,7 @@ func main() {
 	emailBatchDelay := flag.Duration("email-batch-delay", envDuration("PEMMECE_EMAIL_BATCH_DELAY", 20*time.Second), "delay before sending coalesced ticket notification emails")
 	sessionTTL := flag.Duration("session-ttl", envDuration("PEMMECE_SESSION_TTL", 14*24*time.Hour), "browser session lifetime")
 	uploadDir := flag.String("upload-dir", envOr("PEMMECE_UPLOAD_DIR", "pemmece-uploads"), "directory for ticket attachment files")
+	backupDir := flag.String("backup-dir", envOr("PEMMECE_BACKUP_DIR", "pemmece-backups"), "directory where backup snapshots are stored")
 	maxUploadSize := flag.Int64("max-upload-size", envInt64("PEMMECE_MAX_UPLOAD_SIZE", 10<<20), "maximum bytes per attachment")
 	maxUploadFiles := flag.Int("max-upload-files", envInt("PEMMECE_MAX_UPLOAD_FILES", 5), "maximum files per upload request")
 	allowedUploadTypes := flag.String("allowed-upload-types", envOr("PEMMECE_ALLOWED_UPLOAD_TYPES", ""), "comma-separated allowed attachment MIME types")
@@ -112,6 +113,7 @@ func main() {
 			SessionTTL:           *sessionTTL,
 			Version:              version,
 			UploadDir:            *uploadDir,
+			BackupDir:            *backupDir,
 			MaxUploadSize:        *maxUploadSize,
 			MaxUploadFiles:       *maxUploadFiles,
 			AllowedUploadTypes:   splitCSV(*allowedUploadTypes),

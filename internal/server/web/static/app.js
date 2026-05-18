@@ -1334,11 +1334,14 @@ function renderMaintenance() {
   const info = state.maintenance || {};
   const uploads = info.uploads || state.meta.uploads || {};
   const email = info.email || {};
+  const backup = info.backup || {};
   els.maintenanceOverview.replaceChildren(
     maintenanceItem("Version", info.version || "dev"),
     maintenanceItem("Started", info.started_at ? relativeTime(info.started_at) : "-"),
     maintenanceItem("Database", info.database_path || "-"),
     maintenanceItem("Uploads", info.upload_path || "-"),
+    maintenanceItem("Backups", backup.path || "-"),
+    maintenanceItem("Last backup", backup.latest_at ? `${relativeTime(backup.latest_at)} / ${backup.latest_name || "latest"}` : "No backups found"),
     maintenanceItem("Upload limit", `${formatBytes(uploads.max_size_bytes || 0)} / ${uploads.max_files || 0} files`),
     maintenanceItem("Email", email.enabled ? "Enabled" : "Disabled"),
     maintenanceItem("Public URL", email.public_url || "-"),
