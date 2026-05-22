@@ -84,6 +84,17 @@ button:disabled {
   width: 34px;
 }
 
+.brand-mark.logo {
+  background: transparent;
+  border-radius: 0;
+}
+
+.brand-mark img {
+  display: block;
+  height: 34px;
+  width: 34px;
+}
+
 .brand strong,
 .brand span {
   display: block;

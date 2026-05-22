@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 256 256"
+   role="img"
+   aria-labelledby="title desc"
+   version="1.1"
+   id="svg9"
+   sodipodi:docname="logo.svg"
+   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs9" />
+  <sodipodi:namedview
+     id="namedview9"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="2.3340048"
+     inkscape:cx="70.479719"
+     inkscape:cy="104.75557"
+     inkscape:window-width="1920"
+     inkscape:window-height="1032"
+     inkscape:window-x="0"
+     inkscape:window-y="26"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg9" />
+  <title
+     id="title">Pappice logo</title>
+  <desc
+     id="desc">A simple walnut shell with a clear small worm coming out.</desc>
+  <path
+     fill="#9b6335"
+     stroke="#51331f"
+     stroke-width="9.79356"
+     d="M 72.412928,46.761769 C 128.11804,11.166654 196.03461,28.785273 231.62972,84.490389 265.90649,138.13234 251.84065,197.96759 202.325,229.60769 139.39885,269.817 59.933841,252.31385 19.72454,189.3877 -9.9380601,142.96676 9.486773,86.971069 72.412928,46.761769 Z"
+     id="path1" />
+  <path
+     fill="#c88442"
+     d="m 81.756759,72.75229 c 41.836581,-20.922108 86.626401,-19.034073 134.082721,2.94179 14.4719,6.733159 9.63061,28.71285 -6.99009,27.71109 -32.58221,-0.97194 -62.61339,6.59551 -88.7752,24.76547 C 95.316358,143.9907 68.09315,146.8583 40.840114,133.7644 19.977652,123.85088 37.484625,96.683479 81.756759,72.75229 Z"
+     opacity="0.62"
+     id="path2"
+     style="stroke-width:1.22419" />
+  <path
+     fill="#73441f"
+     d="m 37.492273,201.27873 c 37.941206,4.81148 72.471097,-7.08337 103.589677,-35.68457 29.71459,-26.25129 61.89456,-39.55014 96.16753,-38.2058 11.54846,-0.11544 15.99134,15.93169 5.67557,22.52339 -33.01044,21.0934 -54.55806,46.48439 -64.64288,76.17298 -7.19122,20.57571 -31.11858,28.6012 -51.60864,16.99692 -14.09948,-8.4239 -16.47921,-25.78939 -3.72789,-35.39016 17.25003,-13.9282 30.83181,-31.32352 36.70468,-53.96239 -37.39368,36.96929 -78.113032,52.81916 -122.158047,47.54963 z"
+     opacity="0.5"
+     id="path3"
+     style="stroke-width:1.22419" />
+  <path
+     fill="none"
+     stroke="#5c351d"
+     stroke-linecap="round"
+     stroke-width="8.56936"
+     d="m 108.40644,64.440031 c 29.60296,14.497892 56.31229,38.108669 80.12801,70.832349 M 76.513234,80.461199 C 117.12093,105.3605 149.67715,142.66854 174.18186,192.3853 M 50.753646,112.90194 c 29.059259,25.01477 53.161744,60.46076 72.966624,107.36957"
+     opacity="0.7"
+     id="path4" />
+  <path
+     fill="none"
+     stroke="#3c2417"
+     stroke-linecap="round"
+     stroke-width="6.12097"
+     d="M 78.259796,60.459024 C 41.439639,102.87294 28.491025,157.63595 44.28508,218.72989"
+     opacity="0.32"
+     id="path6" />
+  <path
+     fill="none"
+     stroke="#315c2f"
+     stroke-linecap="round"
+     stroke-width="39.1742"
+     d="m 143.49072,143.44511 c 21.49792,-14.92394 34.54093,-36.80535 37.38966,-63.530531 1.11393,-12.554545 2.84871,-26.725192 15.39868,-37.668185"
+     id="path7" />
+  <path
+     fill="none"
+     stroke="#77c95f"
+     stroke-linecap="round"
+     stroke-width="26.9323"
+     d="m 143.49072,143.44511 c 21.49792,-14.92394 34.54093,-36.80535 37.38966,-63.530531 1.11393,-12.554545 2.84871,-26.725192 15.39868,-37.668185"
+     id="path8" />
+  <circle
+     cx="-186.96042"
+     cy="-105.70422"
+     r="20.811314"
+     fill="#91d86f"
+     stroke="#315c2f"
+     stroke-width="8.56936"
+     id="circle8"
+     transform="rotate(157.97433)" />
+  <circle
+     cx="-195.52977"
+     cy="-111.82521"
+     r="3.6725845"
+     fill="#2e2115"
+     id="circle9"
+     transform="rotate(157.97433)"
+     style="stroke-width:1.22419" />
+  <path
+     fill="none"
+     stroke="#4f9e47"
+     stroke-linecap="round"
+     stroke-width="6.12097"
+     d="m 157.05105,131.81857 c 11.32268,-11.18344 17.86351,-24.39412 20.75736,-40.091152"
+     opacity="0.95"
+     id="path9" />
+</svg>

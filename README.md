@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./internal/server/web/static/logo.svg" alt="Pappice logo" width="96">
+</p>
+
 # Pappice
 
 Pappice is a small self-hosted customer support ticketing system for small

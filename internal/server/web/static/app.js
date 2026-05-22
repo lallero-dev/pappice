@@ -187,10 +187,20 @@ function applyBranding() {
   const branding = state.branding;
   els.brandName.textContent = branding.name;
   els.brandSubtitle.textContent = branding.subtitle;
-  els.brandMark.textContent = branding.mark;
+  if (isDefaultPappiceBranding(branding)) {
+    els.brandMark.classList.add("logo");
+    els.brandMark.replaceChildren(el("img", { src: "/static/logo.svg", alt: "" }));
+  } else {
+    els.brandMark.classList.remove("logo");
+    els.brandMark.textContent = branding.mark;
+  }
   document.title = branding.name;
   document.documentElement.style.setProperty("--brand-color", branding.color);
   document.documentElement.style.setProperty("--brand-contrast", contrastColor(branding.color));
+}
+
+function isDefaultPappiceBranding(branding) {
+  return branding.name === "Pappice" && branding.mark === "P";
 }
 
 function isHexColor(value) {
@@ -243,6 +253,7 @@ async function request(path, options = {}) {
 
 async function boot() {
   bindEvents();
+  await loadHealth();
   const route = accountLinkRoute();
   if (route) {
     await loadAccountLinkRoute(route);
