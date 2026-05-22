@@ -7,6 +7,14 @@ customers, staff tools, no-reply email notifications, webhooks, and an audit log
 The project is intentionally simple: no external database, no separate frontend
 build, and no inbound email processing.
 
+## Project Status
+
+Current target: `v0.1.0-alpha` (see [VERSION](./VERSION)).
+
+Pemmece is intended for small-team self-hosting and public audit. It is not yet
+externally security audited, and the API/schema should be considered unstable
+until a non-alpha release.
+
 ## Features
 
 - Products group tickets by service, customer, or team.
@@ -164,3 +172,9 @@ Chromium is not at `/usr/bin/chromium`.
 
 Keep changes small and focused. Run the tests above before opening a pull
 request. Do not commit `.env`, SQLite databases, certificates, or SMTP secrets.
+
+## License
+
+Pemmece is released under the MIT License. See [LICENSE](./LICENSE).
+
+Copyright 2026 Paolo Marrone, [lallero.dev](https://lallero.dev).
