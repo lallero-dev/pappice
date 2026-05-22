@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"pemmece/internal/security"
+	"pappice/internal/security"
 )
 
 func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {

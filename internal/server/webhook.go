@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"pemmece/internal/security"
-	"pemmece/internal/store"
+	"pappice/internal/security"
+	"pappice/internal/store"
 )
 
 func (s *Server) newWebhookClient() *http.Client {
@@ -68,10 +68,10 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, issueID int64,
 		return delivery
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "pemmece-webhook")
-	req.Header.Set("X-Pemmece-Event", event)
+	req.Header.Set("User-Agent", "pappice-webhook")
+	req.Header.Set("X-Pappice-Event", event)
 	if hook.Secret != "" {
-		req.Header.Set("X-Pemmece-Signature", "sha256="+security.HMACSHA256(hook.Secret, body))
+		req.Header.Set("X-Pappice-Signature", "sha256="+security.HMACSHA256(hook.Secret, body))
 	}
 
 	resp, err := s.client.Do(req)

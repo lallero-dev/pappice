@@ -1,9 +1,9 @@
-/pemmece
-/pemmece-data.json
-/pemmece.db
-/pemmece.db-*
-/pemmece-uploads/
-/pemmece-backups/
+/pappice
+/pappice-data.json
+/pappice.db
+/pappice.db-*
+/pappice-uploads/
+/pappice-backups/
 /localhost.pem
 /localhost-key.pem
 /tmp/

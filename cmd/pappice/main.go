@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"pemmece/internal/notify"
-	"pemmece/internal/server"
-	"pemmece/internal/store"
+	"pappice/internal/notify"
+	"pappice/internal/server"
+	"pappice/internal/store"
 )
 
 var version = "dev"
@@ -26,35 +26,35 @@ func main() {
 		log.Fatalf("load .env: %v", err)
 	}
 
-	addr := flag.String("addr", envOr("PEMMECE_ADDR", "127.0.0.1:8388"), "HTTP listen address")
-	dbPath := flag.String("db", envOr("PEMMECE_DB", "pemmece.db"), "path to SQLite database file")
-	tlsCert := flag.String("tls-cert", envOr("PEMMECE_TLS_CERT", ""), "TLS certificate path")
-	tlsKey := flag.String("tls-key", envOr("PEMMECE_TLS_KEY", ""), "TLS private key path")
-	allowInsecureWebhooks := flag.Bool("allow-insecure-webhooks", envBool("PEMMECE_ALLOW_INSECURE_WEBHOOKS"), "allow http webhook URLs")
-	allowPrivateWebhooks := flag.Bool("allow-private-webhooks", envBool("PEMMECE_ALLOW_PRIVATE_WEBHOOKS"), "allow private/link-local webhook targets")
-	publicURL := flag.String("public-url", envOr("PEMMECE_PUBLIC_URL", ""), "public base URL used in email notifications")
-	brandName := flag.String("brand-name", envOr("PEMMECE_BRAND_NAME", ""), "display name for this Pemmece instance")
-	brandSubtitle := flag.String("brand-subtitle", envOr("PEMMECE_BRAND_SUBTITLE", ""), "short subtitle shown under the brand name")
-	brandMark := flag.String("brand-mark", envOr("PEMMECE_BRAND_MARK", ""), "short mark shown in the header")
-	brandColor := flag.String("brand-color", envOr("PEMMECE_BRAND_COLOR", ""), "hex color for the brand mark")
-	emailNotifications := flag.Bool("email-notifications", envBool("PEMMECE_EMAIL_NOTIFICATIONS"), "enable email notification enqueueing and delivery")
-	smtpHost := flag.String("smtp-host", envOr("PEMMECE_SMTP_HOST", ""), "SMTP host for email notifications")
-	smtpPort := flag.Int("smtp-port", envInt("PEMMECE_SMTP_PORT", 0), "SMTP port for email notifications")
-	smtpUser := flag.String("smtp-user", envOr("PEMMECE_SMTP_USER", ""), "SMTP username")
-	smtpPassword := flag.String("smtp-password", envOr("PEMMECE_SMTP_PASSWORD", ""), "SMTP password")
-	smtpFrom := flag.String("smtp-from", envOr("PEMMECE_SMTP_FROM", ""), "sender address for email notifications")
-	smtpTLSMode := flag.String("smtp-tls-mode", envOr("PEMMECE_SMTP_TLS_MODE", "starttls"), "SMTP TLS mode: starttls, tls, or none")
-	emailBatchDelay := flag.Duration("email-batch-delay", envDuration("PEMMECE_EMAIL_BATCH_DELAY", 20*time.Second), "delay before sending coalesced ticket notification emails")
-	sessionTTL := flag.Duration("session-ttl", envDuration("PEMMECE_SESSION_TTL", 14*24*time.Hour), "browser session lifetime")
-	uploadDir := flag.String("upload-dir", envOr("PEMMECE_UPLOAD_DIR", "pemmece-uploads"), "directory for ticket attachment files")
-	backupDir := flag.String("backup-dir", envOr("PEMMECE_BACKUP_DIR", "pemmece-backups"), "directory where backup snapshots are stored")
-	maxUploadSize := flag.Int64("max-upload-size", envInt64("PEMMECE_MAX_UPLOAD_SIZE", 10<<20), "maximum bytes per attachment")
-	maxUploadFiles := flag.Int("max-upload-files", envInt("PEMMECE_MAX_UPLOAD_FILES", 5), "maximum files per upload request")
-	allowedUploadTypes := flag.String("allowed-upload-types", envOr("PEMMECE_ALLOWED_UPLOAD_TYPES", ""), "comma-separated allowed attachment MIME types")
-	loginRateLimit := flag.Int("login-rate-limit", envInt("PEMMECE_LOGIN_RATE_LIMIT", 10), "login attempts allowed per rate window and user/IP")
-	loginRateWindow := flag.Duration("login-rate-window", envDuration("PEMMECE_LOGIN_RATE_WINDOW", time.Minute), "login rate limit window")
-	accountLinkRateLimit := flag.Int("account-link-rate-limit", envInt("PEMMECE_ACCOUNT_LINK_RATE_LIMIT", 10), "account link attempts allowed per rate window and token/IP")
-	accountLinkRateWindow := flag.Duration("account-link-rate-window", envDuration("PEMMECE_ACCOUNT_LINK_RATE_WINDOW", time.Minute), "account link rate limit window")
+	addr := flag.String("addr", envOr("PAPPICE_ADDR", "127.0.0.1:8388"), "HTTP listen address")
+	dbPath := flag.String("db", envOr("PAPPICE_DB", "pappice.db"), "path to SQLite database file")
+	tlsCert := flag.String("tls-cert", envOr("PAPPICE_TLS_CERT", ""), "TLS certificate path")
+	tlsKey := flag.String("tls-key", envOr("PAPPICE_TLS_KEY", ""), "TLS private key path")
+	allowInsecureWebhooks := flag.Bool("allow-insecure-webhooks", envBool("PAPPICE_ALLOW_INSECURE_WEBHOOKS"), "allow http webhook URLs")
+	allowPrivateWebhooks := flag.Bool("allow-private-webhooks", envBool("PAPPICE_ALLOW_PRIVATE_WEBHOOKS"), "allow private/link-local webhook targets")
+	publicURL := flag.String("public-url", envOr("PAPPICE_PUBLIC_URL", ""), "public base URL used in email notifications")
+	brandName := flag.String("brand-name", envOr("PAPPICE_BRAND_NAME", ""), "display name for this Pappice instance")
+	brandSubtitle := flag.String("brand-subtitle", envOr("PAPPICE_BRAND_SUBTITLE", ""), "short subtitle shown under the brand name")
+	brandMark := flag.String("brand-mark", envOr("PAPPICE_BRAND_MARK", ""), "short mark shown in the header")
+	brandColor := flag.String("brand-color", envOr("PAPPICE_BRAND_COLOR", ""), "hex color for the brand mark")
+	emailNotifications := flag.Bool("email-notifications", envBool("PAPPICE_EMAIL_NOTIFICATIONS"), "enable email notification enqueueing and delivery")
+	smtpHost := flag.String("smtp-host", envOr("PAPPICE_SMTP_HOST", ""), "SMTP host for email notifications")
+	smtpPort := flag.Int("smtp-port", envInt("PAPPICE_SMTP_PORT", 0), "SMTP port for email notifications")
+	smtpUser := flag.String("smtp-user", envOr("PAPPICE_SMTP_USER", ""), "SMTP username")
+	smtpPassword := flag.String("smtp-password", envOr("PAPPICE_SMTP_PASSWORD", ""), "SMTP password")
+	smtpFrom := flag.String("smtp-from", envOr("PAPPICE_SMTP_FROM", ""), "sender address for email notifications")
+	smtpTLSMode := flag.String("smtp-tls-mode", envOr("PAPPICE_SMTP_TLS_MODE", "starttls"), "SMTP TLS mode: starttls, tls, or none")
+	emailBatchDelay := flag.Duration("email-batch-delay", envDuration("PAPPICE_EMAIL_BATCH_DELAY", 20*time.Second), "delay before sending coalesced ticket notification emails")
+	sessionTTL := flag.Duration("session-ttl", envDuration("PAPPICE_SESSION_TTL", 14*24*time.Hour), "browser session lifetime")
+	uploadDir := flag.String("upload-dir", envOr("PAPPICE_UPLOAD_DIR", "pappice-uploads"), "directory for ticket attachment files")
+	backupDir := flag.String("backup-dir", envOr("PAPPICE_BACKUP_DIR", "pappice-backups"), "directory where backup snapshots are stored")
+	maxUploadSize := flag.Int64("max-upload-size", envInt64("PAPPICE_MAX_UPLOAD_SIZE", 10<<20), "maximum bytes per attachment")
+	maxUploadFiles := flag.Int("max-upload-files", envInt("PAPPICE_MAX_UPLOAD_FILES", 5), "maximum files per upload request")
+	allowedUploadTypes := flag.String("allowed-upload-types", envOr("PAPPICE_ALLOWED_UPLOAD_TYPES", ""), "comma-separated allowed attachment MIME types")
+	loginRateLimit := flag.Int("login-rate-limit", envInt("PAPPICE_LOGIN_RATE_LIMIT", 10), "login attempts allowed per rate window and user/IP")
+	loginRateWindow := flag.Duration("login-rate-window", envDuration("PAPPICE_LOGIN_RATE_WINDOW", time.Minute), "login rate limit window")
+	accountLinkRateLimit := flag.Int("account-link-rate-limit", envInt("PAPPICE_ACCOUNT_LINK_RATE_LIMIT", 10), "account link attempts allowed per rate window and token/IP")
+	accountLinkRateWindow := flag.Duration("account-link-rate-window", envDuration("PAPPICE_ACCOUNT_LINK_RATE_WINDOW", time.Minute), "account link rate limit window")
 	flag.Parse()
 
 	tracker, err := store.Open(*dbPath)
@@ -130,11 +130,11 @@ func main() {
 				errs <- http.ErrServerClosed
 				log.Fatalf("both -tls-cert and -tls-key are required for HTTPS")
 			}
-			log.Printf("pemmece listening on https://%s", *addr)
+			log.Printf("pappice listening on https://%s", *addr)
 			errs <- srv.ListenAndServeTLS(*tlsCert, *tlsKey)
 			return
 		}
-		log.Printf("pemmece listening on http://%s (browser login requires HTTPS)", *addr)
+		log.Printf("pappice listening on http://%s (browser login requires HTTPS)", *addr)
 		errs <- srv.ListenAndServe()
 	}()
 

@@ -40,9 +40,9 @@ config_value() {
   printf "%s" "$fallback"
 }
 
-DB_PATH="$(config_value PEMMECE_DB ./pemmece.db)"
-UPLOAD_DIR="$(config_value PEMMECE_UPLOAD_DIR ./pemmece-uploads)"
-BACKUP_DIR="$(config_value PEMMECE_BACKUP_DIR ./pemmece-backups)"
+DB_PATH="$(config_value PAPPICE_DB ./pappice.db)"
+UPLOAD_DIR="$(config_value PAPPICE_UPLOAD_DIR ./pappice-uploads)"
+BACKUP_DIR="$(config_value PAPPICE_BACKUP_DIR ./pappice-backups)"
 
 assume_yes=false
 if [[ "${1:-}" == "--yes" ]]; then
@@ -59,7 +59,7 @@ latest_backup() {
     return 1
   fi
   for candidate in "$BACKUP_DIR"/*; do
-    [[ -d "$candidate" && -f "$candidate/pemmece.db" ]] || continue
+    [[ -d "$candidate" && -f "$candidate/pappice.db" ]] || continue
     newest="$candidate"
   done
   [[ -n "$newest" ]] || return 1
@@ -73,13 +73,13 @@ if [[ "$backup" == "latest" ]]; then
   fi
 fi
 
-if [[ ! -f "$backup/pemmece.db" ]]; then
-  echo "Backup database not found: $backup/pemmece.db" >&2
+if [[ ! -f "$backup/pappice.db" ]]; then
+  echo "Backup database not found: $backup/pappice.db" >&2
   exit 1
 fi
 
 if [[ "$assume_yes" != true ]]; then
-  echo "Stop Pemmece before restoring. This will replace:"
+  echo "Stop Pappice before restoring. This will replace:"
   echo "  DB:      $DB_PATH"
   echo "  Uploads: $UPLOAD_DIR"
   printf "Restore from %s? [y/N] " "$backup"
@@ -103,7 +103,7 @@ for suffix in -wal -shm; do
     mv "$DB_PATH$suffix" "$safety_dir/$(basename "$DB_PATH$suffix")"
   fi
 done
-cp "$backup/pemmece.db" "$DB_PATH"
+cp "$backup/pappice.db" "$DB_PATH"
 
 if [[ -f "$backup/uploads.tar" ]]; then
   if [[ -d "$UPLOAD_DIR" ]]; then

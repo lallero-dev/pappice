@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"pemmece/internal/store"
+	"pappice/internal/store"
 )
 
 func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store.User) {
@@ -77,16 +77,16 @@ func (s *Server) enqueueAccountLinkEmail(event string, user store.User, token st
 }
 
 func (s *Server) accountLinkEmailContent(event string, user store.User, token string, expiresAt time.Time) (string, string, string) {
-	action := "Set your Pemmece password"
-	intro := "An account has been created for you in Pemmece."
+	action := "Set your Pappice password"
+	intro := "An account has been created for you in Pappice."
 	if event == "account.reset" {
-		action = "Reset your Pemmece password"
-		intro = "A password reset was requested for your Pemmece account."
+		action = "Reset your Pappice password"
+		intro = "A password reset was requested for your Pappice account."
 	}
 	link := s.accountLinkURL(accountLinkPurpose(event), token)
 	subject := action
 	layout := emailLayout{
-		Kicker: "Pemmece account",
+		Kicker: "Pappice account",
 		Title:  subject,
 		Intro:  intro,
 		Fields: []emailField{
@@ -96,7 +96,7 @@ func (s *Server) accountLinkEmailContent(event string, user store.User, token st
 		},
 		ActionLabel: action,
 		ActionURL:   link,
-		Footer:      "This is a one-time link. If you did not expect this email, contact your Pemmece administrator.",
+		Footer:      "This is a one-time link. If you did not expect this email, contact your Pappice administrator.",
 	}
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
@@ -131,14 +131,14 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 	}
 
 	layout := emailLayout{
-		Kicker:      "Pemmece customer support",
+		Kicker:      "Pappice customer support",
 		Title:       subject,
 		Intro:       intro,
 		Fields:      fields,
 		Blocks:      blocks,
 		ActionLabel: "Open your ticket",
 		ActionURL:   link,
-		Footer:      "Replies to this email are not read. Please open Pemmece to continue the conversation.",
+		Footer:      "Replies to this email are not read. Please open Pappice to continue the conversation.",
 	}
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
@@ -175,12 +175,12 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 	}
 
 	layout := emailLayout{
-		Kicker:      "Pemmece staff notification",
+		Kicker:      "Pappice staff notification",
 		Title:       subject,
 		Intro:       fmt.Sprintf("%s %s %s.", actorName, strings.ToLower(action), issue.Key),
 		Fields:      fields,
 		Blocks:      blocks,
-		ActionLabel: "Open in Pemmece",
+		ActionLabel: "Open in Pappice",
 		ActionURL:   link,
 	}
 	return subject, renderEmailText(layout), renderEmailHTML(layout)

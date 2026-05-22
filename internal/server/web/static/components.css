@@ -17,7 +17,7 @@ dialog {
   max-width: min(680px, calc(100vw - 28px));
   overflow: hidden;
   padding: 0;
-  width: var(--pm-modal-width, 560px);
+  width: var(--pappice-modal-width, 560px);
 }
 
 dialog.wide {

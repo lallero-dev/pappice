@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"pemmece/internal/store"
+	"pappice/internal/store"
 )
 
 type fakeMailer struct {
@@ -152,7 +152,7 @@ func TestSMTPMailerSend(t *testing.T) {
 	mailer, err := NewSMTPMailer(SMTPConfig{
 		Host:    host,
 		Port:    port,
-		From:    "Pemmece <noreply@example.test>",
+		From:    "Pappice <noreply@example.test>",
 		TLSMode: "none",
 		Timeout: time.Second,
 	})
@@ -209,7 +209,7 @@ func TestSMTPConfigAndMessageRendering(t *testing.T) {
 	}
 
 	rendered := string(renderMessage(
-		mustAddress(t, "Pemmece <noreply@example.test>"),
+		mustAddress(t, "Pappice <noreply@example.test>"),
 		mustAddress(t, "client@example.test"),
 		Message{
 			ToName:   "Client",
@@ -256,7 +256,7 @@ func serveSMTPTestConnection(listener net.Listener, messages chan<- string) erro
 		}
 		return writer.Flush()
 	}
-	if err := writeLine("220 pemmece.test ESMTP"); err != nil {
+	if err := writeLine("220 pappice.test ESMTP"); err != nil {
 		return err
 	}
 	for {
@@ -267,7 +267,7 @@ func serveSMTPTestConnection(listener net.Listener, messages chan<- string) erro
 		command := strings.ToUpper(strings.TrimSpace(line))
 		switch {
 		case strings.HasPrefix(command, "EHLO"), strings.HasPrefix(command, "HELO"):
-			if err := writeLine("250 pemmece.test"); err != nil {
+			if err := writeLine("250 pappice.test"); err != nil {
 				return err
 			}
 		case strings.HasPrefix(command, "MAIL FROM:"), strings.HasPrefix(command, "RCPT TO:"):

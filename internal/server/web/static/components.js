@@ -1,4 +1,4 @@
-export class PemmeceModal extends HTMLElement {
+export class PappiceModal extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -62,7 +62,7 @@ export class PemmeceModal extends HTMLElement {
       } catch (error) {
         this.errorNode.textContent = error?.message || "Request failed";
         this.errorNode.hidden = false;
-        this.dispatchEvent(new CustomEvent("pm-modal-error", { detail: error }));
+        this.dispatchEvent(new CustomEvent("pappice-modal-error", { detail: error }));
       } finally {
         this.submitButton.disabled = false;
         this.submitButton.removeAttribute("aria-busy");
@@ -185,7 +185,7 @@ export function splitList(value) {
 }
 
 export function defineComponents() {
-  if (!customElements.get("pm-modal")) {
-    customElements.define("pm-modal", PemmeceModal);
+  if (!customElements.get("pappice-modal")) {
+    customElements.define("pappice-modal", PappiceModal);
   }
 }

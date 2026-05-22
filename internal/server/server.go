@@ -15,23 +15,23 @@ import (
 	"strings"
 	"time"
 
-	"pemmece/internal/security"
-	"pemmece/internal/store"
+	"pappice/internal/security"
+	"pappice/internal/store"
 )
 
 //go:embed web/index.html web/static/*
 var assets embed.FS
 
 const (
-	sessionCookieName      = "pemmece_session"
+	sessionCookieName      = "pappice_session"
 	defaultEmailBatchDelay = 20 * time.Second
 	accountLinkExpiry      = 24 * time.Hour
 	defaultSessionTTL      = 14 * 24 * time.Hour
-	defaultBrandName       = "Pemmece"
+	defaultBrandName       = "Pappice"
 	defaultBrandSubtitle   = "customer support"
 	defaultBrandColor      = "#5bb974"
-	defaultUploadDir       = "pemmece-uploads"
-	defaultBackupDir       = "pemmece-backups"
+	defaultUploadDir       = "pappice-uploads"
+	defaultBackupDir       = "pappice-backups"
 	defaultMaxUploadSize   = 10 << 20
 	defaultMaxUploadFiles  = 5
 	defaultVersion         = "dev"
@@ -254,7 +254,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"name":           "pemmece",
+		"name":           "pappice",
 		"branding":       s.options.Branding,
 		"started_at":     s.started,
 		"needs_setup":    s.store.SetupRequired(),
@@ -321,7 +321,7 @@ func backupStatus(dir string) map[string]any {
 			continue
 		}
 		candidatePath := filepath.Join(status["path"].(string), entry.Name())
-		if _, err := os.Stat(filepath.Join(candidatePath, "pemmece.db")); err != nil {
+		if _, err := os.Stat(filepath.Join(candidatePath, "pappice.db")); err != nil {
 			continue
 		}
 		if newestName == "" || info.ModTime().After(newestTime) {
@@ -886,7 +886,7 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 		}
 		s.emitIssueEvent("ticket.created", issue, auth.User)
 		if customerTicket {
-			s.enqueueRequesterEmail("ticket.created", issue, "Pemmece Support")
+			s.enqueueRequesterEmail("ticket.created", issue, "Pappice Support")
 		}
 		respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, issue))
 	default:
@@ -952,7 +952,7 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 		}
 		s.emitIssueEvent("ticket.created", issue, auth.User)
 		if customerTicket {
-			s.enqueueRequesterEmail("ticket.created", issue, "Pemmece Support")
+			s.enqueueRequesterEmail("ticket.created", issue, "Pappice Support")
 		}
 		respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, issue))
 	default:
@@ -1443,7 +1443,7 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request, auth 
 		"event":      "webhook.test",
 		"created_at": time.Now().UTC(),
 		"actor":      store.ToPublicUser(auth.User),
-		"message":    "Pemmece test delivery",
+		"message":    "Pappice test delivery",
 	}
 	body, _ := json.Marshal(payload)
 	delivery := s.deliverWebhook(hook, "webhook.test", 0, body)
@@ -1546,9 +1546,9 @@ func (s *Server) handleEmailNotificationTest(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	recipientName := defaultString(auth.User.DisplayName, auth.User.Username)
-	subject := "Pemmece test email"
-	bodyText := "This is a no-reply test email from Pemmece.\n\nIf you received this message, SMTP delivery is working."
-	bodyHTML := "<!doctype html><meta charset=\"utf-8\"><p>This is a no-reply test email from Pemmece.</p><p>If you received this message, SMTP delivery is working.</p>"
+	subject := "Pappice test email"
+	bodyText := "This is a no-reply test email from Pappice.\n\nIf you received this message, SMTP delivery is working."
+	bodyHTML := "<!doctype html><meta charset=\"utf-8\"><p>This is a no-reply test email from Pappice.</p><p>If you received this message, SMTP delivery is working.</p>"
 	created, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
 		UserID:         auth.User.ID,
 		RecipientEmail: recipientEmail,
@@ -1701,7 +1701,7 @@ func (s *Server) verifyCSRF(w http.ResponseWriter, r *http.Request, expected str
 		respondError(w, http.StatusForbidden, "same-origin request is required")
 		return false
 	}
-	token := strings.TrimSpace(r.Header.Get("X-Pemmece-CSRF"))
+	token := strings.TrimSpace(r.Header.Get("X-Pappice-CSRF"))
 	if token == "" || !security.ConstantTimeEqual(token, expected) {
 		respondError(w, http.StatusForbidden, "valid CSRF token is required")
 		return false

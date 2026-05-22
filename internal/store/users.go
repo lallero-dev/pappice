@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"pemmece/internal/security"
+	"pappice/internal/security"
 )
 
 func (s *Store) SetupRequired() bool {
@@ -446,7 +446,7 @@ func (s *Store) CreateAPIToken(userID int64, input CreateAPIToken) (PublicAPITok
 	if err != nil {
 		return PublicAPIToken{}, "", err
 	}
-	token := "pme_" + raw
+	token := "pap_" + raw
 	now := time.Now().UTC()
 
 	user, err := s.GetUser(userID)

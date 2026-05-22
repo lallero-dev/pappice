@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
-const chromiumPath = process.env.PEMMECE_E2E_CHROMIUM || process.env.CHROMIUM || "/usr/bin/chromium";
+const chromiumPath = process.env.PAPPICE_E2E_CHROMIUM || process.env.CHROMIUM || "/usr/bin/chromium";
 
 const admin = {
   username: "admin",
@@ -48,11 +48,11 @@ main().catch(async (error) => {
 });
 
 async function main() {
-  tempDir = await mkdtemp(path.join(tmpdir(), "pemmece-e2e-"));
+  tempDir = await mkdtemp(path.join(tmpdir(), "pappice-e2e-"));
   const certPath = path.join(tempDir, "localhost.pem");
   const keyPath = path.join(tempDir, "localhost-key.pem");
-  const dbPath = path.join(tempDir, "pemmece-e2e.db");
-  const binaryPath = path.join(tempDir, "pemmece-e2e");
+  const dbPath = path.join(tempDir, "pappice-e2e.db");
+  const binaryPath = path.join(tempDir, "pappice-e2e");
 
   await buildApp(binaryPath);
   await generateCertificate(certPath, keyPath);
@@ -506,20 +506,20 @@ function startChromium(port, appURL, userDataDir) {
 }
 
 async function buildApp(binaryPath) {
-  await runCommand("go", ["build", "-o", binaryPath, "./cmd/pemmece"], { cwd: repoRoot });
+  await runCommand("go", ["build", "-o", binaryPath, "./cmd/pappice"], { cwd: repoRoot });
 }
 
 function startApp({ appPort, appURL, binaryPath, certPath, dbPath, keyPath, smtpPort }) {
   const env = {
     ...process.env,
-    PEMMECE_EMAIL_NOTIFICATIONS: "true",
-    PEMMECE_PUBLIC_URL: appURL,
-    PEMMECE_SMTP_FROM: "no-reply@example.test",
-    PEMMECE_SMTP_HOST: "127.0.0.1",
-    PEMMECE_SMTP_PASSWORD: "",
-    PEMMECE_SMTP_PORT: String(smtpPort),
-    PEMMECE_SMTP_TLS_MODE: "none",
-    PEMMECE_SMTP_USER: ""
+    PAPPICE_EMAIL_NOTIFICATIONS: "true",
+    PAPPICE_PUBLIC_URL: appURL,
+    PAPPICE_SMTP_FROM: "no-reply@example.test",
+    PAPPICE_SMTP_HOST: "127.0.0.1",
+    PAPPICE_SMTP_PASSWORD: "",
+    PAPPICE_SMTP_PORT: String(smtpPort),
+    PAPPICE_SMTP_TLS_MODE: "none",
+    PAPPICE_SMTP_USER: ""
   };
   return spawnProcess(binaryPath, [
     "-addr", `127.0.0.1:${appPort}`,
@@ -537,7 +537,7 @@ function startApp({ appPort, appURL, binaryPath, certPath, dbPath, keyPath, smtp
   ], {
     cwd: repoRoot,
     env,
-    label: "pemmece"
+    label: "pappice"
   });
 }
 
@@ -559,7 +559,7 @@ function spawnProcess(command, args, { cwd, env = process.env, label }) {
 
 function captureOutput(output, label, chunk) {
   output.push(Buffer.from(chunk));
-  if (process.env.PEMMECE_E2E_VERBOSE) {
+  if (process.env.PAPPICE_E2E_VERBOSE) {
     const text = chunk.toString("utf8").replace(/\n$/, "");
     for (const line of text.split("\n")) {
       if (line) console.error(`[${label}] ${line}`);
@@ -636,7 +636,7 @@ async function startFakeSMTP() {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     socket.setEncoding("utf8");
-    socket.write("220 pemmece-e2e\r\n");
+    socket.write("220 pappice-e2e\r\n");
     let buffer = "";
     let dataMode = false;
     let dataLines = [];
@@ -748,7 +748,7 @@ async function cleanup() {
     }
     smtpServer = null;
   }
-  if (tempDir && !process.env.PEMMECE_E2E_KEEP_TMP) {
+  if (tempDir && !process.env.PAPPICE_E2E_KEEP_TMP) {
     await rm(tempDir, { force: true, recursive: true });
   }
 }

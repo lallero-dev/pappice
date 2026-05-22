@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"pemmece/internal/store"
+	"pappice/internal/store"
 )
 
 func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
@@ -40,7 +40,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"Pemmece customer support",
+		"Pappice customer support",
 		"Need &lt;help&gt;",
 		"Latest public reply",
 		"from Alice",
@@ -61,7 +61,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 
 func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
 	server := &Server{options: Options{PublicURL: "https://tracker.example.test"}}
-	project := store.Project{Key: "PME", Name: "Pemmece"}
+	project := store.Project{Key: "PME", Name: "Pappice"}
 	issue := store.Issue{
 		Key:         "PME-2",
 		ProjectKey:  "PME",
@@ -81,18 +81,18 @@ func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Paolo assigned PME-2.",
-		"Product: PME / Pemmece",
+		"Product: PME / Pappice",
 		"Priority: urgent",
 		"Description:\nLogin fails after password reset.",
-		"Open in Pemmece:\nhttps://tracker.example.test/",
+		"Open in Pappice:\nhttps://tracker.example.test/",
 	} {
 		if !strings.Contains(textBody, want) {
 			t.Fatalf("text body missing %q:\n%s", want, textBody)
 		}
 	}
 	for _, want := range []string{
-		"Pemmece staff notification",
-		"PME / Pemmece",
+		"Pappice staff notification",
+		"PME / Pappice",
 		"Login fails after password reset.",
 		`href="https://tracker.example.test/"`,
 	} {

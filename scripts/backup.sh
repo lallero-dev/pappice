@@ -40,9 +40,9 @@ config_value() {
   printf "%s" "$fallback"
 }
 
-DB_PATH="$(config_value PEMMECE_DB ./pemmece.db)"
-UPLOAD_DIR="$(config_value PEMMECE_UPLOAD_DIR ./pemmece-uploads)"
-BACKUP_DIR="$(config_value PEMMECE_BACKUP_DIR ./pemmece-backups)"
+DB_PATH="$(config_value PAPPICE_DB ./pappice.db)"
+UPLOAD_DIR="$(config_value PAPPICE_UPLOAD_DIR ./pappice-uploads)"
+BACKUP_DIR="$(config_value PAPPICE_BACKUP_DIR ./pappice-backups)"
 
 if [[ ! -f "$DB_PATH" ]]; then
   echo "Database not found: $DB_PATH" >&2
@@ -56,7 +56,7 @@ fi
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 destination="$BACKUP_DIR/$timestamp"
-backup_db="$destination/pemmece.db"
+backup_db="$destination/pappice.db"
 mkdir -p "$destination"
 
 sql_quote() {

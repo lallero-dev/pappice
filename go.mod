@@ -1,4 +1,4 @@
-module pemmece
+module pappice
 
 go 1.26
 

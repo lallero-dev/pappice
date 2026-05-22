@@ -16,7 +16,7 @@ import (
 	"strings"
 	"unicode"
 
-	"pemmece/internal/store"
+	"pappice/internal/store"
 )
 
 var defaultAllowedUploadTypes = []string{

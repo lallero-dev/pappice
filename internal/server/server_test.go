@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"pemmece/internal/store"
+	"pappice/internal/store"
 )
 
 func TestSetupRequiresHTTPS(t *testing.T) {
@@ -137,12 +137,12 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Pemmece")) {
+	if !bytes.Contains(body, []byte("Pappice")) {
 		t.Fatalf("index body missing app name: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/support", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Pemmece")) || bytes.Contains(body, []byte("support-portal")) {
+	if !bytes.Contains(body, []byte("Pappice")) || bytes.Contains(body, []byte("support-portal")) {
 		t.Fatalf("support route should serve the main app: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/missing", nil, nil, "", "")
@@ -243,7 +243,7 @@ func TestAdminMaintenanceEndpoint(t *testing.T) {
 	if err := os.MkdirAll(latestBackup, 0o755); err != nil {
 		t.Fatalf("create backup dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(latestBackup, "pemmece.db"), []byte("backup"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(latestBackup, "pappice.db"), []byte("backup"), 0o600); err != nil {
 		t.Fatalf("write backup db marker: %v", err)
 	}
 	_, server, client := newTestServer(t, Options{
@@ -305,7 +305,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/account/setup/"+setupToken, nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Pemmece")) {
+	if !bytes.Contains(body, []byte("Pappice")) {
 		t.Fatalf("account setup route should serve app: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/account-links/"+setupToken, nil, nil, "", "")
@@ -876,10 +876,10 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 	var signatureSeen atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		webhookHits.Add(1)
-		if strings.HasPrefix(r.Header.Get("X-Pemmece-Signature"), "sha256=") {
+		if strings.HasPrefix(r.Header.Get("X-Pappice-Signature"), "sha256=") {
 			signatureSeen.Store(true)
 		}
-		if got := r.Header.Get("X-Pemmece-Event"); got == "webhook.test" {
+		if got := r.Header.Get("X-Pappice-Event"); got == "webhook.test" {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
@@ -1567,7 +1567,7 @@ func doMultipart(t *testing.T, client *http.Client, method, rawURL string, field
 		req.AddCookie(cookie)
 	}
 	if csrf != "" {
-		req.Header.Set("X-Pemmece-CSRF", csrf)
+		req.Header.Set("X-Pappice-CSRF", csrf)
 	}
 	if origin != "" {
 		req.Header.Set("Origin", origin)
@@ -1603,7 +1603,7 @@ func doJSON(t *testing.T, client *http.Client, method, rawURL string, payload an
 		req.AddCookie(cookie)
 	}
 	if csrf != "" {
-		req.Header.Set("X-Pemmece-CSRF", csrf)
+		req.Header.Set("X-Pappice-CSRF", csrf)
 	}
 	if origin != "" {
 		req.Header.Set("Origin", origin)

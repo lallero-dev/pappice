@@ -28,7 +28,7 @@ const state = {
   deliveries: [],
   tokens: [],
   branding: {
-    name: "Pemmece",
+    name: "Pappice",
     subtitle: "customer support",
     mark: "P",
     color: "#5bb974"
@@ -171,7 +171,7 @@ function formatSeconds(seconds) {
 }
 
 function normalizeBranding(input = {}) {
-  const name = String(input.name || "").trim() || "Pemmece";
+  const name = String(input.name || "").trim() || "Pappice";
   const subtitle = String(input.subtitle || "").trim() || "customer support";
   const mark = String(input.mark || "").trim() || name.slice(0, 1).toUpperCase() || "P";
   const color = isHexColor(input.color) ? input.color : "#5bb974";
@@ -216,7 +216,7 @@ async function request(path, options = {}) {
     headers["Content-Type"] = "application/json";
   }
   if (state.csrf && ["POST", "PATCH", "PUT", "DELETE"].includes(method)) {
-    headers["X-Pemmece-CSRF"] = state.csrf;
+    headers["X-Pappice-CSRF"] = state.csrf;
   }
   const response = await fetch(path, {
     credentials: "same-origin",
@@ -314,7 +314,7 @@ function renderAccountLinkForm({ purpose, user = null, expiresAt = "", loading =
   els.accountLinkHelp.textContent = error || (loading
     ? "Checking this one-time link..."
     : reset
-      ? "Enter a new password for this Pemmece account."
+      ? "Enter a new password for this Pappice account."
       : "Enter a password to finish account setup.");
   els.accountLinkHelp.classList.toggle("status-error", Boolean(error));
   els.accountLinkSubmit.disabled = loading || Boolean(error);
@@ -1840,7 +1840,7 @@ function openAccountLinkResult(payload, purpose = "setup") {
     ? "This account has no email address. Share this one-time link manually."
     : link.email_enabled
     ? link.email_queued
-      ? "Pemmece queued the email. Keep this link as a fallback for manual delivery."
+      ? "Pappice queued the email. Keep this link as a fallback for manual delivery."
       : "Email is configured, but the message could not be queued. Use the link below."
     : "Email is not configured. Share this one-time link manually.";
   const content = el("div", { className: "link-result" }, [
@@ -2102,7 +2102,7 @@ function bindEvents() {
     button.addEventListener("click", () => switchAdminSection(button.getAttribute("data-admin-section")).catch(showError));
   }
   els.newIssueButton.addEventListener("click", () => openIssueModal());
-  els.modalHost.addEventListener("pm-modal-error", (event) => showError(event.detail));
+  els.modalHost.addEventListener("pappice-modal-error", (event) => showError(event.detail));
   document.querySelectorAll("[data-sort-key]").forEach((button) => {
     button.addEventListener("click", () => setIssueSort(button.dataset.sortKey));
   });
@@ -2235,7 +2235,7 @@ function userMessage(error) {
   if (typeof error === "string") return error;
   const raw = String(error?.message || "Request failed").trim();
   if (!raw || raw === "Failed to fetch") {
-    return "Pemmece could not be reached. Check the connection and try again.";
+    return "Pappice could not be reached. Check the connection and try again.";
   }
   if (raw.startsWith("validation failed: ")) {
     return raw.replace("validation failed: ", "");
@@ -2244,7 +2244,7 @@ function userMessage(error) {
   if (error?.status === 404) return raw && raw !== "not found" ? raw : "The requested item was not found. Refresh the page and try again.";
   if (error?.status === 409) return raw || "This action conflicts with the current state.";
   if (error?.status === 429) return raw || "Too many attempts. Try again later.";
-  if (error?.status >= 500) return "Pemmece hit an internal error. Try again, then check the server logs if it persists.";
+  if (error?.status >= 500) return "Pappice hit an internal error. Try again, then check the server logs if it persists.";
   return raw;
 }
 

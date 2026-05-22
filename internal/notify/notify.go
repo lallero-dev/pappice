@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"pemmece/internal/store"
+	"pappice/internal/store"
 )
 
 type Message struct {
@@ -228,7 +228,7 @@ func (w Worker) logf(format string, args ...any) {
 }
 
 func renderMessage(from, to *mail.Address, message Message) []byte {
-	boundary := "pemmece-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	boundary := "pappice-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	bodyText := normalizeLineEndings(message.BodyText)
 	bodyHTML := normalizeLineEndings(message.BodyHTML)
 

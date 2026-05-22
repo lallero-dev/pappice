@@ -519,7 +519,7 @@ var projectKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}$`)
 
 func Open(path string) (*Store, error) {
 	if path == "" {
-		path = "pemmece.db"
+		path = "pappice.db"
 	}
 	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
