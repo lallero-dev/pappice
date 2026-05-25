@@ -47,7 +47,7 @@ openssl req -x509 -newkey rsa:2048 -nodes \
   -subj /CN=127.0.0.1 \
   -addext subjectAltName=IP:127.0.0.1,DNS:localhost
 
-go run ./cmd/pappice \
+go run ./cmd/pappice serve \
   -tls-cert ./localhost.pem \
   -tls-key ./localhost-key.pem
 ```
@@ -58,8 +58,10 @@ For persistent local configuration:
 
 ```sh
 cp .env.example .env
-go run ./cmd/pappice
+go run ./cmd/pappice serve
 ```
+
+`pappice [flags]` remains an alias for `pappice serve [flags]`.
 
 ## Configuration
 
@@ -79,6 +81,17 @@ Important values:
 - `PAPPICE_BACKUP_DIR`: directory where backup snapshots are stored
 
 Use [.env.example](./.env.example) as the complete reference.
+
+Useful local commands:
+
+```sh
+pappice doctor
+pappice version
+pappice serve -h
+```
+
+`pappice doctor` validates paths, TLS, public URL, SMTP, upload limits, rate
+limits, and development-only webhook settings before starting the server.
 
 ## Branding
 

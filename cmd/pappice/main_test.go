@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,6 +35,9 @@ func TestEnvHelpers(t *testing.T) {
 	}
 	if got := envInt("PAPPICE_TEST_MISSING", 9); got != 9 {
 		t.Fatalf("envInt missing fallback = %d", got)
+	}
+	if got := envInt64("PAPPICE_TEST_INT", 7); got != 42 {
+		t.Fatalf("envInt64 parsed = %d", got)
 	}
 	if got := envDuration("PAPPICE_TEST_DURATION", time.Second); got != 1500*time.Millisecond {
 		t.Fatalf("envDuration parsed = %s", got)
@@ -99,5 +104,124 @@ func TestLoadDotEnvValidation(t *testing.T) {
 	}
 	if err := loadDotEnv(path); err == nil {
 		t.Fatal("unterminated quoted value should fail")
+	}
+}
+
+func TestSplitCommand(t *testing.T) {
+	tests := []struct {
+		args        []string
+		wantCommand string
+		wantArgs    []string
+	}{
+		{[]string{"pappice"}, "serve", nil},
+		{[]string{"pappice", "serve", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
+		{[]string{"pappice", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
+		{[]string{"pappice", "doctor"}, "doctor", nil},
+		{[]string{"pappice", "version"}, "version", nil},
+		{[]string{"pappice", "--version"}, "version", nil},
+		{[]string{"pappice", "-h"}, "help", nil},
+	}
+	for _, tt := range tests {
+		command, args := splitCommand(tt.args)
+		if command != tt.wantCommand || strings.Join(args, "\x00") != strings.Join(tt.wantArgs, "\x00") {
+			t.Fatalf("splitCommand(%v) = %q %v, want %q %v", tt.args, command, args, tt.wantCommand, tt.wantArgs)
+		}
+	}
+}
+
+func TestVersionCommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pappice", "version"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("version exit = %d stderr=%s", code, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "pappice "+version {
+		t.Fatalf("version output = %q", got)
+	}
+}
+
+func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
+	t.Setenv("PAPPICE_SMTP_PASSWORD", "super-secret-password")
+	t.Setenv("PAPPICE_SMTP_USER", "secret-user")
+	t.Setenv("PAPPICE_SMTP_HOST", "secret-host")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pappice", "serve", "-h"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("help exit = %d", code)
+	}
+	output := stdout.String() + stderr.String()
+	for _, secret := range []string{"super-secret-password", "secret-user", "secret-host"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("help output leaked %q:\n%s", secret, output)
+		}
+	}
+	if !strings.Contains(output, "-smtp-password") {
+		t.Fatalf("help output missing smtp password flag:\n%s", output)
+	}
+}
+
+func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
+	t.Setenv("PAPPICE_ADDR", "127.0.0.1:9000")
+	t.Setenv("PAPPICE_DB", "env.db")
+	t.Setenv("PAPPICE_SMTP_PASSWORD", "configured-secret")
+
+	var output bytes.Buffer
+	cfg, code, ok := parseRuntimeConfig("pappice serve", []string{"-addr", "127.0.0.1:9999"}, &output)
+	if !ok || code != 0 {
+		t.Fatalf("parse config ok=%v code=%d output=%s", ok, code, output.String())
+	}
+	if cfg.Addr != "127.0.0.1:9999" {
+		t.Fatalf("flag addr was not preserved: %q", cfg.Addr)
+	}
+	if cfg.DBPath != "env.db" {
+		t.Fatalf("env db was not applied: %q", cfg.DBPath)
+	}
+	if cfg.SMTPPassword != "configured-secret" {
+		t.Fatalf("env smtp password was not applied")
+	}
+}
+
+func TestDoctorCommand(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "pappice.db")
+	uploads := filepath.Join(dir, "uploads")
+	backups := filepath.Join(dir, "backups")
+	t.Setenv("PAPPICE_EMAIL_NOTIFICATIONS", "false")
+	t.Setenv("PAPPICE_SMTP_HOST", "")
+	t.Setenv("PAPPICE_SMTP_FROM", "")
+	t.Setenv("PAPPICE_PUBLIC_URL", "")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"pappice",
+		"doctor",
+		"-db", dbPath,
+		"-upload-dir", uploads,
+		"-backup-dir", backups,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doctor exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "Pappice doctor") || !strings.Contains(output, "0 error(s)") {
+		t.Fatalf("doctor output = %s", output)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"pappice",
+		"doctor",
+		"-db", dbPath,
+		"-upload-dir", uploads,
+		"-backup-dir", backups,
+		"-email-notifications",
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("doctor should fail with enabled email and no SMTP config: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ERROR email") {
+		t.Fatalf("doctor missing email error: %s", stdout.String())
 	}
 }
