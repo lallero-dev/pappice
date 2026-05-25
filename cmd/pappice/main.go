@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -46,7 +45,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func splitCommand(args []string) (string, []string) {
 	if len(args) < 2 {
-		return "serve", nil
+		return "help", nil
 	}
 	first := args[1]
 	switch first {
@@ -54,12 +53,7 @@ func splitCommand(args []string) (string, []string) {
 		return "help", args[2:]
 	case "serve", "doctor", "version":
 		return first, args[2:]
-	case "-version", "--version":
-		return "version", args[2:]
 	default:
-		if strings.HasPrefix(first, "-") {
-			return "serve", args[1:]
-		}
 		return first, args[2:]
 	}
 }
@@ -71,7 +65,6 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "  pappice serve [flags]     Start the web server")
 	fmt.Fprintln(w, "  pappice doctor [flags]    Validate local runtime configuration")
 	fmt.Fprintln(w, "  pappice version           Print the build version")
-	fmt.Fprintln(w, "  pappice [flags]           Alias for pappice serve [flags]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Run \"pappice serve -h\" or \"pappice doctor -h\" for configuration flags.")
 }

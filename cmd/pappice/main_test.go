@@ -113,12 +113,11 @@ func TestSplitCommand(t *testing.T) {
 		wantCommand string
 		wantArgs    []string
 	}{
-		{[]string{"pappice"}, "serve", nil},
+		{[]string{"pappice"}, "help", nil},
 		{[]string{"pappice", "serve", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
-		{[]string{"pappice", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
+		{[]string{"pappice", "-addr", ":8080"}, "-addr", []string{":8080"}},
 		{[]string{"pappice", "doctor"}, "doctor", nil},
 		{[]string{"pappice", "version"}, "version", nil},
-		{[]string{"pappice", "--version"}, "version", nil},
 		{[]string{"pappice", "-h"}, "help", nil},
 	}
 	for _, tt := range tests {
@@ -126,6 +125,17 @@ func TestSplitCommand(t *testing.T) {
 		if command != tt.wantCommand || strings.Join(args, "\x00") != strings.Join(tt.wantArgs, "\x00") {
 			t.Fatalf("splitCommand(%v) = %q %v, want %q %v", tt.args, command, args, tt.wantCommand, tt.wantArgs)
 		}
+	}
+}
+
+func TestRootFlagsAreNotServeAliases(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pappice", "-addr", ":8080"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("flat flags exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `unknown command "-addr"`) {
+		t.Fatalf("flat flags did not report unknown command: %s", stderr.String())
 	}
 }
 

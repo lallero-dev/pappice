@@ -61,8 +61,6 @@ cp .env.example .env
 go run ./cmd/pappice serve
 ```
 
-`pappice [flags]` remains an alias for `pappice serve [flags]`.
-
 ## Configuration
 
 Every runtime option is available as a flag and as an environment variable.

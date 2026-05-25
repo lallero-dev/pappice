@@ -522,6 +522,7 @@ function startApp({ appPort, appURL, binaryPath, certPath, dbPath, keyPath, smtp
     PAPPICE_SMTP_USER: ""
   };
   return spawnProcess(binaryPath, [
+    "serve",
     "-addr", `127.0.0.1:${appPort}`,
     "-db", dbPath,
     "-tls-cert", certPath,
