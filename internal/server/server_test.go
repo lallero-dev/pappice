@@ -213,6 +213,230 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	}
 }
 
+func TestAPIMethodContracts(t *testing.T) {
+	_, server, client := newTestServer(t, Options{EmailNotifications: true})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	userID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "methodstaff",
+		"email":    "methodstaff@example.test",
+		"password": "correct horse",
+		"role":     "staff",
+	})
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, userID, "agent")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  projectID,
+		"title":       "Method contract",
+		"description": "Exercise route methods",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	issueID := decodeInt64(t, body, "id")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tokens", map[string]any{"name": "method-contract"}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	tokenID := decodeNestedInt64(t, body, "token", "id")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/webhooks", map[string]any{
+		"name": "global-method-contract",
+		"url":  "https://example.com/pappice-hook",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	hookID := decodeNestedInt64(t, body, "webhook", "id")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/test", map[string]any{}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	notificationID := decodeNestedInt64(t, body, "notification", "id")
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		allow  string
+	}{
+		{"health", http.MethodPost, "/api/health", http.MethodGet},
+		{"session", http.MethodPost, "/api/session", http.MethodGet},
+		{"me", http.MethodPost, "/api/me", "GET, PATCH"},
+		{"me password", http.MethodGet, "/api/me/password", http.MethodPost},
+		{"setup", http.MethodGet, "/api/setup", http.MethodPost},
+		{"login", http.MethodGet, "/api/login", http.MethodPost},
+		{"logout", http.MethodGet, "/api/logout", http.MethodPost},
+		{"account link", http.MethodPut, "/api/account-links/not-a-real-token", "GET, POST"},
+		{"projects", http.MethodPut, "/api/projects", "GET, POST"},
+		{"single project", http.MethodPost, "/api/projects/" + itoa(projectID), "GET, PATCH, DELETE"},
+		{"project members", http.MethodPut, "/api/projects/" + itoa(projectID) + "/members", "GET, POST"},
+		{"project tickets", http.MethodPut, "/api/projects/" + itoa(projectID) + "/tickets", "GET, POST"},
+		{"project webhooks", http.MethodPut, "/api/projects/" + itoa(projectID) + "/webhooks", "GET, POST"},
+		{"project deliveries", http.MethodPost, "/api/projects/" + itoa(projectID) + "/webhook-deliveries", http.MethodGet},
+		{"tickets", http.MethodPut, "/api/tickets", "GET, POST"},
+		{"single ticket", http.MethodPost, "/api/tickets/" + itoa(issueID), "GET, PATCH"},
+		{"ticket comments", http.MethodGet, "/api/tickets/" + itoa(issueID) + "/comments", http.MethodPost},
+		{"attachments", http.MethodPost, "/api/attachments/1", http.MethodGet},
+		{"users", http.MethodPut, "/api/users", "GET, POST"},
+		{"single user", http.MethodGet, "/api/users/" + itoa(userID), "PATCH, DELETE"},
+		{"password reset", http.MethodGet, "/api/users/" + itoa(userID) + "/password-reset", http.MethodPost},
+		{"tokens", http.MethodPut, "/api/tokens", "GET, POST"},
+		{"single token", http.MethodGet, "/api/tokens/" + itoa(tokenID), http.MethodDelete},
+		{"global webhooks", http.MethodPut, "/api/webhooks", "GET, POST"},
+		{"single webhook", http.MethodGet, "/api/webhooks/" + itoa(hookID), "PATCH, DELETE"},
+		{"webhook test", http.MethodGet, "/api/webhooks/" + itoa(hookID) + "/test", http.MethodPost},
+		{"webhook deliveries", http.MethodPost, "/api/webhook-deliveries", http.MethodGet},
+		{"email notifications", http.MethodPost, "/api/email-notifications", http.MethodGet},
+		{"email retry", http.MethodGet, "/api/email-notifications/" + itoa(notificationID) + "/retry", http.MethodPost},
+		{"audit", http.MethodPost, "/api/audit-events", http.MethodGet},
+		{"maintenance", http.MethodPost, "/api/admin/maintenance", http.MethodGet},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			csrf, origin := "", ""
+			if isUnsafeMethod(tt.method) {
+				csrf = adminCSRF
+				origin = server.URL
+			}
+			resp, body := doJSON(t, client, tt.method, server.URL+tt.path, nil, adminCookie, csrf, origin)
+			requireStatus(t, resp, body, http.StatusMethodNotAllowed)
+			if got := resp.Header.Get("Allow"); got != tt.allow {
+				t.Fatalf("Allow = %q body=%s, want %q", got, body, tt.allow)
+			}
+		})
+	}
+}
+
+func TestAPIAuthAndCSRFContracts(t *testing.T) {
+	_, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/tokens", map[string]any{"name": "contract"}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	tokenValue := decodeString(t, body, "value")
+
+	for _, path := range []string{
+		"/api/projects",
+		"/api/tickets",
+		"/api/users",
+		"/api/tokens",
+		"/api/webhook-deliveries",
+		"/api/email-notifications",
+		"/api/audit-events",
+		"/api/admin/maintenance",
+		"/api/attachments/1",
+	} {
+		t.Run("unauthenticated "+path, func(t *testing.T) {
+			resp, body := doJSON(t, client, http.MethodGet, server.URL+path, nil, nil, "", "")
+			requireStatus(t, resp, body, http.StatusUnauthorized)
+		})
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/projects", map[string]any{
+		"key":  "NO-CSRF",
+		"name": "Missing token",
+	}, adminCookie, "", server.URL)
+	requireStatus(t, resp, body, http.StatusForbidden)
+	if !bytes.Contains(body, []byte("valid CSRF token")) {
+		t.Fatalf("missing csrf response = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/projects", map[string]any{
+		"key":  "BAD-ORIGIN",
+		"name": "Bad origin",
+	}, adminCookie, adminCSRF, "https://evil.example.test")
+	requireStatus(t, resp, body, http.StatusForbidden)
+	if !bytes.Contains(body, []byte("same-origin")) {
+		t.Fatalf("bad origin response = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/projects", map[string]any{
+		"key":  "BAD-CSRF",
+		"name": "Bad token",
+	}, adminCookie, "wrong-token", server.URL)
+	requireStatus(t, resp, body, http.StatusForbidden)
+
+	resp, body = doJSONBearer(t, client, http.MethodPost, server.URL+"/api/projects", map[string]any{
+		"key":  "API",
+		"name": "Created by API token",
+	}, tokenValue)
+	requireStatus(t, resp, body, http.StatusCreated)
+
+	resp, body = doJSONBearer(t, client, http.MethodPost, server.URL+"/api/me/password", map[string]any{
+		"current_password": "correct horse",
+		"new_password":     "better password",
+	}, tokenValue)
+	requireStatus(t, resp, body, http.StatusForbidden)
+	if !bytes.Contains(body, []byte("browser session")) {
+		t.Fatalf("token password change response = %s", body)
+	}
+}
+
+func TestAPIValidationContracts(t *testing.T) {
+	_, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	userID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "validationstaff",
+		"email":    "validationstaff@example.test",
+		"password": "correct horse",
+		"role":     "staff",
+	})
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id": projectID,
+		"title":      "Validation ticket",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	issueID := decodeInt64(t, body, "id")
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		want   int
+	}{
+		{"malformed json", http.MethodPost, "/api/projects", `{"key":`, http.StatusBadRequest},
+		{"unknown json field", http.MethodPost, "/api/projects", `{"key":"BAD","name":"Bad","extra":true}`, http.StatusBadRequest},
+		{"multiple json documents", http.MethodPost, "/api/projects", `{"key":"BAD","name":"Bad"} {}`, http.StatusBadRequest},
+		{"invalid product id", http.MethodGet, "/api/projects/not-a-number", ``, http.StatusBadRequest},
+		{"invalid ticket id", http.MethodGet, "/api/tickets/not-a-number", ``, http.StatusBadRequest},
+		{"invalid token id", http.MethodDelete, "/api/tokens/not-a-number", ``, http.StatusBadRequest},
+		{"invalid email notification id", http.MethodPost, "/api/email-notifications/not-a-number/retry", `{}`, http.StatusBadRequest},
+		{"empty ticket patch", http.MethodPatch, "/api/tickets/" + itoa(issueID), `{}`, http.StatusBadRequest},
+		{"direct password patch blocked", http.MethodPatch, "/api/users/" + itoa(userID), `{"password":"new password"}`, http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			csrf, origin := "", ""
+			if isUnsafeMethod(tt.method) {
+				csrf = adminCSRF
+				origin = server.URL
+			}
+			resp, body := doRawJSON(t, client, tt.method, server.URL+tt.path, tt.body, adminCookie, csrf, origin)
+			requireStatus(t, resp, body, tt.want)
+			if !bytes.Contains(body, []byte("error")) {
+				t.Fatalf("validation response missing error field: %s", body)
+			}
+		})
+	}
+
+	disabledTracker, disabledServer, disabledClient := newTestServer(t)
+	_ = disabledTracker
+	disabledCookie, disabledCSRF := setupAdmin(t, disabledClient, disabledServer.URL, "admin", "admin@example.test")
+	resp, body = doJSON(t, disabledClient, http.MethodPost, disabledServer.URL+"/api/email-notifications/test", map[string]any{}, disabledCookie, disabledCSRF, disabledServer.URL)
+	requireStatus(t, resp, body, http.StatusConflict)
+	if !bytes.Contains(body, []byte("email notifications are not configured")) {
+		t.Fatalf("disabled email test response = %s", body)
+	}
+}
+
 func TestHealthExposesBranding(t *testing.T) {
 	_, server, client := newTestServer(t, Options{Branding: Branding{
 		Name:     "lallero.dev",
@@ -1345,6 +1569,87 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 	}
 }
 
+func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) {
+	uploadDir := t.TempDir()
+	tracker, server, client := newTestServer(t, Options{UploadDir: uploadDir})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/projects", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	projectID := decodeFirstProjectID(t, body)
+
+	devID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "patchdev",
+		"email":    "patchdev@example.test",
+		"password": "correct horse",
+		"role":     "staff",
+	})
+	addProjectMember(t, client, server.URL, adminCookie, adminCSRF, projectID, devID, "agent")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"project_id":  projectID,
+		"title":       "Multipart patch source",
+		"description": "Original description",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	issueID := decodeInt64(t, body, "id")
+
+	resp, body = doMultipart(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]string{
+		"title":       "Multipart patched ticket",
+		"description": "Updated through a multipart save",
+		"status":      "assigned",
+		"priority":    "high",
+		"assignee":    "patchdev",
+		"body":        "Patch evidence attached",
+		"visibility":  "public",
+	}, []testUpload{{
+		Field:    "attachments",
+		Filename: "patch-evidence.txt",
+		Body:     "multipart patch attachment content",
+	}}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	var patched store.Issue
+	if err := json.Unmarshal(body, &patched); err != nil {
+		t.Fatalf("decode patched ticket: %v", err)
+	}
+	if patched.Title != "Multipart patched ticket" ||
+		patched.Description != "Updated through a multipart save" ||
+		patched.Status != "assigned" ||
+		patched.Priority != "high" ||
+		patched.Assignee != "patchdev" {
+		t.Fatalf("multipart patch did not update workflow fields: %#v", patched)
+	}
+
+	var attachmentID int64
+	for _, comment := range patched.Comments {
+		if comment.Body == "Patch evidence attached" && comment.Visibility == "public" && len(comment.Attachments) == 1 {
+			attachmentID = comment.Attachments[0].ID
+		}
+	}
+	if attachmentID == 0 {
+		t.Fatalf("multipart patch comment attachment missing: %#v", patched.Comments)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(attachmentID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("multipart patch attachment content")) {
+		t.Fatalf("multipart patch attachment body=%s", body)
+	}
+
+	attachment, err := tracker.GetAttachment(attachmentID)
+	if err != nil {
+		t.Fatalf("load attachment: %v", err)
+	}
+	if err := os.Remove(filepath.Join(uploadDir, filepath.FromSlash(attachment.StorageKey))); err != nil {
+		t.Fatalf("remove stored attachment file: %v", err)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(attachmentID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+	if !bytes.Contains(body, []byte("attachment file not found")) {
+		t.Fatalf("missing attachment response = %s", body)
+	}
+}
+
 func TestBlockedUploadReturnsClearMessage(t *testing.T) {
 	_, server, client := newTestServer(t, Options{
 		UploadDir:     t.TempDir(),
@@ -1593,6 +1898,38 @@ func doJSON(t *testing.T, client *http.Client, method, rawURL string, payload an
 			t.Fatalf("marshal payload: %v", err)
 		}
 		body = bytes.NewReader(content)
+	}
+	req, err := http.NewRequest(method, rawURL, body)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	if csrf != "" {
+		req.Header.Set("X-Pappice-CSRF", csrf)
+	}
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp, data
+}
+
+func doRawJSON(t *testing.T, client *http.Client, method, rawURL string, rawBody string, cookie *http.Cookie, csrf, origin string) (*http.Response, []byte) {
+	t.Helper()
+	var body io.Reader
+	if rawBody != "" {
+		body = strings.NewReader(rawBody)
 	}
 	req, err := http.NewRequest(method, rawURL, body)
 	if err != nil {
