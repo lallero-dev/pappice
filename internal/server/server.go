@@ -154,8 +154,6 @@ func (s *Server) routes() {
 	}
 
 	s.mux.HandleFunc("/", s.handleIndex)
-	s.mux.HandleFunc("/support", s.handleSupportIndex)
-	s.mux.HandleFunc("/support/", s.handleSupportIndex)
 	s.mux.HandleFunc("/account/", s.handleAccountIndex)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles))))
 
@@ -186,7 +184,7 @@ func (s *Server) routes() {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	if !isAppIndexPath(r.URL.Path) {
 		http.NotFound(w, r)
 		return
 	}
@@ -206,25 +204,31 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
-func (s *Server) handleSupportIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/support" && !strings.HasPrefix(r.URL.Path, "/support/tickets/") {
-		http.NotFound(w, r)
-		return
+func isAppIndexPath(path string) bool {
+	if len(path) > 1 {
+		path = strings.TrimRight(path, "/")
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		methodNotAllowed(w, http.MethodGet, http.MethodHead)
-		return
+	switch path {
+	case "/", "/tickets", "/admin":
+		return true
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if r.Method == http.MethodHead {
-		return
+	if strings.HasPrefix(path, "/admin/") {
+		switch strings.TrimPrefix(path, "/admin/") {
+		case "products", "accounts", "tokens", "webhooks", "email", "maintenance", "audit":
+			return true
+		default:
+			return false
+		}
 	}
-	content, err := assets.ReadFile("web/index.html")
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "index asset not found")
-		return
+	if strings.HasPrefix(path, "/products/") {
+		id := strings.TrimPrefix(path, "/products/")
+		if id == "" || strings.Contains(id, "/") {
+			return false
+		}
+		parsed, err := strconv.ParseInt(id, 10, 64)
+		return err == nil && parsed > 0
 	}
-	_, _ = w.Write(content)
+	return false
 }
 
 func (s *Server) handleAccountIndex(w http.ResponseWriter, r *http.Request) {

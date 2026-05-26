@@ -890,6 +890,69 @@ button:focus-visible {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.project-context {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.project-context-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-context-kicker {
+  color: var(--blue-dark);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.project-context h1 {
+  font-size: 22px;
+  line-height: 1.2;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-context-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-key-pill {
+  background: #edf6ff;
+  border: 1px solid #c9dff3;
+  border-radius: 999px;
+  color: var(--blue-dark);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 5px 8px;
+}
+
+.project-context-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .admin-panel {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1123,6 +1186,11 @@ button:focus-visible {
 
   .admin-side-button {
     min-width: 160px;
+  }
+
+  .project-context {
+    align-items: stretch;
+    display: grid;
   }
 
   .detail-pane {

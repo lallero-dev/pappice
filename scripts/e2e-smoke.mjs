@@ -83,6 +83,7 @@ async function main() {
   const selectedProductID = await selectFirstProduct(page);
   const setupLink = await createCustomerAccount(page);
   await addCustomerToProduct(page, selectedProductID);
+  await verifyProductRouteReload(page, selectedProductID);
   await completeCustomerSetup(page, setupLink);
   await createCustomerTicket(page);
   await logout(page);
@@ -139,8 +140,10 @@ async function createCustomerAccount(cdp) {
       const view = document.querySelector("#adminView");
       return view && !view.hidden;
     }, "admin view");
+    await waitFor(() => window.location.pathname === "/admin/products", "admin products route");
     document.querySelector("[data-admin-section='accounts']").click();
     await waitFor(() => document.querySelector("#userList")?.textContent.includes("admin"), "accounts admin section");
+    await waitFor(() => window.location.pathname === "/admin/accounts", "admin accounts route");
 
     document.querySelector("#addUserButton").click();
     const root = await waitFor(() => {
@@ -171,11 +174,21 @@ async function addCustomerToProduct(cdp, productID) {
     if (productFilter.value !== selectedProductID) {
       setValue(productFilter, selectedProductID);
     }
+    const selectedProductLabel = [...productFilter.options].find((option) => option.value === selectedProductID)?.textContent || "";
+    const separatorIndex = selectedProductLabel.indexOf(" / ");
+    const selectedProductKey = separatorIndex > -1 ? selectedProductLabel.slice(0, separatorIndex) : selectedProductLabel;
+    const selectedProductName = separatorIndex > -1 ? selectedProductLabel.slice(separatorIndex + 3) : selectedProductLabel;
     document.querySelector("#projectTab").click();
     await waitFor(() => {
       const view = document.querySelector("#projectView");
       return view && !view.hidden;
     }, "product admin view");
+    await waitFor(() => window.location.pathname === `/products/${selectedProductID}`, "product route");
+    await waitFor(() => {
+      const title = document.querySelector("#projectContextTitle")?.textContent.trim();
+      const meta = document.querySelector("#projectContextMeta")?.textContent || "";
+      return title === selectedProductName && meta.includes(selectedProductKey);
+    }, "selected product context");
 
     document.querySelector("#addMemberButton").click();
     const root = await waitFor(() => {
@@ -191,6 +204,19 @@ async function addCustomerToProduct(cdp, productID) {
     await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "add member modal closed", 12000);
     await waitFor(() => document.querySelector("#memberList")?.textContent.includes(customerUsername), "customer product membership");
   }, { productID, customerUsername: customer.username });
+}
+
+async function verifyProductRouteReload(cdp, productID) {
+  await cdp.send("Page.reload", { ignoreCache: true });
+  await waitForDocumentReady(cdp);
+  await runInPage(cdp, async ({ productID: selectedProductID }) => {
+    const { waitFor } = pageTools();
+    await waitFor(() => {
+      const view = document.querySelector("#projectView");
+      const title = document.querySelector("#projectContextTitle")?.textContent.trim();
+      return window.location.pathname === `/products/${selectedProductID}` && view && !view.hidden && title && title !== "Product";
+    }, "product route reload");
+  }, { productID });
 }
 
 async function completeCustomerSetup(cdp, setupLink) {

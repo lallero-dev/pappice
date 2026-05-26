@@ -140,12 +140,26 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	if !bytes.Contains(body, []byte("Pappice")) {
 		t.Fatalf("index body missing app name: %s", body)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/support", nil, nil, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/tickets", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Pappice")) || bytes.Contains(body, []byte("support-portal")) {
-		t.Fatalf("support route should serve the main app: %s", body)
+	if !bytes.Contains(body, []byte("Pappice")) {
+		t.Fatalf("tickets route should serve the main app: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/tickets/", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/admin/products", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Pappice")) {
+		t.Fatalf("admin route should serve the main app: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/products/1", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Pappice")) {
+		t.Fatalf("product route should serve the main app: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/missing", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/support", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/health", nil, nil, "", "")

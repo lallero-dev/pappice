@@ -114,6 +114,9 @@ const els = {
   adminSectionButtons: Array.from(document.querySelectorAll("[data-admin-section]")),
   adminSectionPanels: Array.from(document.querySelectorAll("[data-admin-panel]")),
   projectView: document.querySelector("#projectView"),
+  projectContextTitle: document.querySelector("#projectContextTitle"),
+  projectContextMeta: document.querySelector("#projectContextMeta"),
+  projectTicketsButton: document.querySelector("#projectTicketsButton"),
   issueList: document.querySelector("#issueList"),
   searchInput: document.querySelector("#searchInput"),
   productFilter: document.querySelector("#productFilter"),
@@ -286,6 +289,86 @@ function accountLinkRoute() {
   };
 }
 
+function parseAppRoute() {
+  const trailingSlash = window.location.pathname.length > 1 && window.location.pathname.endsWith("/");
+  const parts = window.location.pathname.split("/").filter(Boolean).map(decodeRoutePart);
+  if (parts.length === 0) return { view: "issues", normalize: true };
+  switch (parts[0]) {
+    case "tickets":
+      return { view: "issues", normalize: trailingSlash || parts.length !== 1 };
+    case "admin": {
+      const section = validAdminSection(parts[1]) ? parts[1] : "products";
+      return { view: "admin", section, normalize: trailingSlash || parts.length !== 2 || section !== parts[1] };
+    }
+    case "products": {
+      const projectId = Number(parts[1] || 0);
+      return { view: "project", projectId, normalize: trailingSlash || !Number.isInteger(projectId) || projectId < 1 || parts.length !== 2 };
+    }
+    default:
+      return { view: "issues", normalize: true };
+  }
+}
+
+function decodeRoutePart(part) {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+}
+
+async function applyRouteFromPath() {
+  if (!state.user) return;
+  const route = parseAppRoute();
+  if (route.view === "admin") {
+    if (!isAdmin()) {
+      switchView("issues", { updateRoute: false });
+      updateRoutePath({ replace: true });
+      return;
+    }
+    state.adminSection = route.section;
+    switchView("admin", { updateRoute: false });
+    updateRoutePath({ replace: route.normalize });
+    return;
+  }
+  if (route.view === "project") {
+    const project = currentProject(route.projectId);
+    if (project) {
+      state.selectedProjectId = project.id;
+      renderProductFilter();
+      updateProjectActions();
+      await loadIssues();
+      if (canManageProject()) {
+        switchView("project", { updateRoute: false });
+        updateRoutePath({ replace: route.normalize });
+        return;
+      }
+    }
+    switchView("issues", { updateRoute: false });
+    updateRoutePath({ replace: true });
+    return;
+  }
+  switchView("issues", { updateRoute: false });
+  updateRoutePath({ replace: route.normalize });
+}
+
+function updateRoutePath({ replace = false } = {}) {
+  if (!state.user) return;
+  const nextPath = routePathForState();
+  if (window.location.pathname === nextPath && window.location.search === "" && window.location.hash === "") return;
+  if (replace) {
+    window.history.replaceState(null, "", nextPath);
+  } else {
+    window.history.pushState(null, "", nextPath);
+  }
+}
+
+function routePathForState() {
+  if (state.view === "admin") return `/admin/${state.adminSection}`;
+  if (state.view === "project" && state.selectedProjectId) return `/products/${state.selectedProjectId}`;
+  return "/tickets";
+}
+
 async function loadAccountLinkRoute(route) {
   state.accountLink = { ...route, user: null };
   showAuth("account");
@@ -351,9 +434,7 @@ async function enterApp() {
     renderAssigneeFilter();
   }
   await loadProjects();
-  if (canManageProject()) {
-    await loadProjectAdmin();
-  }
+  await applyRouteFromPath();
 }
 
 function showAuth(mode) {
@@ -380,7 +461,7 @@ function showApp() {
   els.topNav.hidden = false;
   els.profileMenu.hidden = false;
   renderProfileMenu();
-  switchView("issues");
+  switchView("issues", { updateRoute: false });
 }
 
 function renderProfileMenu() {
@@ -498,6 +579,7 @@ async function loadAdminSection(section) {
 }
 
 async function loadProjectAdmin() {
+  renderProjectContext();
   if (!state.selectedProjectId || !canManageProject()) return;
   await Promise.all([loadUsers(), loadMembers(), loadProjectWebhooks(), loadProjectDeliveries()]);
 }
@@ -1124,6 +1206,7 @@ async function switchAdminSection(section) {
   if (!isAdmin()) return;
   state.adminSection = validAdminSection(section) ? section : "products";
   renderAdminSections();
+  if (state.view === "admin") updateRoutePath();
   await loadAdminSection(state.adminSection);
 }
 
@@ -1159,6 +1242,26 @@ function renderProjectList() {
     );
     els.projectList.append(row);
   }
+}
+
+function renderProjectContext() {
+  const project = currentProject();
+  if (!els.projectContextTitle || !els.projectContextMeta || !els.projectTicketsButton) return;
+  els.projectContextMeta.replaceChildren();
+
+  if (!project) {
+    els.projectContextTitle.textContent = "No product selected";
+    els.projectContextMeta.append(el("span", { className: "muted" }, "Choose a product to manage members and integrations."));
+    els.projectTicketsButton.disabled = true;
+    return;
+  }
+
+  els.projectContextTitle.textContent = project.name || project.key || "Product";
+  els.projectContextMeta.append(
+    el("span", { className: "project-key-pill" }, project.key || `#${project.id}`),
+    el("span", { className: "muted" }, `${labelize(project.role || "owner")} access`)
+  );
+  els.projectTicketsButton.disabled = false;
 }
 
 function renderUsers() {
@@ -2105,6 +2208,7 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeProfileMenu();
   });
+  window.addEventListener("popstate", () => applyRouteFromPath().catch(showError));
 
   els.issuesTab.addEventListener("click", () => switchView("issues"));
   els.projectTab.addEventListener("click", () => switchView("project"));
@@ -2148,10 +2252,14 @@ function bindEvents() {
   els.addMemberButton.addEventListener("click", () => openMemberModal());
   els.addGlobalWebhookButton.addEventListener("click", () => openWebhookModal("global"));
   els.addWebhookButton.addEventListener("click", () => openWebhookModal("project"));
+  els.projectTicketsButton.addEventListener("click", async () => {
+    switchView("issues");
+    await loadIssues();
+  });
   els.appAlertClose.addEventListener("click", clearAppAlert);
 }
 
-function switchView(view) {
+function switchView(view, options = {}) {
   if (view === "admin" && !isAdmin()) return;
   if (view === "project" && !canManageProject()) return;
   state.view = view;
@@ -2161,8 +2269,12 @@ function switchView(view) {
   els.issuesTab.classList.toggle("active", view === "issues");
   els.adminTab.classList.toggle("active", view === "admin");
   els.projectTab.classList.toggle("active", view === "project");
+  if (options.updateRoute !== false) updateRoutePath({ replace: Boolean(options.replaceRoute) });
   if (view === "admin") loadAdmin().catch(showError);
-  if (view === "project") loadProjectAdmin().catch(showError);
+  if (view === "project") {
+    renderProjectContext();
+    loadProjectAdmin().catch(showError);
+  }
 }
 
 async function refreshCurrent() {
