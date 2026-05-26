@@ -221,12 +221,23 @@ func isAppIndexPath(path string) bool {
 		}
 	}
 	if strings.HasPrefix(path, "/products/") {
-		id := strings.TrimPrefix(path, "/products/")
-		if id == "" || strings.Contains(id, "/") {
+		parts := strings.Split(strings.Trim(strings.TrimPrefix(path, "/products/"), "/"), "/")
+		if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
 			return false
 		}
-		parsed, err := strconv.ParseInt(id, 10, 64)
-		return err == nil && parsed > 0
+		parsed, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || parsed < 1 {
+			return false
+		}
+		if len(parts) == 1 {
+			return true
+		}
+		switch parts[1] {
+		case "members", "webhooks", "deliveries":
+			return true
+		default:
+			return false
+		}
 	}
 	return false
 }

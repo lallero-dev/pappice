@@ -157,6 +157,13 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	if !bytes.Contains(body, []byte("Pappice")) {
 		t.Fatalf("product route should serve the main app: %s", body)
 	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/products/1/webhooks", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Pappice")) {
+		t.Fatalf("product section route should serve the main app: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/products/1/unknown", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/missing", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/support", nil, nil, "", "")

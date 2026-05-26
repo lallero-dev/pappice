@@ -897,7 +897,7 @@ button:focus-visible {
   border-radius: 8px;
   display: flex;
   gap: 16px;
-  justify-content: space-between;
+  justify-content: flex-start;
   margin-bottom: 10px;
   min-width: 0;
   padding: 14px 16px;
@@ -944,13 +944,6 @@ button:focus-visible {
   max-width: 100%;
   overflow-wrap: anywhere;
   padding: 5px 8px;
-}
-
-.project-context-actions {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  gap: 6px;
 }
 
 .admin-panel {

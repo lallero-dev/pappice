@@ -183,12 +183,16 @@ async function addCustomerToProduct(cdp, productID) {
       const view = document.querySelector("#projectView");
       return view && !view.hidden;
     }, "product admin view");
-    await waitFor(() => window.location.pathname === `/products/${selectedProductID}`, "product route");
+    await waitFor(() => window.location.pathname === `/products/${selectedProductID}/members`, "product members route");
     await waitFor(() => {
       const title = document.querySelector("#projectContextTitle")?.textContent.trim();
       const meta = document.querySelector("#projectContextMeta")?.textContent || "";
       return title === selectedProductName && meta.includes(selectedProductKey);
     }, "selected product context");
+    await waitFor(() => {
+      return document.querySelector("[data-product-section='members']")?.classList.contains("active") &&
+        !document.querySelector("[data-product-panel='members']")?.hidden;
+    }, "product members section");
 
     document.querySelector("#addMemberButton").click();
     const root = await waitFor(() => {
@@ -203,6 +207,12 @@ async function addCustomerToProduct(cdp, productID) {
     root.querySelector("form").requestSubmit();
     await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "add member modal closed", 12000);
     await waitFor(() => document.querySelector("#memberList")?.textContent.includes(customerUsername), "customer product membership");
+    document.querySelector("[data-product-section='webhooks']").click();
+    await waitFor(() => window.location.pathname === `/products/${selectedProductID}/webhooks`, "product webhooks route");
+    await waitFor(() => {
+      return document.querySelector("[data-product-section='webhooks']")?.classList.contains("active") &&
+        !document.querySelector("[data-product-panel='webhooks']")?.hidden;
+    }, "product webhooks section");
   }, { productID, customerUsername: customer.username });
 }
 
@@ -214,7 +224,12 @@ async function verifyProductRouteReload(cdp, productID) {
     await waitFor(() => {
       const view = document.querySelector("#projectView");
       const title = document.querySelector("#projectContextTitle")?.textContent.trim();
-      return window.location.pathname === `/products/${selectedProductID}` && view && !view.hidden && title && title !== "Product";
+      return window.location.pathname === `/products/${selectedProductID}/webhooks` &&
+        view &&
+        !view.hidden &&
+        title &&
+        title !== "Product" &&
+        document.querySelector("[data-product-section='webhooks']")?.classList.contains("active");
     }, "product route reload");
   }, { productID });
 }
