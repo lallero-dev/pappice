@@ -319,7 +319,6 @@ button:disabled {
 .auth-wrap {
   align-items: center;
   display: grid;
-  gap: 10px;
   justify-content: center;
   min-height: calc(100vh - 60px);
   padding: 18px;
@@ -353,9 +352,7 @@ button:disabled {
   border-radius: 8px;
   color: #8f1d1d;
   margin: 0;
-  max-width: 420px;
   padding: 10px 12px;
-  width: min(420px, calc(100vw - 36px));
 }
 
 .account-summary {

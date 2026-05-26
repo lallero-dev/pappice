@@ -461,6 +461,13 @@ function showAuth(mode) {
   els.setupForm.hidden = mode !== "setup";
   els.loginForm.hidden = mode !== "login";
   els.accountLinkForm.hidden = mode !== "account";
+  if (mode === "login") {
+    els.loginForm.insertBefore(els.authError, els.loginForm.children[1] || null);
+  } else if (mode === "setup") {
+    els.setupForm.insertBefore(els.authError, els.setupForm.children[1] || null);
+  } else {
+    els.accountLinkForm.insertBefore(els.authError, els.accountLinkForm.children[1] || null);
+  }
 }
 
 function showApp() {
@@ -1317,14 +1324,8 @@ function renderUsers() {
   els.userList.replaceChildren();
   for (const user of state.users) {
     const row = el("div", { className: "admin-row" });
-    const reset = el("button", { className: "ghost-button", type: "button" }, "Reset");
-    reset.disabled = user.id === state.user.id || user.disabled;
-    reset.addEventListener("click", () => resetUserPassword(user).catch(showError));
     const edit = el("button", { className: "ghost-button", type: "button" }, "Edit");
     edit.addEventListener("click", () => openUserModal(user));
-    const remove = el("button", { className: "ghost-button", type: "button" }, "Delete");
-    remove.disabled = user.id === state.user.id;
-    remove.addEventListener("click", () => deleteUser(user.id).catch(showError));
     const label = user.email
       ? `${user.display_name || user.username} / ${user.username} / ${user.email}`
       : `${user.display_name || user.username} / ${user.username}`;
@@ -1333,9 +1334,7 @@ function renderUsers() {
       el("div", { className: "admin-row-main" }, label),
       badge(user.role, "priority-normal"),
       el("span", { className: user.disabled || user.password_reset_required ? "muted" : "status-ok" }, user.disabled ? "Disabled" : user.password_reset_required ? "Password pending" : "Active"),
-      reset,
-      edit,
-      remove
+      edit
     );
     els.userList.append(row);
   }
@@ -1927,22 +1926,27 @@ function openProjectModal() {
 
 function openUserModal(user = null) {
   const editing = Boolean(user);
-  const values = editing ? {
-    display_name: user.display_name || "",
-    email: user.email || "",
-    role: user.role,
-    disabled: Boolean(user.disabled)
-  } : { role: "staff" };
-  const fields = editing ? [
-    { group: [
-      { name: "display_name", label: "Display name", autocomplete: "off" },
-      { name: "email", label: "Email", type: "email", autocomplete: "email" }
-    ] },
-    { group: [
-      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), disabled: user.id === state.user.id }
-    ] },
-    { name: "disabled", label: "Disabled", type: "checkbox", disabled: user.id === state.user.id }
-  ] : [
+  if (editing) {
+    els.modalHost.open({
+      title: `Edit ${user.username}`,
+      submitText: "Save",
+      content: accountEditContent(user),
+      onSubmit: async (data) => {
+        const patch = {
+          display_name: data.display_name || "",
+          email: data.email || ""
+        };
+        if (user.id !== state.user.id) {
+          patch.role = data.role;
+          patch.disabled = Boolean(data.disabled);
+        }
+        await updateUser(user.id, patch);
+      }
+    });
+    return;
+  }
+
+  const fields = [
     { group: [
       { name: "username", label: "Username", required: true, maxlength: 48, autocomplete: "off" },
       { name: "display_name", label: "Display name", autocomplete: "off" }
@@ -1952,28 +1956,115 @@ function openUserModal(user = null) {
   ];
 
   els.modalHost.open({
-    title: editing ? `Edit ${user.username}` : "New Account",
-    submitText: editing ? "Save" : "Create & Send Setup",
-    values,
+    title: "New Account",
+    submitText: "Create & Send Setup",
+    values: { role: "staff" },
     fields,
     onSubmit: async (data) => {
-      if (!editing) {
-        const created = await request("/api/users", { method: "POST", body: JSON.stringify(data) });
-        await loadUsers();
-        window.setTimeout(() => openAccountLinkResult(created, "setup"), 0);
-        return;
-      }
-      const patch = {
-        display_name: data.display_name || "",
-        email: data.email || ""
-      };
-      if (user.id !== state.user.id) {
-        patch.role = data.role;
-        patch.disabled = Boolean(data.disabled);
-      }
-      await updateUser(user.id, patch);
+      const created = await request("/api/users", { method: "POST", body: JSON.stringify(data) });
+      await loadUsers();
+      window.setTimeout(() => openAccountLinkResult(created, "setup"), 0);
     }
   });
+}
+
+function accountEditContent(user) {
+  const self = user.id === state.user.id;
+  const displayName = el("input", {
+    name: "display_name",
+    autocomplete: "off",
+    value: user.display_name || ""
+  });
+  const email = el("input", {
+    name: "email",
+    type: "email",
+    autocomplete: "email",
+    value: user.email || ""
+  });
+  const role = el("select", { name: "role" });
+  for (const option of selectOptions(state.meta.roles)) {
+    role.append(new Option(option.label, option.value));
+  }
+  role.value = user.role || "staff";
+  role.disabled = self;
+
+  const disabled = el("input", { name: "disabled", type: "checkbox" });
+  disabled.checked = Boolean(user.disabled);
+  disabled.disabled = self;
+
+  const reset = el("button", {
+    className: "ghost",
+    type: "button",
+    "data-account-action": "reset"
+  }, "Send reset link");
+  reset.disabled = self || user.disabled;
+  const remove = el("button", {
+    className: "danger",
+    type: "button",
+    "data-account-action": "delete"
+  }, "Delete account");
+  remove.disabled = self;
+  const confirmArea = el("div", { className: "account-confirm-area" });
+  const content = el("div", { className: "account-edit" }, [
+    el("div", { className: "account-edit-grid" }, [
+      accountField("Display name", displayName),
+      accountField("Email", email),
+      accountField("Role", role),
+      el("label", { className: "check" }, [disabled, "Disabled"])
+    ]),
+    el("section", { className: "account-manage" }, [
+      el("div", { className: "account-manage-head" }, [
+        el("strong", {}, "Account access"),
+        el("span", {}, self ? "You cannot reset or delete your own account." : "Use these actions only when the account owner cannot sign in or no longer needs access.")
+      ]),
+      el("div", { className: "account-action-row" }, [reset, remove]),
+      confirmArea
+    ])
+  ]);
+
+  reset.addEventListener("click", () => showAccountActionConfirm(confirmArea, {
+    title: "Send a password reset link?",
+    body: `${user.display_name || user.username} will receive a one-time link if email is configured. Existing sessions are not changed.`,
+    confirmLabel: "Send reset link",
+    onConfirm: () => resetUserPassword(user)
+  }));
+  remove.addEventListener("click", () => showAccountActionConfirm(confirmArea, {
+    title: "Delete this account?",
+    body: `This permanently removes ${user.display_name || user.username}. This cannot be undone.`,
+    confirmLabel: "Delete account",
+    danger: true,
+    onConfirm: async () => {
+      await deleteUser(user.id);
+      els.modalHost.close();
+    }
+  }));
+  return content;
+}
+
+function accountField(label, control) {
+  return el("label", {}, [label, control]);
+}
+
+function showAccountActionConfirm(container, { title, body, confirmLabel, danger = false, onConfirm }) {
+  const confirm = el("button", { className: danger ? "danger" : "primary", type: "button" }, confirmLabel);
+  const cancel = el("button", { className: "ghost", type: "button" }, "Cancel");
+  cancel.addEventListener("click", () => container.replaceChildren());
+  confirm.addEventListener("click", async () => {
+    confirm.disabled = true;
+    confirm.setAttribute("aria-busy", "true");
+    try {
+      await onConfirm();
+    } catch (error) {
+      showError(error);
+      confirm.disabled = false;
+      confirm.removeAttribute("aria-busy");
+    }
+  });
+  container.replaceChildren(el("div", { className: danger ? "account-confirm danger-zone" : "account-confirm" }, [
+    el("strong", {}, title),
+    el("p", {}, body),
+    el("div", { className: "account-confirm-actions" }, [cancel, confirm])
+  ]));
 }
 
 async function resetUserPassword(user) {

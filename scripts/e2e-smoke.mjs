@@ -163,6 +163,34 @@ async function createCustomerAccount(cdp) {
     const setupLink = linkInput.value;
     document.querySelector("#modalHost").close();
     await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "setup link modal closed");
+    const row = await waitFor(() => {
+      return [...document.querySelectorAll("#userList .admin-row")]
+        .find((item) => item.textContent.includes(input.username));
+    }, "customer account row");
+    const rowButtons = [...row.querySelectorAll("button")].map((button) => button.textContent.trim());
+    if (rowButtons.includes("Reset") || rowButtons.includes("Delete")) {
+      throw new Error("reset/delete controls should be inside the edit account modal");
+    }
+    row.querySelector("button").click();
+    const editRoot = await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open] h2")?.textContent.includes(input.username) ? rootNode : null;
+    }, "edit account modal");
+    const reset = editRoot.querySelector("[data-account-action='reset']");
+    const remove = editRoot.querySelector("[data-account-action='delete']");
+    if (!reset || !remove || !remove.classList.contains("danger")) {
+      throw new Error("edit account modal is missing reset/delete management actions");
+    }
+    reset.click();
+    await waitFor(() => editRoot.querySelector(".account-confirm")?.textContent.includes("Send reset link"), "reset confirmation");
+    editRoot.querySelector(".account-confirm .ghost").click();
+    await waitFor(() => !editRoot.querySelector(".account-confirm"), "reset confirmation dismissed");
+    remove.click();
+    await waitFor(() => editRoot.querySelector(".account-confirm.danger-zone")?.textContent.includes("Delete account"), "delete confirmation");
+    editRoot.querySelector(".account-confirm .ghost").click();
+    await waitFor(() => !editRoot.querySelector(".account-confirm"), "delete confirmation dismissed");
+    document.querySelector("#modalHost").close();
+    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "edit account modal closed");
     return setupLink;
   }, customer);
 }
@@ -298,6 +326,12 @@ async function loginAsAdmin(cdp) {
       const candidate = document.querySelector("#loginForm");
       return candidate && !candidate.hidden ? candidate : null;
     }, "login form");
+    setValue(form.querySelector("[name='username']"), input.username);
+    setValue(form.querySelector("[name='password']"), "wrong password");
+    form.requestSubmit();
+    await waitFor(() => {
+      return form.contains(document.querySelector("#authError")) && !document.querySelector("#authError")?.hidden;
+    }, "inline login error");
     setValue(form.querySelector("[name='username']"), input.username);
     setValue(form.querySelector("[name='password']"), input.password);
     form.requestSubmit();
