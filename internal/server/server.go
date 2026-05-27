@@ -171,8 +171,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/login", s.handleLogin)
 	s.mux.HandleFunc("/api/logout", s.handleLogout)
 	s.mux.HandleFunc("/api/account-links/", s.handleAccountLinkByToken)
-	s.mux.HandleFunc("/api/projects", s.handleProjects)
-	s.mux.HandleFunc("/api/projects/", s.handleProjectByID)
+	s.mux.HandleFunc("/api/products", s.handleProducts)
+	s.mux.HandleFunc("/api/products/", s.handleProductByID)
 	s.mux.HandleFunc("/api/tickets", s.handleTickets)
 	s.mux.HandleFunc("/api/tickets/", s.handleTicketByID)
 	s.mux.HandleFunc("/api/attachments/", s.handleAttachmentByID)
@@ -272,7 +272,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"statuses":       store.Statuses(),
 		"priorities":     store.Priorities(),
 		"roles":          store.Roles(),
-		"project_roles":  store.ProjectRoles(),
+		"product_roles":  store.ProductRoles(),
 		"webhook_events": store.Events(),
 		"email_enabled":  s.options.EmailNotifications,
 		"uploads":        s.publicUploadConfig(),
@@ -667,145 +667,145 @@ func (s *Server) respondAccountLinkError(w http.ResponseWriter, token string) {
 	})
 }
 
-func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		respondJSON(w, http.StatusOK, map[string]any{"projects": s.store.ListProjects(auth.User)})
+		respondJSON(w, http.StatusOK, map[string]any{"products": s.store.ListProducts(auth.User)})
 	case http.MethodPost:
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-		var input store.CreateProject
+		var input store.CreateProduct
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		project, err := s.store.CreateProject(input)
+		product, err := s.store.CreateProduct(input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "product.created", "product", project.ID, project.Key, map[string]any{"name": project.Name})
-		respondJSON(w, http.StatusCreated, project)
+		s.audit(r, auth.User, "product.created", "product", product.ID, product.Key, map[string]any{"name": product.Name})
+		respondJSON(w, http.StatusCreated, product)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
-func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProductByID(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
 	}
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/projects/"), "/"), "/")
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/products/"), "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
 	}
-	projectID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || projectID < 1 {
+	productID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || productID < 1 {
 		respondError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 	if len(parts) == 1 {
-		s.handleSingleProject(w, r, auth, projectID)
+		s.handleSingleProduct(w, r, auth, productID)
 		return
 	}
 	switch parts[1] {
 	case "members":
-		s.handleProjectMembers(w, r, auth, projectID, parts[2:])
+		s.handleProductMembers(w, r, auth, productID, parts[2:])
 	case "tickets":
-		s.handleProjectIssues(w, r, auth, projectID)
+		s.handleProductIssues(w, r, auth, productID)
 	case "webhooks":
-		s.handleProjectWebhooks(w, r, auth, projectID)
+		s.handleProductWebhooks(w, r, auth, productID)
 	case "webhook-deliveries":
-		s.handleProjectDeliveries(w, r, auth, projectID)
+		s.handleProductDeliveries(w, r, auth, productID)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-func (s *Server) handleSingleProject(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
+func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.canReadProject(auth.User, projectID) {
+		if !s.canReadProduct(auth.User, productID) {
 			respondError(w, http.StatusNotFound, "not found")
 			return
 		}
-		project, err := s.store.GetProject(projectID)
+		product, err := s.store.GetProduct(productID)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		if role, ok := s.store.ProjectRole(auth.User.ID, projectID); ok {
-			project.Role = role
+		if role, ok := s.store.ProductRole(auth.User.ID, productID); ok {
+			product.Role = role
 		}
 		if isAdmin(auth.User) {
-			project.Role = "owner"
+			product.Role = "owner"
 		}
-		respondJSON(w, http.StatusOK, project)
+		respondJSON(w, http.StatusOK, product)
 	case http.MethodPatch:
-		if !s.canManageProject(auth.User, projectID) {
+		if !s.canManageProduct(auth.User, productID) {
 			respondError(w, http.StatusForbidden, "product owner access is required")
 			return
 		}
-		var patch store.UpdateProject
+		var patch store.UpdateProduct
 		if !decodeJSON(w, r, &patch) {
 			return
 		}
-		project, err := s.store.UpdateProject(projectID, patch)
+		product, err := s.store.UpdateProduct(productID, patch)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "product.updated", "product", project.ID, project.Key, map[string]any{"name": project.Name})
-		respondJSON(w, http.StatusOK, project)
+		s.audit(r, auth.User, "product.updated", "product", product.ID, product.Key, map[string]any{"name": product.Name})
+		respondJSON(w, http.StatusOK, product)
 	case http.MethodDelete:
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-		project, err := s.store.GetProject(projectID)
+		product, err := s.store.GetProduct(productID)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		if err := s.store.DeleteProject(projectID); err != nil {
+		if err := s.store.DeleteProduct(productID); err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "product.deleted", "product", project.ID, project.Key, map[string]any{"name": project.Name})
+		s.audit(r, auth.User, "product.deleted", "product", product.ID, product.Key, map[string]any{"name": product.Name})
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch, http.MethodDelete)
 	}
 }
 
-func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64, rest []string) {
-	if !s.canManageProject(auth.User, projectID) {
+func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, rest []string) {
+	if !s.canManageProduct(auth.User, productID) {
 		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
 	if len(rest) == 0 {
 		switch r.Method {
 		case http.MethodGet:
-			respondJSON(w, http.StatusOK, map[string]any{"members": s.store.ListProjectMembers(projectID), "roles": store.ProjectRoles()})
+			respondJSON(w, http.StatusOK, map[string]any{"members": s.store.ListProductMembers(productID), "roles": store.ProductRoles()})
 		case http.MethodPost:
-			var input store.UpsertProjectMember
+			var input store.UpsertProductMember
 			if !decodeJSON(w, r, &input) {
 				return
 			}
-			member, err := s.store.UpsertProjectMember(projectID, input)
+			member, err := s.store.UpsertProductMember(productID, input)
 			if err != nil {
 				respondStoreError(w, err)
 				return
 			}
 			s.audit(r, auth.User, "product_member.upserted", "user", member.UserID, member.Username, map[string]any{
-				"project_id": projectID,
+				"product_id": productID,
 				"role":       member.Role,
 			})
 			respondJSON(w, http.StatusCreated, member)
@@ -821,7 +821,7 @@ func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request, au
 			return
 		}
 		user, _ := s.store.GetUser(userID)
-		if err := s.store.DeleteProjectMember(projectID, userID); err != nil {
+		if err := s.store.DeleteProductMember(productID, userID); err != nil {
 			respondStoreError(w, err)
 			return
 		}
@@ -829,15 +829,15 @@ func (s *Server) handleProjectMembers(w http.ResponseWriter, r *http.Request, au
 		if targetName == "" {
 			targetName = strconv.FormatInt(userID, 10)
 		}
-		s.audit(r, auth.User, "product_member.removed", "user", userID, targetName, map[string]any{"project_id": projectID})
+		s.audit(r, auth.User, "product_member.removed", "user", userID, targetName, map[string]any{"product_id": productID})
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
 	http.NotFound(w, r)
 }
 
-func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
-	if !s.canReadProject(auth.User, projectID) {
+func (s *Server) handleProductIssues(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
+	if !s.canReadProduct(auth.User, productID) {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -845,7 +845,7 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 	case http.MethodGet:
 		query := r.URL.Query()
 		issues := s.store.ListIssuesForUser(store.Filter{
-			ProjectID: projectID,
+			ProductID: productID,
 			Query:     query.Get("q"),
 			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
@@ -856,7 +856,7 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			"priorities": store.Priorities(),
 		})
 	case http.MethodPost:
-		if !s.canCreateIssue(auth.User, projectID) {
+		if !s.canCreateIssue(auth.User, productID) {
 			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
@@ -868,7 +868,7 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			}
 			defer cleanupMultipartForm(r)
 			var err error
-			input, err = multipartCreateIssueInput(r, projectID)
+			input, err = multipartCreateIssueInput(r, productID)
 			if err != nil {
 				respondStoreError(w, err)
 				return
@@ -882,9 +882,9 @@ func (s *Server) handleProjectIssues(w http.ResponseWriter, r *http.Request, aut
 			if !decodeJSON(w, r, &input) {
 				return
 			}
-			input.ProjectID = projectID
+			input.ProductID = productID
 		}
-		customerTicket, ok := s.prepareIssueInput(w, auth.User, projectID, &input)
+		customerTicket, ok := s.prepareIssueInput(w, auth.User, productID, &input)
 		if !ok {
 			cleanupStoredUploads(uploads)
 			return
@@ -913,9 +913,9 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		query := r.URL.Query()
-		projectID, _ := strconv.ParseInt(query.Get("project_id"), 10, 64)
+		productID, _ := strconv.ParseInt(query.Get("product_id"), 10, 64)
 		issues := s.store.ListIssuesForUser(store.Filter{
-			ProjectID: projectID,
+			ProductID: productID,
 			Query:     query.Get("q"),
 			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
@@ -940,11 +940,11 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if !s.canCreateIssue(auth.User, input.ProjectID) {
+		if !s.canCreateIssue(auth.User, input.ProductID) {
 			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
-		customerTicket, ok := s.prepareIssueInput(w, auth.User, input.ProjectID, &input)
+		customerTicket, ok := s.prepareIssueInput(w, auth.User, input.ProductID, &input)
 		if !ok {
 			return
 		}
@@ -1052,11 +1052,11 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 		respondError(w, http.StatusBadRequest, "ticket changes or comment are required")
 		return store.Issue{}, false
 	}
-	if hasPatch && !s.canEditIssue(auth.User, issue.ProjectID) {
+	if hasPatch && !s.canEditIssue(auth.User, issue.ProductID) {
 		respondError(w, http.StatusForbidden, "agent access is required")
 		return store.Issue{}, false
 	}
-	if hasComment && !s.canCommentIssue(auth.User, issue.ProjectID) {
+	if hasComment && !s.canCommentIssue(auth.User, issue.ProductID) {
 		respondError(w, http.StatusForbidden, "product comment access is required")
 		return store.Issue{}, false
 	}
@@ -1065,7 +1065,7 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 	if hasComment {
 		next := *input.Comment
 		next.Visibility = defaultString(next.Visibility, "public")
-		if next.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
+		if next.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProductID) {
 			respondError(w, http.StatusForbidden, "agent access is required for internal notes")
 			return store.Issue{}, false
 		}
@@ -1131,7 +1131,7 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if !s.canCommentIssue(auth.User, issue.ProjectID) {
+	if !s.canCommentIssue(auth.User, issue.ProductID) {
 		respondError(w, http.StatusForbidden, "product comment access is required")
 		return
 	}
@@ -1154,7 +1154,7 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		}
 	}
 	input.Visibility = defaultString(input.Visibility, "public")
-	if input.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProjectID) {
+	if input.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProductID) {
 		respondError(w, http.StatusForbidden, "agent access is required for internal notes")
 		cleanupStoredUploads(uploads)
 		return
@@ -1341,7 +1341,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		input.ProjectID = nil
+		input.ProductID = nil
 		hook, err := s.store.CreateWebhook(input)
 		if err != nil {
 			respondStoreError(w, err)
@@ -1354,15 +1354,15 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleProjectWebhooks(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
-	if !s.canManageProject(auth.User, projectID) {
+func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
+	if !s.canManageProduct(auth.User, productID) {
 		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
 		respondJSON(w, http.StatusOK, map[string]any{
-			"webhooks": publicWebhooks(s.store.ListWebhooks(&projectID)),
+			"webhooks": publicWebhooks(s.store.ListWebhooks(&productID)),
 			"events":   store.Events(),
 		})
 	case http.MethodPost:
@@ -1370,13 +1370,13 @@ func (s *Server) handleProjectWebhooks(w http.ResponseWriter, r *http.Request, a
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		input.ProjectID = &projectID
+		input.ProductID = &productID
 		hook, err := s.store.CreateWebhook(input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "webhook.created", "webhook", hook.ID, hook.Name, map[string]any{"project_id": projectID})
+		s.audit(r, auth.User, "webhook.created", "webhook", hook.ID, hook.Name, map[string]any{"product_id": productID})
 		respondJSON(w, http.StatusCreated, map[string]any{"webhook": store.ToPublicWebhook(hook), "secret": hook.Secret})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1403,12 +1403,12 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
-	if hook.ProjectID == nil {
+	if hook.ProductID == nil {
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-	} else if !s.canManageProject(auth.User, *hook.ProjectID) {
+	} else if !s.canManageProduct(auth.User, *hook.ProductID) {
 		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
@@ -1600,8 +1600,8 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, projectID int64) {
-	if !s.canManageProject(auth.User, projectID) {
+func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
+	if !s.canManageProduct(auth.User, productID) {
 		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
@@ -1612,7 +1612,7 @@ func (s *Server) handleProjectDeliveries(w http.ResponseWriter, r *http.Request,
 	deliveries := s.store.ListDeliveries(200)
 	filtered := make([]store.WebhookDelivery, 0)
 	for _, delivery := range deliveries {
-		if delivery.ProjectID != nil && *delivery.ProjectID == projectID {
+		if delivery.ProductID != nil && *delivery.ProductID == productID {
 			filtered = append(filtered, delivery)
 		}
 	}
@@ -1720,11 +1720,11 @@ func (s *Server) verifyCSRF(w http.ResponseWriter, r *http.Request, expected str
 	return true
 }
 
-func (s *Server) canReadProject(user store.User, projectID int64) bool {
+func (s *Server) canReadProduct(user store.User, productID int64) bool {
 	if isAdmin(user) {
 		return true
 	}
-	_, ok := s.store.ProjectRole(user.ID, projectID)
+	_, ok := s.store.ProductRole(user.ID, productID)
 	return ok
 }
 
@@ -1732,7 +1732,7 @@ func (s *Server) canReadIssue(user store.User, issue store.Issue) bool {
 	if isAdmin(user) {
 		return true
 	}
-	role, ok := s.store.ProjectRole(user.ID, issue.ProjectID)
+	role, ok := s.store.ProductRole(user.ID, issue.ProductID)
 	if !ok {
 		return false
 	}
@@ -1742,30 +1742,30 @@ func (s *Server) canReadIssue(user store.User, issue store.Issue) bool {
 	return true
 }
 
-func (s *Server) canManageProject(user store.User, projectID int64) bool {
+func (s *Server) canManageProduct(user store.User, productID int64) bool {
 	if isCustomer(user) {
 		return false
 	}
 	if isAdmin(user) {
 		return true
 	}
-	role, ok := s.store.ProjectRole(user.ID, projectID)
+	role, ok := s.store.ProductRole(user.ID, productID)
 	return ok && role == "owner"
 }
 
-func (s *Server) canCreateIssue(user store.User, projectID int64) bool {
-	return s.hasProjectRole(user, projectID, "owner", "agent", "customer")
+func (s *Server) canCreateIssue(user store.User, productID int64) bool {
+	return s.hasProductRole(user, productID, "owner", "agent", "customer")
 }
 
-func (s *Server) canCommentIssue(user store.User, projectID int64) bool {
-	return s.hasProjectRole(user, projectID, "owner", "agent", "customer")
+func (s *Server) canCommentIssue(user store.User, productID int64) bool {
+	return s.hasProductRole(user, productID, "owner", "agent", "customer")
 }
 
-func (s *Server) canEditIssue(user store.User, projectID int64) bool {
+func (s *Server) canEditIssue(user store.User, productID int64) bool {
 	if isCustomer(user) {
 		return false
 	}
-	return s.hasProjectRole(user, projectID, "owner", "agent")
+	return s.hasProductRole(user, productID, "owner", "agent")
 }
 
 func (s *Server) isSupportTicketRequester(user store.User, issue store.Issue) bool {
@@ -1776,10 +1776,10 @@ func (s *Server) isSupportTicketRequester(user store.User, issue store.Issue) bo
 	return issue.Source == "portal" && strings.EqualFold(strings.TrimSpace(issue.Reporter), strings.TrimSpace(user.Username))
 }
 
-func (s *Server) prepareIssueInput(w http.ResponseWriter, user store.User, projectID int64, input *store.CreateIssue) (bool, bool) {
-	input.ProjectID = projectID
+func (s *Server) prepareIssueInput(w http.ResponseWriter, user store.User, productID int64, input *store.CreateIssue) (bool, bool) {
+	input.ProductID = productID
 	input.Reporter = user.Username
-	if !s.isCustomerTicketCreator(user, projectID) {
+	if !s.isCustomerTicketCreator(user, productID) {
 		return false, true
 	}
 	requesterEmail := strings.TrimSpace(user.Email)
@@ -1794,16 +1794,16 @@ func (s *Server) prepareIssueInput(w http.ResponseWriter, user store.User, proje
 	return true, true
 }
 
-func (s *Server) isCustomerTicketCreator(user store.User, projectID int64) bool {
+func (s *Server) isCustomerTicketCreator(user store.User, productID int64) bool {
 	if isCustomer(user) {
 		return true
 	}
-	role, ok := s.store.ProjectRole(user.ID, projectID)
+	role, ok := s.store.ProductRole(user.ID, productID)
 	return ok && role == "customer"
 }
 
 func (s *Server) issueForUser(user store.User, issue store.Issue) store.Issue {
-	if s.canEditIssue(user, issue.ProjectID) {
+	if s.canEditIssue(user, issue.ProductID) {
 		return issue
 	}
 	issue.Comments = publicComments(issue.Comments)
@@ -1829,11 +1829,11 @@ func publicComments(comments []store.Comment) []store.Comment {
 	return result
 }
 
-func (s *Server) hasProjectRole(user store.User, projectID int64, allowed ...string) bool {
+func (s *Server) hasProductRole(user store.User, productID int64, allowed ...string) bool {
 	if isAdmin(user) {
 		return true
 	}
-	role, ok := s.store.ProjectRole(user.ID, projectID)
+	role, ok := s.store.ProductRole(user.ID, productID)
 	if !ok {
 		return false
 	}

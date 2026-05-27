@@ -17,12 +17,12 @@ func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store
 	if len(recipients) == 0 {
 		return
 	}
-	project, _ := s.store.GetProject(issue.ProjectID)
-	subject, textBody, htmlBody := s.issueEmailContent(event, project, issue, actor)
+	product, _ := s.store.GetProduct(issue.ProductID)
+	subject, textBody, htmlBody := s.issueEmailContent(event, product, issue, actor)
 	inputs := make([]store.CreateEmailNotification, 0, len(recipients))
 	for _, recipient := range recipients {
 		inputs = append(inputs, store.CreateEmailNotification{
-			ProjectID:      issue.ProjectID,
+			ProductID:      issue.ProductID,
 			IssueID:        issue.ID,
 			UserID:         recipient.UserID,
 			RecipientEmail: recipient.Email,
@@ -44,7 +44,7 @@ func (s *Server) enqueueRequesterEmail(event string, issue store.Issue, actorNam
 	}
 	subject, textBody, htmlBody := s.requesterEmailContent(event, issue, actorName)
 	_, _ = s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
-		ProjectID:      issue.ProjectID,
+		ProductID:      issue.ProductID,
 		IssueID:        issue.ID,
 		UserID:         0,
 		RecipientEmail: issue.RequesterEmail,
@@ -143,13 +143,13 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
 
-func (s *Server) issueEmailContent(event string, project store.Project, issue store.Issue, actor store.User) (string, string, string) {
+func (s *Server) issueEmailContent(event string, product store.Product, issue store.Issue, actor store.User) (string, string, string) {
 	actorName := defaultString(actor.DisplayName, actor.Username)
 	action := issueEventAction(event)
 	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, issueEmailSubjectAction(event), issue.Title)
-	projectLabel := issue.ProjectKey
-	if project.Name != "" {
-		projectLabel = fmt.Sprintf("%s / %s", project.Key, project.Name)
+	productLabel := issue.ProductKey
+	if product.Name != "" {
+		productLabel = fmt.Sprintf("%s / %s", product.Key, product.Name)
 	}
 	link := strings.TrimRight(s.options.PublicURL, "/")
 	if link != "" {
@@ -158,7 +158,7 @@ func (s *Server) issueEmailContent(event string, project store.Project, issue st
 
 	fields := []emailField{
 		{Label: "Ticket", Value: issue.Key},
-		{Label: "Product", Value: projectLabel},
+		{Label: "Product", Value: productLabel},
 		{Label: "Status", Value: issue.Status},
 		{Label: "Priority", Value: issue.Priority},
 		{Label: "Assignee", Value: issue.Assignee},

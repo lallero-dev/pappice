@@ -12,7 +12,7 @@ func Roles() []string {
 	return []string{"admin", "staff", "customer"}
 }
 
-func ProjectRoles() []string {
+func ProductRoles() []string {
 	return []string{"owner", "agent", "customer", "viewer"}
 }
 
@@ -37,7 +37,7 @@ func ToPublicUser(user User) PublicUser {
 func ToPublicWebhook(hook Webhook) PublicWebhook {
 	return PublicWebhook{
 		ID:              hook.ID,
-		ProjectID:       hook.ProjectID,
+		ProductID:       hook.ProductID,
 		Name:            hook.Name,
 		URL:             hook.URL,
 		Events:          append([]string(nil), hook.Events...),

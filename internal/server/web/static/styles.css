@@ -1605,7 +1605,7 @@ button:focus-visible {
   overflow: auto;
 }
 
-.project-context {
+.product-context {
   align-items: center;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1618,13 +1618,13 @@ button:focus-visible {
   padding: 14px 16px;
 }
 
-.project-context-main {
+.product-context-main {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
 
-.project-context-kicker {
+.product-context-kicker {
   color: var(--blue-dark);
   font-size: 12px;
   font-weight: 800;
@@ -1633,21 +1633,21 @@ button:focus-visible {
   text-transform: uppercase;
 }
 
-.project-context h1 {
+.product-context h1 {
   font-size: 22px;
   line-height: 1.2;
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.project-context-meta {
+.product-context-meta {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.project-key-pill {
+.product-key-pill {
   background: #edf6ff;
   border: 1px solid #c9dff3;
   border-radius: 999px;
@@ -1941,7 +1941,7 @@ button:focus-visible {
     min-width: 160px;
   }
 
-  .project-context {
+  .product-context {
     align-items: stretch;
     display: grid;
   }

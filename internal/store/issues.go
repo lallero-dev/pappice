@@ -25,7 +25,7 @@ func (s *Store) CreateIssueWithAttachments(input CreateIssue, attachments []Crea
 		return Issue{}, err
 	}
 	issue := Issue{
-		ProjectID:      input.ProjectID,
+		ProductID:      input.ProductID,
 		Title:          strings.TrimSpace(input.Title),
 		Description:    strings.TrimSpace(input.Description),
 		Status:         "new",
@@ -57,8 +57,8 @@ func (s *Store) CreateIssueWithAttachments(input CreateIssue, attachments []Crea
 		}
 		issue.CustomerToken = token
 	}
-	if issue.ProjectID < 1 {
-		return Issue{}, fmt.Errorf("%w: project_id is required", ErrValidation)
+	if issue.ProductID < 1 {
+		return Issue{}, fmt.Errorf("%w: product_id is required", ErrValidation)
 	}
 	if issue.Title == "" {
 		return Issue{}, fmt.Errorf("%w: title is required", ErrValidation)
@@ -75,19 +75,19 @@ func (s *Store) CreateIssueWithAttachments(input CreateIssue, attachments []Crea
 		return Issue{}, err
 	}
 	defer tx.Rollback()
-	if _, err := getProjectTx(tx, issue.ProjectID); err != nil {
+	if _, err := getProductTx(tx, issue.ProductID); err != nil {
 		return Issue{}, err
 	}
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE project_id = ?`, issue.ProjectID).Scan(&issue.Number); err != nil {
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE product_id = ?`, issue.ProductID).Scan(&issue.Number); err != nil {
 		return Issue{}, err
 	}
 	result, err := tx.Exec(`
 		INSERT INTO issues (
-			project_id, number, title, description, status, severity, priority, assignee, reporter,
+			product_id, number, title, description, status, severity, priority, assignee, reporter,
 			source, requester_name, requester_email, customer_token, created_at, updated_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		issue.ProjectID, issue.Number, issue.Title, issue.Description, issue.Status, issue.Severity, issue.Priority,
+		issue.ProductID, issue.Number, issue.Title, issue.Description, issue.Status, issue.Severity, issue.Priority,
 		issue.Assignee, issue.Reporter, issue.Source, issue.RequesterName, issue.RequesterEmail,
 		nullEmptyString(issue.CustomerToken), formatTime(issue.CreatedAt), formatTime(issue.UpdatedAt),
 	)
@@ -128,8 +128,8 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 		}
 		conditions = append(conditions, `EXISTS (
 			SELECT 1
-			FROM project_members pm
-			WHERE pm.project_id = i.project_id
+			FROM product_members pm
+			WHERE pm.product_id = i.product_id
 			  AND pm.user_id = ?
 			  AND (
 			    (? = 1 AND pm.role NOT IN ('customer', 'reporter')) OR
@@ -139,9 +139,9 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 		)`)
 		args = append(args, user.ID, staffScope, strings.ToLower(strings.TrimSpace(user.Username)), strings.ToLower(strings.TrimSpace(user.Email)))
 	}
-	if filter.ProjectID > 0 {
-		conditions = append(conditions, "i.project_id = ?")
-		args = append(args, filter.ProjectID)
+	if filter.ProductID > 0 {
+		conditions = append(conditions, "i.product_id = ?")
+		args = append(args, filter.ProductID)
 	}
 	if len(filter.Statuses) == 1 {
 		conditions = append(conditions, "i.status = ?")
@@ -166,11 +166,11 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 	}
 
 	query := `
-		SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+		SELECT i.id, i.product_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
 		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
-		JOIN projects p ON p.id = i.project_id
+		JOIN products p ON p.id = i.product_id
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY i.updated_at DESC`
 	rows, err := s.db.Query(query, args...)
@@ -203,11 +203,11 @@ func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
 		return Issue{}, ErrNotFound
 	}
 	row := s.db.QueryRow(`
-		SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+		SELECT i.id, i.product_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
 		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
-		JOIN projects p ON p.id = i.project_id
+		JOIN products p ON p.id = i.product_id
 		WHERE i.customer_token = ?`, token)
 	issue, err := scanIssue(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -418,9 +418,9 @@ func updateIssueTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
 	return nil
 }
 
-func (s *Store) IssueIDByProjectNumber(projectID, number int64) (int64, bool) {
+func (s *Store) IssueIDByProductNumber(productID, number int64) (int64, bool) {
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM issues WHERE project_id = ? AND number = ?`, projectID, number).Scan(&id)
+	err := s.db.QueryRow(`SELECT id FROM issues WHERE product_id = ? AND number = ?`, productID, number).Scan(&id)
 	return id, err == nil
 }
 
@@ -516,8 +516,8 @@ type issueQueryer interface {
 }
 
 func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
-	issue.Key = fmt.Sprintf("%s-%d", issue.ProjectKey, issue.Number)
-	issue.Project = issue.ProjectKey
+	issue.Key = fmt.Sprintf("%s-%d", issue.ProductKey, issue.Number)
+	issue.Product = issue.ProductKey
 	issue.Attachments = nil
 	issue.Comments = nil
 
@@ -571,18 +571,18 @@ func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 }
 
 const issueSelectSQL = `
-	SELECT i.id, i.project_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+	SELECT i.id, i.product_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
 	       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
 	       i.created_at, i.updated_at, i.closed_at
 	FROM issues i
-	JOIN projects p ON p.id = i.project_id`
+	JOIN products p ON p.id = i.product_id`
 
 func scanIssue(rows scanner) (Issue, error) {
 	var issue Issue
 	var closed, customerToken sql.NullString
 	var created, updated string
 	if err := rows.Scan(
-		&issue.ID, &issue.ProjectID, &issue.ProjectKey, &issue.Number, &issue.Title, &issue.Description,
+		&issue.ID, &issue.ProductID, &issue.ProductKey, &issue.Number, &issue.Title, &issue.Description,
 		&issue.Status, &issue.Severity, &issue.Priority, &issue.Assignee, &issue.Reporter,
 		&issue.Source, &issue.RequesterName, &issue.RequesterEmail, &customerToken, &created, &updated, &closed,
 	); err != nil {
@@ -595,8 +595,8 @@ func scanIssue(rows scanner) (Issue, error) {
 	issue.CreatedAt = parseTime(created)
 	issue.UpdatedAt = parseTime(updated)
 	issue.ClosedAt = parseNullTime(closed)
-	issue.Key = fmt.Sprintf("%s-%d", issue.ProjectKey, issue.Number)
-	issue.Project = issue.ProjectKey
+	issue.Key = fmt.Sprintf("%s-%d", issue.ProductKey, issue.Number)
+	issue.Product = issue.ProductKey
 	return issue, nil
 }
 

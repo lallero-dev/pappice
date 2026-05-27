@@ -18,7 +18,7 @@
       </div>
       <nav class="topnav" id="topNav" hidden>
         <button class="nav-button active" id="issuesTab" type="button">Tickets</button>
-        <button class="nav-button" id="projectTab" type="button">Products</button>
+        <button class="nav-button" id="productTab" type="button">Products</button>
       </nav>
       <div class="topbar-actions">
         <button class="nav-button topbar-admin-button" id="adminTab" type="button" hidden>Admin</button>
@@ -255,21 +255,21 @@
         </div>
       </section>
 
-      <section class="admin-view" id="projectView" hidden>
+      <section class="admin-view" id="productView" hidden>
         <section class="admin-panel" id="productIndexPanel">
           <div class="panel-head">
             <h2>Products</h2>
-            <button class="ghost-button" id="addProjectButton" type="button">New</button>
+            <button class="ghost-button" id="addProductButton" type="button">New</button>
           </div>
           <div class="admin-list product-index-list" id="productIndexList"></div>
         </section>
 
         <div id="productDetailView" hidden>
-          <header class="project-context" aria-labelledby="projectContextTitle">
-            <div class="project-context-main">
-              <p class="project-context-kicker">Product settings</p>
-              <h1 id="projectContextTitle">Product</h1>
-              <div class="project-context-meta" id="projectContextMeta"></div>
+          <header class="product-context" aria-labelledby="productContextTitle">
+            <div class="product-context-main">
+              <p class="product-context-kicker">Product settings</p>
+              <h1 id="productContextTitle">Product</h1>
+              <div class="product-context-meta" id="productContextMeta"></div>
             </div>
           </header>
           <div class="admin-shell product-shell">

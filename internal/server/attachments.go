@@ -156,7 +156,7 @@ func (s *Server) canReadAttachment(user store.User, issue store.Issue, attachmen
 		if comment.ID != *attachment.CommentID {
 			continue
 		}
-		return comment.Visibility == "" || comment.Visibility == "public" || s.canEditIssue(user, issue.ProjectID)
+		return comment.Visibility == "" || comment.Visibility == "public" || s.canEditIssue(user, issue.ProductID)
 	}
 	return false
 }
@@ -391,17 +391,17 @@ func attachmentInputs(uploads []storedUpload) []store.CreateAttachment {
 	return inputs
 }
 
-func multipartCreateIssueInput(r *http.Request, fallbackProjectID int64) (store.CreateIssue, error) {
-	projectID := fallbackProjectID
-	if projectID == 0 {
-		parsed, err := strconv.ParseInt(strings.TrimSpace(multipartValue(r, "project_id")), 10, 64)
+func multipartCreateIssueInput(r *http.Request, fallbackProductID int64) (store.CreateIssue, error) {
+	productID := fallbackProductID
+	if productID == 0 {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(multipartValue(r, "product_id")), 10, 64)
 		if err != nil || parsed < 1 {
-			return store.CreateIssue{}, fmt.Errorf("%w: project_id is required", store.ErrValidation)
+			return store.CreateIssue{}, fmt.Errorf("%w: product_id is required", store.ErrValidation)
 		}
-		projectID = parsed
+		productID = parsed
 	}
 	return store.CreateIssue{
-		ProjectID:      projectID,
+		ProductID:      productID,
 		Title:          multipartValue(r, "title"),
 		Description:    multipartValue(r, "description"),
 		Priority:       multipartValue(r, "priority"),

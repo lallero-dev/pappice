@@ -41,7 +41,7 @@ func (s *Server) emitIssueWebhook(event string, issue store.Issue, actor store.U
 		"ticket":     issue,
 	}
 	body, _ := json.Marshal(payload)
-	for _, hook := range s.store.ListWebhooksForEvent(event, issue.ProjectID) {
+	for _, hook := range s.store.ListWebhooksForEvent(event, issue.ProductID) {
 		go s.deliverWebhook(hook, event, issue.ID, body)
 	}
 }
@@ -50,7 +50,7 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, issueID int64,
 	started := time.Now()
 	delivery := store.WebhookDelivery{
 		WebhookID: hook.ID,
-		ProjectID: hook.ProjectID,
+		ProductID: hook.ProductID,
 		Event:     event,
 		IssueID:   issueID,
 	}

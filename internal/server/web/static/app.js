@@ -21,7 +21,7 @@ const TICKET_AUTOSAVE_DELAY_MS = 450;
 const state = {
   issues: [],
   issueCounts: { all: 0 },
-  projects: [],
+  products: [],
   users: [],
   members: [],
   webhooks: [],
@@ -48,7 +48,7 @@ const state = {
   productSection: DEFAULT_PRODUCT_SECTION,
   productMode: "index",
   productDetailId: null,
-  ticketProjectId: null,
+  ticketProductId: null,
   selectedId: null,
   renderedTicketDetailId: null,
   sort: {
@@ -59,7 +59,7 @@ const state = {
     statuses: [],
     priorities: [],
     roles: [],
-    projectRoles: [],
+    productRoles: [],
     webhookEvents: [],
     uploads: {
       max_size_bytes: 10 * 1024 * 1024,
@@ -96,7 +96,7 @@ const els = {
   brandSubtitle: document.querySelector("#brandSubtitle"),
   topNav: document.querySelector("#topNav"),
   issuesTab: document.querySelector("#issuesTab"),
-  projectTab: document.querySelector("#projectTab"),
+  productTab: document.querySelector("#productTab"),
   adminTab: document.querySelector("#adminTab"),
   profileMenu: document.querySelector("#profileMenu"),
   profileButton: document.querySelector("#profileButton"),
@@ -124,14 +124,14 @@ const els = {
   adminView: document.querySelector("#adminView"),
   adminSectionButtons: Array.from(document.querySelectorAll("[data-admin-section]")),
   adminSectionPanels: Array.from(document.querySelectorAll("[data-admin-panel]")),
-  projectView: document.querySelector("#projectView"),
+  productView: document.querySelector("#productView"),
   productSectionButtons: Array.from(document.querySelectorAll("[data-product-section]")),
   productSectionPanels: Array.from(document.querySelectorAll("[data-product-panel]")),
   productIndexPanel: document.querySelector("#productIndexPanel"),
   productIndexList: document.querySelector("#productIndexList"),
   productDetailView: document.querySelector("#productDetailView"),
-  projectContextTitle: document.querySelector("#projectContextTitle"),
-  projectContextMeta: document.querySelector("#projectContextMeta"),
+  productContextTitle: document.querySelector("#productContextTitle"),
+  productContextMeta: document.querySelector("#productContextMeta"),
   issueList: document.querySelector("#issueList"),
   ticketDetailPane: document.querySelector("#ticketDetailPane"),
   searchInput: document.querySelector("#searchInput"),
@@ -139,7 +139,7 @@ const els = {
   assigneeFilter: document.querySelector("#assigneeFilter"),
   issueSortSelect: document.querySelector("#issueSortSelect"),
   statusFilterList: document.querySelector("#statusFilterList"),
-  addProjectButton: document.querySelector("#addProjectButton"),
+  addProductButton: document.querySelector("#addProductButton"),
   addUserButton: document.querySelector("#addUserButton"),
   userList: document.querySelector("#userList"),
   createTokenButton: document.querySelector("#createTokenButton"),
@@ -318,16 +318,16 @@ function parseAppRoute() {
     }
     case "products": {
       if (parts.length === 1) {
-        return { view: "project", mode: "index", normalize: trailingSlash };
+        return { view: "product", mode: "index", normalize: trailingSlash };
       }
-      const projectId = Number(parts[1] || 0);
+      const productId = Number(parts[1] || 0);
       const section = validProductSection(parts[2]) ? parts[2] : DEFAULT_PRODUCT_SECTION;
       return {
-        view: "project",
+        view: "product",
         mode: "detail",
-        projectId,
+        productId,
         section,
-        normalize: trailingSlash || !Number.isInteger(projectId) || projectId < 1 || parts.length !== 3 || section !== parts[2]
+        normalize: trailingSlash || !Number.isInteger(productId) || productId < 1 || parts.length !== 3 || section !== parts[2]
       };
     }
     default:
@@ -357,23 +357,23 @@ async function applyRouteFromPath() {
     updateRoutePath({ replace: route.normalize });
     return;
   }
-  if (route.view === "project") {
+  if (route.view === "product") {
     if (route.mode === "index") {
       if (canAccessProductsView()) {
         state.productMode = "index";
         state.productDetailId = null;
-        switchView("project", { updateRoute: false });
+        switchView("product", { updateRoute: false });
         updateRoutePath({ replace: route.normalize });
         return;
       }
     } else {
-      const project = currentProject(route.projectId);
-      if (project && canManageProject(project.id)) {
+      const product = currentProduct(route.productId);
+      if (product && canManageProduct(product.id)) {
         state.productMode = "detail";
-        state.productDetailId = project.id;
+        state.productDetailId = product.id;
         state.productSection = route.section;
-        updateProjectActions();
-        switchView("project", { updateRoute: false });
+        updateProductActions();
+        switchView("product", { updateRoute: false });
         updateRoutePath({ replace: route.normalize });
         return;
       }
@@ -399,10 +399,10 @@ function updateRoutePath({ replace = false } = {}) {
 
 function routePathForState() {
   if (state.view === "admin") return `/admin/${state.adminSection}`;
-  if (state.view === "project" && state.productMode === "detail" && state.productDetailId) {
+  if (state.view === "product" && state.productMode === "detail" && state.productDetailId) {
     return `/products/${state.productDetailId}/${state.productSection}`;
   }
-  if (state.view === "project") return "/products";
+  if (state.view === "product") return "/products";
   return "/tickets";
 }
 
@@ -470,7 +470,7 @@ async function enterApp() {
   } else {
     renderAssigneeFilter();
   }
-  await loadProjects();
+  await loadProducts();
   await applyRouteFromPath();
 }
 
@@ -538,7 +538,7 @@ async function loadHealth() {
   state.meta.statuses = meta.statuses || [];
   state.meta.priorities = meta.priorities || [];
   state.meta.roles = meta.roles || [];
-  state.meta.projectRoles = meta.project_roles || [];
+  state.meta.productRoles = meta.product_roles || [];
   state.meta.webhookEvents = meta.webhook_events || [];
   state.meta.uploads = meta.uploads || state.meta.uploads;
   state.branding = normalizeBranding(meta.branding);
@@ -547,24 +547,24 @@ async function loadHealth() {
   if (state.filters.statuses.length === 0) state.filters.statuses = defaultStatusFilters();
 }
 
-async function loadProjects() {
-  const payload = await request("/api/projects");
-  state.projects = payload.projects || [];
-  if (state.ticketProjectId && !state.projects.some((project) => project.id === state.ticketProjectId)) {
-    state.ticketProjectId = null;
+async function loadProducts() {
+  const payload = await request("/api/products");
+  state.products = payload.products || [];
+  if (state.ticketProductId && !state.products.some((product) => product.id === state.ticketProductId)) {
+    state.ticketProductId = null;
   }
-  if (state.productDetailId && !state.projects.some((project) => project.id === state.productDetailId)) {
+  if (state.productDetailId && !state.products.some((product) => product.id === state.productDetailId)) {
     state.productDetailId = null;
     state.productMode = "index";
   }
   renderProductFilter();
   renderProductIndex();
-  updateProjectActions();
+  updateProductActions();
   await loadIssues();
 }
 
 async function loadIssues({ renderDetail = true } = {}) {
-  if (state.projects.length === 0) {
+  if (state.products.length === 0) {
     state.issues = [];
     state.issueCounts = countIssues([]);
     renderIssuesView();
@@ -574,15 +574,15 @@ async function loadIssues({ renderDetail = true } = {}) {
   if (state.filters.q) params.set("q", state.filters.q);
   if (state.filters.assignee) params.set("assignee", state.filters.assignee);
   for (const status of state.filters.statuses) params.append("status", status);
-  const projectID = state.ticketProjectId || null;
-  if (projectID) params.set("project_id", String(projectID));
+  const productID = state.ticketProductId || null;
+  if (productID) params.set("product_id", String(productID));
   const countParams = new URLSearchParams();
-  if (projectID) countParams.set("project_id", String(projectID));
+  if (productID) countParams.set("product_id", String(productID));
   const [payload, countsPayload] = await Promise.all([
     request(`/api/tickets?${params.toString()}`),
     request(`/api/tickets?${countParams.toString()}`)
   ]);
-  if (projectID !== (state.ticketProjectId || null)) return;
+  if (productID !== (state.ticketProductId || null)) return;
   state.issues = payload.tickets || [];
   state.issueCounts = countIssues(countsPayload.tickets || []);
   const previousSelectedId = state.selectedId;
@@ -630,9 +630,9 @@ async function loadAdminSection(section) {
   }
 }
 
-async function loadProjectAdmin() {
+async function loadProductAdmin() {
   renderProductsView();
-  if (state.productMode !== "detail" || !state.productDetailId || !canManageProject(state.productDetailId)) return;
+  if (state.productMode !== "detail" || !state.productDetailId || !canManageProduct(state.productDetailId)) return;
   await loadProductSection(state.productSection);
 }
 
@@ -642,10 +642,10 @@ async function loadProductSection(section) {
       await Promise.all([loadUsers(), loadMembers()]);
       return;
     case "webhooks":
-      await loadProjectWebhooks();
+      await loadProductWebhooks();
       return;
     case "deliveries":
-      await loadProjectDeliveries();
+      await loadProductDeliveries();
       return;
     default:
       state.productSection = DEFAULT_PRODUCT_SECTION;
@@ -668,13 +668,13 @@ async function loadTokens() {
 }
 
 async function loadMembers() {
-  const payload = await request(`/api/projects/${state.productDetailId}/members`);
+  const payload = await request(`/api/products/${state.productDetailId}/members`);
   state.members = payload.members || [];
   renderMembers();
 }
 
-async function loadProjectWebhooks() {
-  const payload = await request(`/api/projects/${state.productDetailId}/webhooks`);
+async function loadProductWebhooks() {
+  const payload = await request(`/api/products/${state.productDetailId}/webhooks`);
   state.webhooks = payload.webhooks || [];
   renderWebhooks(els.webhookList, state.webhooks);
 }
@@ -723,34 +723,34 @@ async function loadMaintenance() {
   renderMaintenance();
 }
 
-async function loadProjectDeliveries() {
-  const payload = await request(`/api/projects/${state.productDetailId}/webhook-deliveries`);
+async function loadProductDeliveries() {
+  const payload = await request(`/api/products/${state.productDetailId}/webhook-deliveries`);
   state.deliveries = payload.deliveries || [];
   renderDeliveries();
 }
 
 function renderProductFilter() {
   els.productFilter.replaceChildren();
-  if (state.projects.length === 0) {
+  if (state.products.length === 0) {
     els.productFilter.append(new Option("No products", ""));
     els.productFilter.disabled = true;
     return;
   }
   els.productFilter.disabled = false;
   els.productFilter.append(new Option("All products", ""));
-  for (const project of state.projects) {
-    els.productFilter.append(new Option(`${project.key} / ${project.name}`, String(project.id)));
+  for (const product of state.products) {
+    els.productFilter.append(new Option(`${product.key} / ${product.name}`, String(product.id)));
   }
-  els.productFilter.value = state.ticketProjectId ? String(state.ticketProjectId) : "";
+  els.productFilter.value = state.ticketProductId ? String(state.ticketProductId) : "";
 }
 
-function updateProjectActions() {
+function updateProductActions() {
   els.adminTab.hidden = !isAdmin();
-  els.projectTab.hidden = !canAccessProductsView();
-  els.addProjectButton.hidden = !isAdmin();
+  els.productTab.hidden = !canAccessProductsView();
+  els.addProductButton.hidden = !isAdmin();
   els.newIssueButton.hidden = !canCreateIssue();
   if (state.view === "admin" && !isAdmin()) switchView("issues");
-  if (state.view === "project" && !canAccessProductsView()) switchView("issues");
+  if (state.view === "product" && !canAccessProductsView()) switchView("issues");
 }
 
 function renderIssuesView() {
@@ -865,14 +865,14 @@ function clearTicketFilters() {
 
 function renderIssueList() {
   els.issueList.replaceChildren();
-  if (state.projects.length === 0) {
+  if (state.products.length === 0) {
     els.issueList.append(emptyState({
       title: isAdmin() ? "Create a product to start" : "No products available",
       body: isAdmin()
         ? "Products group tickets by the customer, service, or team you support."
         : "Ask an administrator to add your account to a product before opening tickets.",
       actionLabel: isAdmin() ? "New Product" : "",
-      onAction: isAdmin() ? openProjectModal : null
+      onAction: isAdmin() ? openProductModal : null
     }));
     return;
   }
@@ -995,10 +995,10 @@ function compareOrdered(left, right, order) {
 }
 
 function issueProductParts(issue) {
-  const project = currentProject(issue.project_id);
+  const product = currentProduct(issue.product_id);
   return {
-    key: issue.project_key || project?.key || issue.project || "Product",
-    name: project?.name || ""
+    key: issue.product_key || product?.key || issue.product || "Product",
+    name: product?.name || ""
   };
 }
 
@@ -1061,17 +1061,17 @@ function prefersReducedMotion() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
 }
 
-async function createTicketFromForm(data, form, fallbackProjectId) {
-  const payload = ticketCreatePayload(data, fallbackProjectId);
+async function createTicketFromForm(data, form, fallbackProductId) {
+  const payload = ticketCreatePayload(data, fallbackProductId);
   const body = ticketCreateRequestBody(payload, form);
-  const created = await request(`/api/projects/${payload.project_id}/tickets`, { method: "POST", body });
-  state.ticketProjectId = payload.project_id;
+  const created = await request(`/api/products/${payload.product_id}/tickets`, { method: "POST", body });
+  state.ticketProductId = payload.product_id;
   const createdStatus = created.status || "new";
   if (createdStatus && !state.filters.statuses.includes(createdStatus)) {
     state.filters.statuses = [createdStatus];
   }
   state.selectedId = created.id;
-  await loadProjects();
+  await loadProducts();
 }
 
 function ticketDetailContent({ issue, editable, canComment }) {
@@ -1105,7 +1105,7 @@ function ticketDetailContent({ issue, editable, canComment }) {
     side.append(sideSection("Requester", requester));
   }
   const facts = [
-    factBlock("Product", issue.project_key || issue.project || "Product"),
+    factBlock("Product", issue.product_key || issue.product || "Product"),
     factBlock("Created", relativeTime(issue.created_at)),
     factBlock("Updated", relativeTime(issue.updated_at))
   ];
@@ -1117,21 +1117,21 @@ function ticketDetailContent({ issue, editable, canComment }) {
   return wrap;
 }
 
-function ticketProductOptions(projects) {
-  return projects.map((project) => ({ value: String(project.id), label: `${project.key} / ${project.name}` }));
+function ticketProductOptions(products) {
+  return products.map((product) => ({ value: String(product.id), label: `${product.key} / ${product.name}` }));
 }
 
 function openTicketCreateModal() {
-  const creatableProjects = state.projects.filter((project) => canCreateIssue(project.id));
-  if (creatableProjects.length === 0) {
+  const creatableProducts = state.products.filter((product) => canCreateIssue(product.id));
+  if (creatableProducts.length === 0) {
     showError(new Error("Create a product before adding tickets"));
     return;
   }
   const content = el("div", { className: "ticket-create-modal" }, [
     ticketCreateFlow({
       issue: { title: "", description: "", priority: "" },
-      projectId: null,
-      creatableProjects
+      productId: null,
+      creatableProducts
     })
   ]);
   const confirmArea = el("div", { className: "ticket-create-confirm-area" });
@@ -1161,7 +1161,7 @@ function openTicketCreateModal() {
 function showTicketCreateConfirm(container, { data, form, footer, submitButton }) {
   const payload = ticketCreatePayload(data);
   const files = selectedTicketFiles(form);
-  const project = currentProject(payload.project_id);
+  const product = currentProduct(payload.product_id);
   const cancel = el("button", { className: "ghost", type: "button" }, "Keep Editing");
   const confirm = el("button", { className: "primary", type: "button", "data-ticket-create-confirm": "true" }, "Create Ticket");
   if (footer) footer.hidden = true;
@@ -1188,7 +1188,7 @@ function showTicketCreateConfirm(container, { data, form, footer, submitButton }
     el("p", {}, "The ticket will be opened and visible to the people who can access this product."),
     el("dl", { className: "confirm-detail-list" }, [
       el("dt", {}, "Product"),
-      el("dd", {}, project ? `${project.key} / ${project.name}` : "Selected product"),
+      el("dd", {}, product ? `${product.key} / ${product.name}` : "Selected product"),
       el("dt", {}, "Priority"),
       el("dd", {}, labelize(payload.priority)),
       el("dt", {}, "Attachments"),
@@ -1198,19 +1198,19 @@ function showTicketCreateConfirm(container, { data, form, footer, submitButton }
   ]));
 }
 
-function ticketCreateFlow({ issue, projectId, creatableProjects }) {
+function ticketCreateFlow({ issue, productId, creatableProducts }) {
   const productOptions = [
     { value: "", label: "Choose product" },
-    ...ticketProductOptions(creatableProjects)
+    ...ticketProductOptions(creatableProducts)
   ];
   const priorityOptions = [
     { value: "", label: "Choose priority" },
     ...selectOptions(state.meta.priorities)
   ];
-  const projectValue = projectId && creatableProjects.some((project) => project.id === projectId) ? String(projectId) : "";
+  const productValue = productId && creatableProducts.some((product) => product.id === productId) ? String(productId) : "";
   return el("div", { className: "ticket-create-flow" }, [
     ticketCreateStep("1", "Product", [
-      ticketSelectField("", "project_id", projectValue, productOptions, {
+      ticketSelectField("", "product_id", productValue, productOptions, {
         ariaLabel: "Product",
         required: true
       })
@@ -1531,7 +1531,7 @@ function renderProductSections() {
 }
 
 function renderProductsView() {
-  const showDetail = state.productMode === "detail" && state.productDetailId && canManageProject(state.productDetailId);
+  const showDetail = state.productMode === "detail" && state.productDetailId && canManageProduct(state.productDetailId);
   els.productIndexPanel.hidden = Boolean(showDetail);
   els.productDetailView.hidden = !showDetail;
   if (!showDetail) {
@@ -1539,15 +1539,15 @@ function renderProductsView() {
     renderProductIndex();
     return;
   }
-  renderProjectContext();
+  renderProductContext();
   renderProductSections();
 }
 
 async function switchProductSection(section) {
   state.productSection = validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION;
   renderProductSections();
-  if (state.view === "project") updateRoutePath();
-  if (state.productMode === "detail" && state.productDetailId && canManageProject(state.productDetailId)) {
+  if (state.view === "product") updateRoutePath();
+  if (state.productMode === "detail" && state.productDetailId && canManageProduct(state.productDetailId)) {
     await loadProductSection(state.productSection);
   }
 }
@@ -1557,9 +1557,9 @@ function validProductSection(section) {
 }
 
 function renderProductIndex() {
-  els.addProjectButton.hidden = !isAdmin();
+  els.addProductButton.hidden = !isAdmin();
   els.productIndexList.replaceChildren();
-  const products = manageableProjects();
+  const products = manageableProducts();
   if (products.length === 0) {
     els.productIndexList.append(emptyInline({
       title: "No products",
@@ -1567,45 +1567,45 @@ function renderProductIndex() {
         ? "Create a product before inviting customers."
         : "Ask an admin to grant owner access before managing product settings.",
       actionLabel: isAdmin() ? "New Product" : "",
-      onAction: isAdmin() ? openProjectModal : null
+      onAction: isAdmin() ? openProductModal : null
     }));
     return;
   }
-  for (const project of products) {
+  for (const product of products) {
     const row = el("div", { className: "admin-row product-index-row" });
     const open = el("button", {
       className: "ghost-button",
       type: "button",
-      "data-product-open": String(project.id)
+      "data-product-open": String(product.id)
     }, "Open");
-    open.addEventListener("click", () => openProductDetail(project.id).catch(showError));
+    open.addEventListener("click", () => openProductDetail(product.id).catch(showError));
     row.append(
       el("div", { className: "admin-row-main" }, [
-        el("strong", {}, project.name || project.key || `Product ${project.id}`),
-        el("span", {}, project.key || `#${project.id}`)
+        el("strong", {}, product.name || product.key || `Product ${product.id}`),
+        el("span", {}, product.key || `#${product.id}`)
       ]),
-      el("span", { className: "muted" }, `${labelize(project.role || "owner")} access`),
+      el("span", { className: "muted" }, `${labelize(product.role || "owner")} access`),
       open
     );
     els.productIndexList.append(row);
   }
 }
 
-function renderProjectContext() {
-  const project = currentProductDetail();
-  if (!els.projectContextTitle || !els.projectContextMeta) return;
-  els.projectContextMeta.replaceChildren();
+function renderProductContext() {
+  const product = currentProductDetail();
+  if (!els.productContextTitle || !els.productContextMeta) return;
+  els.productContextMeta.replaceChildren();
 
-  if (!project) {
-    els.projectContextTitle.textContent = "No product selected";
-    els.projectContextMeta.append(el("span", { className: "muted" }, "Choose a product to manage members and integrations."));
+  if (!product) {
+    els.productContextTitle.textContent = "No product selected";
+    els.productContextMeta.append(el("span", { className: "muted" }, "Choose a product to manage members and integrations."));
     return;
   }
 
-  els.projectContextTitle.textContent = project.name || project.key || "Product";
-  els.projectContextMeta.append(
-    el("span", { className: "project-key-pill" }, project.key || `#${project.id}`),
-    el("span", { className: "muted" }, `${labelize(project.role || "owner")} access`)
+  els.productContextTitle.textContent = product.name || product.key || "Product";
+  els.productContextMeta.append(
+    el("span", { className: "product-key-pill" }, product.key || `#${product.id}`),
+    el("span", { className: "muted" }, `${labelize(product.role || "owner")} access`)
   );
 }
 
@@ -1685,7 +1685,7 @@ function renderWebhooks(list, hooks) {
       title: "No webhooks",
       body: global ? "Global webhooks receive events from every product." : "Product webhooks only receive events for this product.",
       actionLabel: "New Webhook",
-      onAction: () => openWebhookModal(global ? "global" : "project")
+      onAction: () => openWebhookModal(global ? "global" : "product")
     }));
     return;
   }
@@ -2005,11 +2005,11 @@ function confirmSendAction({ title, body, confirmLabel, details = [] }) {
   });
 }
 
-function ticketCreatePayload(data, fallbackProjectId) {
+function ticketCreatePayload(data, fallbackProductId) {
   const payload = {
     description: String(data.description || "").trim(),
     priority: String(data.priority || "normal").trim() || "normal",
-    project_id: Number(data.project_id || fallbackProjectId),
+    product_id: Number(data.product_id || fallbackProductId),
     title: String(data.title || "").trim()
   };
   if (!isCustomer()) {
@@ -2191,7 +2191,7 @@ function selectedCommentFiles(composer) {
 }
 
 function bindTicketCreateState({ root, submitButton }) {
-  const product = root.querySelector("[name='project_id']");
+  const product = root.querySelector("[name='product_id']");
   const priority = root.querySelector("[name='priority']");
   const title = root.querySelector("[name='title']");
   const description = root.querySelector("[name='description']");
@@ -2459,29 +2459,29 @@ async function deleteToken(id) {
 }
 
 async function upsertMember(input) {
-  await request(`/api/projects/${state.productDetailId}/members`, { method: "POST", body: JSON.stringify(input) });
-  await loadProjects();
-  if (state.productDetailId && canManageProject(state.productDetailId)) await loadMembers();
+  await request(`/api/products/${state.productDetailId}/members`, { method: "POST", body: JSON.stringify(input) });
+  await loadProducts();
+  if (state.productDetailId && canManageProduct(state.productDetailId)) await loadMembers();
 }
 
 async function deleteMember(userId) {
-  await request(`/api/projects/${state.productDetailId}/members/${userId}`, { method: "DELETE" });
-  await loadProjects();
-  if (state.productDetailId && canManageProject(state.productDetailId)) await loadMembers();
+  await request(`/api/products/${state.productDetailId}/members/${userId}`, { method: "DELETE" });
+  await loadProducts();
+  if (state.productDetailId && canManageProduct(state.productDetailId)) await loadMembers();
 }
 
 async function deleteWebhook(id) {
   await request(`/api/webhooks/${id}`, { method: "DELETE" });
   if (isAdmin()) await loadGlobalWebhooks();
-  if (state.view === "project" && state.productDetailId && canManageProject(state.productDetailId)) await loadProjectWebhooks();
+  if (state.view === "product" && state.productDetailId && canManageProduct(state.productDetailId)) await loadProductWebhooks();
 }
 
 async function testWebhook(id) {
   const delivery = await request(`/api/webhooks/${id}/test`, { method: "POST" });
   console.info(delivery.error ? "Webhook test failed" : "Webhook test sent", delivery);
   if (isAdmin()) await loadGlobalWebhooks();
-  if (state.view === "project" && state.productDetailId && canManageProject(state.productDetailId)) {
-    await Promise.all([loadProjectWebhooks(), loadProjectDeliveries()]);
+  if (state.view === "product" && state.productDetailId && canManageProduct(state.productDetailId)) {
+    await Promise.all([loadProductWebhooks(), loadProductDeliveries()]);
   }
 }
 
@@ -2489,7 +2489,7 @@ function selectOptions(values) {
   return values.map((value) => ({ value, label: labelize(value) }));
 }
 
-function openProjectModal() {
+function openProductModal() {
   els.modalHost.open({
     title: "New Product",
     submitText: "Create",
@@ -2501,9 +2501,9 @@ function openProjectModal() {
       { name: "description", label: "Description", type: "textarea", rows: 3 }
     ],
     onSubmit: async (data) => {
-      const project = await request("/api/projects", { method: "POST", body: JSON.stringify(data) });
-      await loadProjects();
-      await openProductDetail(project.id);
+      const product = await request("/api/products", { method: "POST", body: JSON.stringify(data) });
+      await loadProducts();
+      await openProductDetail(product.id);
     }
   });
 }
@@ -2818,7 +2818,7 @@ function openMemberModal(member = null) {
     submitText: "Save",
     fields: [
       { name: "user_id", label: "Account", type: "select", options: users },
-      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.projectRoles), value: "viewer" }
+      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.productRoles), value: "viewer" }
     ],
     onSubmit: async (data) => {
       await upsertMember({ user_id: Number(data.user_id), role: data.role });
@@ -2828,7 +2828,7 @@ function openMemberModal(member = null) {
 
 function memberEditContent(member) {
   const role = el("select", { name: "role" });
-  for (const option of selectOptions(state.meta.projectRoles)) {
+  for (const option of selectOptions(state.meta.productRoles)) {
     role.append(new Option(option.label, option.value));
   }
   role.value = member.role || "viewer";
@@ -2888,8 +2888,8 @@ function openWebhookModal(scope) {
         await loadGlobalWebhooks();
         return;
       }
-      await request(`/api/projects/${state.productDetailId}/webhooks`, { method: "POST", body: JSON.stringify(payload) });
-      await loadProjectWebhooks();
+      await request(`/api/products/${state.productDetailId}/webhooks`, { method: "POST", body: JSON.stringify(payload) });
+      await loadProductWebhooks();
     }
   });
 }
@@ -2987,7 +2987,7 @@ function bindEvents() {
   window.addEventListener("popstate", () => applyRouteFromPath().catch(showError));
 
   els.issuesTab.addEventListener("click", () => switchView("issues"));
-  els.projectTab.addEventListener("click", () => openProductsIndex());
+  els.productTab.addEventListener("click", () => openProductsIndex());
   els.adminTab.addEventListener("click", () => switchView("admin"));
   for (const button of els.adminSectionButtons) {
     button.addEventListener("click", () => switchAdminSection(button.getAttribute("data-admin-section")).catch(showError));
@@ -3003,10 +3003,10 @@ function bindEvents() {
     loadIssues().catch(showError);
   }, 180));
   els.productFilter.addEventListener("change", async () => {
-    state.ticketProjectId = Number(els.productFilter.value) || null;
+    state.ticketProductId = Number(els.productFilter.value) || null;
     state.selectedId = null;
     renderProductFilter();
-    updateProjectActions();
+    updateProductActions();
     await loadIssues();
   });
   els.assigneeFilter.addEventListener("change", () => {
@@ -3021,13 +3021,13 @@ function bindEvents() {
     loadEmailNotifications().catch(showError);
   });
   els.auditSearchInput.addEventListener("input", runAuditSearch);
-  els.addProjectButton.addEventListener("click", () => openProjectModal());
+  els.addProductButton.addEventListener("click", () => openProductModal());
   els.addUserButton.addEventListener("click", () => openUserModal());
   els.createTokenButton.addEventListener("click", () => openTokenModal());
   els.sendTestEmailButton.addEventListener("click", () => openTestEmailModal());
   els.addMemberButton.addEventListener("click", () => openMemberModal());
   els.addGlobalWebhookButton.addEventListener("click", () => openWebhookModal("global"));
-  els.addWebhookButton.addEventListener("click", () => openWebhookModal("project"));
+  els.addWebhookButton.addEventListener("click", () => openWebhookModal("product"));
   els.appAlertClose.addEventListener("click", clearAppAlert);
 }
 
@@ -3050,32 +3050,32 @@ function closeSelectedTicket() {
 
 function switchView(view, options = {}) {
   if (view === "admin" && !isAdmin()) return;
-  if (view === "project" && !canAccessProductsView()) return;
+  if (view === "product" && !canAccessProductsView()) return;
   state.view = view;
   els.issueView.hidden = view !== "issues";
   els.adminView.hidden = view !== "admin";
-  els.projectView.hidden = view !== "project";
+  els.productView.hidden = view !== "product";
   els.issuesTab.classList.toggle("active", view === "issues");
   els.adminTab.classList.toggle("active", view === "admin");
-  els.projectTab.classList.toggle("active", view === "project");
+  els.productTab.classList.toggle("active", view === "product");
   if (options.updateRoute !== false) updateRoutePath({ replace: Boolean(options.replaceRoute) });
   if (view === "admin" && options.load !== false) loadAdmin().catch(showError);
-  if (view === "project" && options.load !== false) loadProjectAdmin().catch(showError);
+  if (view === "product" && options.load !== false) loadProductAdmin().catch(showError);
 }
 
 function openProductsIndex() {
   state.productMode = "index";
   state.productDetailId = null;
-  switchView("project");
+  switchView("product");
 }
 
-async function openProductDetail(projectId, section = DEFAULT_PRODUCT_SECTION) {
-  if (!canManageProject(projectId)) return;
+async function openProductDetail(productId, section = DEFAULT_PRODUCT_SECTION) {
+  if (!canManageProduct(productId)) return;
   state.productMode = "detail";
-  state.productDetailId = projectId;
+  state.productDetailId = productId;
   state.productSection = validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION;
-  switchView("project", { load: false });
-  await loadProjectAdmin();
+  switchView("product", { load: false });
+  await loadProductAdmin();
 }
 
 async function refreshCurrent() {
@@ -3083,19 +3083,19 @@ async function refreshCurrent() {
     await loadAdmin();
     return;
   }
-  if (state.view === "project") {
-    await loadProjectAdmin();
+  if (state.view === "product") {
+    await loadProductAdmin();
     return;
   }
-  await loadProjects();
+  await loadProducts();
 }
 
-function currentProject(projectId) {
-  return state.projects.find((project) => project.id === projectId) || null;
+function currentProduct(productId) {
+  return state.products.find((product) => product.id === productId) || null;
 }
 
 function currentProductDetail() {
-  return currentProject(state.productDetailId);
+  return currentProduct(state.productDetailId);
 }
 
 function selectedIssue() {
@@ -3110,36 +3110,36 @@ function isCustomer() {
   return state.user?.role === "customer";
 }
 
-function projectRole(projectId) {
-  return currentProject(projectId)?.role || "";
+function productRole(productId) {
+  return currentProduct(productId)?.role || "";
 }
 
-function canManageProject(projectId) {
-  return Boolean(projectId) && !isCustomer() && (isAdmin() || projectRole(projectId) === "owner");
+function canManageProduct(productId) {
+  return Boolean(productId) && !isCustomer() && (isAdmin() || productRole(productId) === "owner");
 }
 
-function manageableProjects() {
-  return state.projects.filter((project) => canManageProject(project.id));
+function manageableProducts() {
+  return state.products.filter((product) => canManageProduct(product.id));
 }
 
 function canAccessProductsView() {
-  return isAdmin() || manageableProjects().length > 0;
+  return isAdmin() || manageableProducts().length > 0;
 }
 
-function canCreateIssue(projectId = state.ticketProjectId) {
-  if (!projectId) {
-    return state.projects.some((project) => canCreateIssue(project.id));
+function canCreateIssue(productId = state.ticketProductId) {
+  if (!productId) {
+    return state.products.some((product) => canCreateIssue(product.id));
   }
-  return isAdmin() || ["owner", "agent", "customer"].includes(projectRole(projectId));
+  return isAdmin() || ["owner", "agent", "customer"].includes(productRole(productId));
 }
 
 function canCommentTicket(issue = null) {
-  return Boolean(issue?.project_id) && canCreateIssue(issue.project_id);
+  return Boolean(issue?.product_id) && canCreateIssue(issue.product_id);
 }
 
 function canEditTicket(issue = null) {
-  const projectId = issue?.project_id || state.ticketProjectId;
-  return Boolean(projectId) && !isCustomer() && (isAdmin() || ["owner", "agent"].includes(projectRole(projectId)));
+  const productId = issue?.product_id || state.ticketProductId;
+  return Boolean(productId) && !isCustomer() && (isAdmin() || ["owner", "agent"].includes(productRole(productId)));
 }
 
 function showAuthError(error) {

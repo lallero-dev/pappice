@@ -22,7 +22,7 @@ func (s *Store) IssueEmailRecipients(event string, issue Issue, actor User) []Em
 
 	switch event {
 	case "ticket.created":
-		for _, recipient := range s.projectOwnerEmailRecipients(issue.ProjectID) {
+		for _, recipient := range s.productOwnerEmailRecipients(issue.ProductID) {
 			add(recipient)
 		}
 	case "ticket.updated", "ticket.commented":
@@ -68,7 +68,7 @@ func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]E
 			return nil, fmt.Errorf("%w: email, subject, and body are required", ErrValidation)
 		}
 		notification := EmailNotification{
-			ProjectID:      input.ProjectID,
+			ProductID:      input.ProductID,
 			IssueID:        input.IssueID,
 			UserID:         input.UserID,
 			RecipientEmail: email,
@@ -120,11 +120,11 @@ func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]E
 		}
 		result, err := tx.Exec(`
 			INSERT INTO email_notifications (
-				project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+				product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 				status, attempts, next_attempt_at, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-			nullZero(notification.ProjectID), nullZero(notification.IssueID), nullZero(notification.UserID), notification.RecipientEmail,
+			nullZero(notification.ProductID), nullZero(notification.IssueID), nullZero(notification.UserID), notification.RecipientEmail,
 			notification.RecipientName, notification.Event, notification.Subject, notification.BodyText, notification.BodyHTML,
 			formatTime(notification.NextAttemptAt), formatTime(notification.CreatedAt),
 		)
@@ -265,7 +265,7 @@ func (s *Store) MarkEmailFailed(id int64, sendErr error, maxAttempts int) error 
 
 func (s *Store) GetEmailNotification(id int64) (EmailNotification, error) {
 	row := s.db.QueryRow(`
-		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications
 		WHERE id = ?`, id)
@@ -289,7 +289,7 @@ func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) Email
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit, offset)
 	rows, err := s.db.Query(`
-		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications
 		`+where+`
@@ -389,16 +389,16 @@ func (s *Store) RetryEmailNotification(id int64) (EmailNotification, error) {
 	return s.GetEmailNotification(id)
 }
 
-func (s *Store) projectOwnerEmailRecipients(projectID int64) []EmailRecipient {
+func (s *Store) productOwnerEmailRecipients(productID int64) []EmailRecipient {
 	rows, err := s.db.Query(`
 		SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.role
 		FROM users u
-		LEFT JOIN project_members pm ON pm.user_id = u.id AND pm.project_id = ?
+		LEFT JOIN product_members pm ON pm.user_id = u.id AND pm.product_id = ?
 		WHERE u.disabled = 0
 		  AND u.email IS NOT NULL
 		  AND trim(u.email) <> ''
 		  AND (u.role = 'admin' OR pm.role = 'owner')
-		ORDER BY u.username`, projectID)
+		ORDER BY u.username`, productID)
 	if err != nil {
 		return nil
 	}
@@ -472,7 +472,7 @@ func pendingEmailNotificationIDTx(tx *sql.Tx, notification EmailNotification) (i
 
 func getEmailNotificationTx(tx *sql.Tx, id int64) (EmailNotification, error) {
 	row := tx.QueryRow(`
-		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications
 		WHERE id = ?`, id)
@@ -485,18 +485,18 @@ func getEmailNotificationTx(tx *sql.Tx, id int64) (EmailNotification, error) {
 
 func scanEmailNotification(rows scanner) (EmailNotification, error) {
 	var notification EmailNotification
-	var projectID, issueID, userID sql.NullInt64
+	var productID, issueID, userID sql.NullInt64
 	var nextAttempt, created string
 	var lockedUntil, sentAt sql.NullString
 	if err := rows.Scan(
-		&notification.ID, &projectID, &issueID, &userID, &notification.RecipientEmail,
+		&notification.ID, &productID, &issueID, &userID, &notification.RecipientEmail,
 		&notification.RecipientName, &notification.Event, &notification.Subject, &notification.BodyText, &notification.BodyHTML,
 		&notification.Status, &notification.Attempts, &nextAttempt, &lockedUntil, &notification.LastError, &created, &sentAt,
 	); err != nil {
 		return EmailNotification{}, err
 	}
-	if projectID.Valid {
-		notification.ProjectID = projectID.Int64
+	if productID.Valid {
+		notification.ProductID = productID.Int64
 	}
 	if issueID.Valid {
 		notification.IssueID = issueID.Int64

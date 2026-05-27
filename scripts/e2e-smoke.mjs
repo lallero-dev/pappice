@@ -128,7 +128,7 @@ async function selectFirstProduct(cdp) {
     }, "product filter options");
     const firstProduct = [...select.options].find((item) => item.value);
     setValue(select, firstProduct.value);
-    await waitFor(() => document.querySelector("#projectTab") && !document.querySelector("#projectTab").hidden, "products tab");
+    await waitFor(() => document.querySelector("#productTab") && !document.querySelector("#productTab").hidden, "products tab");
     return firstProduct.value;
   });
 }
@@ -202,9 +202,9 @@ async function addCustomerToProduct(cdp, productID) {
     const separatorIndex = selectedProductLabel.indexOf(" / ");
     const selectedProductKey = separatorIndex > -1 ? selectedProductLabel.slice(0, separatorIndex) : selectedProductLabel;
     const selectedProductName = separatorIndex > -1 ? selectedProductLabel.slice(separatorIndex + 3) : selectedProductLabel;
-    document.querySelector("#projectTab").click();
+    document.querySelector("#productTab").click();
     await waitFor(() => {
-      const view = document.querySelector("#projectView");
+      const view = document.querySelector("#productView");
       return view && !view.hidden;
     }, "products view");
     await waitFor(() => window.location.pathname === "/products", "products route");
@@ -214,8 +214,8 @@ async function addCustomerToProduct(cdp, productID) {
     openButton.click();
     await waitFor(() => window.location.pathname === `/products/${selectedProductID}/members`, "product members route");
     await waitFor(() => {
-      const title = document.querySelector("#projectContextTitle")?.textContent.trim();
-      const meta = document.querySelector("#projectContextMeta")?.textContent || "";
+      const title = document.querySelector("#productContextTitle")?.textContent.trim();
+      const meta = document.querySelector("#productContextMeta")?.textContent || "";
       return title === selectedProductName && meta.includes(selectedProductKey);
     }, "selected product context");
     await waitFor(() => {
@@ -284,8 +284,8 @@ async function verifyProductRouteReload(cdp, productID) {
   await runInPage(cdp, async ({ productID: selectedProductID }) => {
     const { waitFor } = pageTools();
     await waitFor(() => {
-      const view = document.querySelector("#projectView");
-      const title = document.querySelector("#projectContextTitle")?.textContent.trim();
+      const view = document.querySelector("#productView");
+      const title = document.querySelector("#productContextTitle")?.textContent.trim();
       return window.location.pathname === `/products/${selectedProductID}/webhooks` &&
         view &&
         !view.hidden &&
@@ -331,10 +331,10 @@ async function createCustomerTicket(cdp) {
     if (document.querySelector("#issueList .issue-row.draft")) {
       throw new Error("ticket creation should use a modal, not a draft row");
     }
-    const project = root.querySelector("[name='project_id']");
-    if (!project.value) {
-      const firstProject = [...project.options].find((option) => option.value);
-      setValue(project, firstProject.value);
+    const product = root.querySelector("[name='product_id']");
+    if (!product.value) {
+      const firstProduct = [...product.options].find((option) => option.value);
+      setValue(product, firstProduct.value);
     }
     await waitFor(() => !root.querySelector("[name='priority']").disabled, "priority step enabled");
     setValue(root.querySelector("[name='priority']"), "high");

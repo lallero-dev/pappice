@@ -11,7 +11,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 	server := &Server{options: Options{PublicURL: "https://tracker.example.test"}}
 	issue := store.Issue{
 		Key:           "PME-1",
-		ProjectKey:    "PME",
+		ProductKey:    "PME",
 		Title:         "Need <help>",
 		Status:        "resolved",
 		CustomerToken: "customer-token",
@@ -61,10 +61,10 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 
 func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
 	server := &Server{options: Options{PublicURL: "https://tracker.example.test"}}
-	project := store.Project{Key: "PME", Name: "Pappice"}
+	product := store.Product{Key: "PME", Name: "Pappice"}
 	issue := store.Issue{
 		Key:         "PME-2",
-		ProjectKey:  "PME",
+		ProductKey:  "PME",
 		Title:       "Cannot sign in",
 		Description: "Login fails after password reset.",
 		Status:      "assigned",
@@ -74,7 +74,7 @@ func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
 	}
 	actor := store.User{Username: "paolo", DisplayName: "Paolo"}
 
-	subject, textBody, htmlBody := server.issueEmailContent("ticket.assigned", project, issue, actor)
+	subject, textBody, htmlBody := server.issueEmailContent("ticket.assigned", product, issue, actor)
 
 	if subject != "[PME-2] Ticket update: Cannot sign in" {
 		t.Fatalf("subject = %q", subject)

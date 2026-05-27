@@ -21,13 +21,13 @@ func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
 	if err != nil {
 		return Webhook{}, err
 	}
-	if input.ProjectID != nil {
-		if _, err := s.GetProject(*input.ProjectID); err != nil {
+	if input.ProductID != nil {
+		if _, err := s.GetProduct(*input.ProductID); err != nil {
 			return Webhook{}, err
 		}
 	}
 	hook := Webhook{
-		ProjectID: input.ProjectID,
+		ProductID: input.ProductID,
 		Name:      strings.TrimSpace(input.Name),
 		URL:       strings.TrimSpace(input.URL),
 		Secret:    strings.TrimSpace(input.Secret),
@@ -51,9 +51,9 @@ func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
 	}
 	eventsJSON, _ := json.Marshal(hook.Events)
 	result, err := s.db.Exec(`
-		INSERT INTO webhooks (project_id, name, url, secret, events_json, enabled, created_at, updated_at)
+		INSERT INTO webhooks (product_id, name, url, secret, events_json, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullableInt64(hook.ProjectID), hook.Name, hook.URL, hook.Secret, string(eventsJSON), boolInt(hook.Enabled),
+		nullableInt64(hook.ProductID), hook.Name, hook.URL, hook.Secret, string(eventsJSON), boolInt(hook.Enabled),
 		formatTime(hook.CreatedAt), formatTime(hook.UpdatedAt),
 	)
 	if err != nil {
@@ -63,16 +63,16 @@ func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
 	return copyWebhook(hook), nil
 }
 
-func (s *Store) ListWebhooks(projectID *int64) []Webhook {
+func (s *Store) ListWebhooks(productID *int64) []Webhook {
 	query := `
-		SELECT id, project_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
+		SELECT id, product_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
 		FROM webhooks`
 	args := []any{}
-	if projectID == nil {
-		query += ` WHERE project_id IS NULL`
+	if productID == nil {
+		query += ` WHERE product_id IS NULL`
 	} else {
-		query += ` WHERE project_id = ?`
-		args = append(args, *projectID)
+		query += ` WHERE product_id = ?`
+		args = append(args, *productID)
 	}
 	query += ` ORDER BY id`
 	rows, err := s.db.Query(query, args...)
@@ -85,7 +85,7 @@ func (s *Store) ListWebhooks(projectID *int64) []Webhook {
 
 func (s *Store) GetWebhook(id int64) (Webhook, error) {
 	row := s.db.QueryRow(`
-		SELECT id, project_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
+		SELECT id, product_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
 		FROM webhooks
 		WHERE id = ?`, id)
 	hook, err := scanWebhook(row)
@@ -95,12 +95,12 @@ func (s *Store) GetWebhook(id int64) (Webhook, error) {
 	return hook, err
 }
 
-func (s *Store) ListWebhooksForEvent(event string, projectID int64) []Webhook {
+func (s *Store) ListWebhooksForEvent(event string, productID int64) []Webhook {
 	rows, err := s.db.Query(`
-		SELECT id, project_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
+		SELECT id, product_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
 		FROM webhooks
-		WHERE enabled = 1 AND (project_id IS NULL OR project_id = ?)
-		ORDER BY project_id IS NOT NULL DESC, id`, projectID)
+		WHERE enabled = 1 AND (product_id IS NULL OR product_id = ?)
+		ORDER BY product_id IS NOT NULL DESC, id`, productID)
 	if err != nil {
 		return nil
 	}
@@ -173,9 +173,9 @@ func (s *Store) DeleteWebhook(id int64) error {
 func (s *Store) RecordDelivery(delivery WebhookDelivery) error {
 	now := time.Now().UTC()
 	result, err := s.db.Exec(`
-		INSERT INTO webhook_deliveries (webhook_id, project_id, event, issue_id, status_code, error, duration_ms, created_at)
+		INSERT INTO webhook_deliveries (webhook_id, product_id, event, issue_id, status_code, error, duration_ms, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		delivery.WebhookID, nullableInt64(delivery.ProjectID), delivery.Event, nullZero(delivery.IssueID),
+		delivery.WebhookID, nullableInt64(delivery.ProductID), delivery.Event, nullZero(delivery.IssueID),
 		nullZero(int64(delivery.StatusCode)), delivery.Error, delivery.DurationMS, formatTime(now),
 	)
 	if err != nil {
@@ -200,7 +200,7 @@ func (s *Store) ListDeliveries(limit int) []WebhookDelivery {
 		limit = 50
 	}
 	rows, err := s.db.Query(`
-		SELECT id, webhook_id, project_id, event, issue_id, status_code, error, duration_ms, created_at
+		SELECT id, webhook_id, product_id, event, issue_id, status_code, error, duration_ms, created_at
 		FROM webhook_deliveries
 		ORDER BY created_at DESC
 		LIMIT ?`, limit)
@@ -212,12 +212,12 @@ func (s *Store) ListDeliveries(limit int) []WebhookDelivery {
 	var deliveries []WebhookDelivery
 	for rows.Next() {
 		var delivery WebhookDelivery
-		var projectID, issueID, status sql.NullInt64
+		var productID, issueID, status sql.NullInt64
 		var created string
-		if err := rows.Scan(&delivery.ID, &delivery.WebhookID, &projectID, &delivery.Event, &issueID, &status, &delivery.Error, &delivery.DurationMS, &created); err == nil {
-			if projectID.Valid {
-				v := projectID.Int64
-				delivery.ProjectID = &v
+		if err := rows.Scan(&delivery.ID, &delivery.WebhookID, &productID, &delivery.Event, &issueID, &status, &delivery.Error, &delivery.DurationMS, &created); err == nil {
+			if productID.Valid {
+				v := productID.Int64
+				delivery.ProductID = &v
 			}
 			if issueID.Valid {
 				delivery.IssueID = issueID.Int64
@@ -245,20 +245,20 @@ func scanWebhooks(rows *sql.Rows) []Webhook {
 
 func scanWebhook(rows scanner) (Webhook, error) {
 	var hook Webhook
-	var projectID sql.NullInt64
+	var productID sql.NullInt64
 	var enabled int
 	var eventsJSON string
 	var created, updated string
 	var lastError, lastDelivered sql.NullString
 	if err := rows.Scan(
-		&hook.ID, &projectID, &hook.Name, &hook.URL, &hook.Secret, &eventsJSON, &enabled,
+		&hook.ID, &productID, &hook.Name, &hook.URL, &hook.Secret, &eventsJSON, &enabled,
 		&created, &updated, &hook.LastStatus, &lastError, &lastDelivered,
 	); err != nil {
 		return Webhook{}, err
 	}
-	if projectID.Valid {
-		v := projectID.Int64
-		hook.ProjectID = &v
+	if productID.Valid {
+		v := productID.Int64
+		hook.ProductID = &v
 	}
 	_ = json.Unmarshal([]byte(eventsJSON), &hook.Events)
 	hook.Enabled = enabled != 0

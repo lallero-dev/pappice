@@ -38,13 +38,13 @@ func (s *Store) CreateFirstAdmin(input CreateUser) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	project, err := createProjectTx(tx, CreateProject{Key: "PME", Name: "Inbox"})
+	product, err := createProductTx(tx, CreateProduct{Key: "PME", Name: "Inbox"})
 	if err != nil {
 		return User{}, err
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`,
-		project.ID, user.ID, formatTime(time.Now().UTC()),
+		`INSERT INTO product_members (product_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`,
+		product.ID, user.ID, formatTime(time.Now().UTC()),
 	); err != nil {
 		return User{}, err
 	}

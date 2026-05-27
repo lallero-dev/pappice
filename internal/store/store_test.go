@@ -21,13 +21,13 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	projects := tracker.ListProjects(admin)
-	if len(projects) != 1 {
-		t.Fatalf("projects = %d, want 1", len(projects))
+	products := tracker.ListProducts(admin)
+	if len(products) != 1 {
+		t.Fatalf("products = %d, want 1", len(products))
 	}
 
 	issue, err := tracker.CreateIssue(CreateIssue{
-		ProjectID: projects[0].ID,
+		ProductID: products[0].ID,
 		Title:     "Cannot import invoice",
 		Priority:  "urgent",
 	})
@@ -70,9 +70,9 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if len(issues) != 0 {
 		t.Fatalf("comments should not match issue search, got %d", len(issues))
 	}
-	issues = reloaded.ListIssues(Filter{ProjectID: projects[0].ID})
+	issues = reloaded.ListIssues(Filter{ProductID: products[0].ID})
 	if len(issues) != 1 {
-		t.Fatalf("project issues = %d, want 1", len(issues))
+		t.Fatalf("product issues = %d, want 1", len(issues))
 	}
 }
 
@@ -86,14 +86,14 @@ func TestStoreValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	projectID := tracker.ListProjects(admin)[0].ID
+	productID := tracker.ListProducts(admin)[0].ID
 
-	_, err = tracker.CreateIssue(CreateIssue{ProjectID: projectID, Priority: "normal"})
+	_, err = tracker.CreateIssue(CreateIssue{ProductID: productID, Priority: "normal"})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty title error = %v, want ErrValidation", err)
 	}
 
-	issue, err := tracker.CreateIssue(CreateIssue{ProjectID: projectID, Title: "Bad status"})
+	issue, err := tracker.CreateIssue(CreateIssue{ProductID: productID, Title: "Bad status"})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -125,8 +125,8 @@ func TestMetadataAndPublicViews(t *testing.T) {
 	if got, want := Roles(), []string{"admin", "staff", "customer"}; !slices.Equal(got, want) {
 		t.Fatalf("roles = %#v, want %#v", got, want)
 	}
-	if got, want := ProjectRoles(), []string{"owner", "agent", "customer", "viewer"}; !slices.Equal(got, want) {
-		t.Fatalf("project roles = %#v, want %#v", got, want)
+	if got, want := ProductRoles(), []string{"owner", "agent", "customer", "viewer"}; !slices.Equal(got, want) {
+		t.Fatalf("product roles = %#v, want %#v", got, want)
 	}
 	if got, want := Events(), []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}; !slices.Equal(got, want) {
 		t.Fatalf("events = %#v, want %#v", got, want)
@@ -136,11 +136,11 @@ func TestMetadataAndPublicViews(t *testing.T) {
 	if publicUser.Role != "staff" || publicUser.Username != "bob" || !publicUser.Disabled {
 		t.Fatalf("public user = %#v", publicUser)
 	}
-	projectID := int64(3)
-	hook := Webhook{ID: 9, ProjectID: &projectID, Name: "hook", URL: "https://example.test/hook", Secret: "secret", Events: []string{"ticket.created"}}
+	productID := int64(3)
+	hook := Webhook{ID: 9, ProductID: &productID, Name: "hook", URL: "https://example.test/hook", Secret: "secret", Events: []string{"ticket.created"}}
 	publicHook := ToPublicWebhook(hook)
 	hook.Events[0] = "ticket.updated"
-	if !publicHook.HasSecret || publicHook.Events[0] != "ticket.created" || publicHook.ProjectID == nil || *publicHook.ProjectID != projectID {
+	if !publicHook.HasSecret || publicHook.Events[0] != "ticket.created" || publicHook.ProductID == nil || *publicHook.ProductID != productID {
 		t.Fatalf("public hook = %#v", publicHook)
 	}
 }
@@ -154,8 +154,8 @@ func TestSaveIssueIsTransactional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	projectID := tracker.ListProjects(admin)[0].ID
-	issue, err := tracker.CreateIssue(CreateIssue{ProjectID: projectID, Title: "Original", Priority: "normal"})
+	productID := tracker.ListProducts(admin)[0].ID
+	issue, err := tracker.CreateIssue(CreateIssue{ProductID: productID, Title: "Original", Priority: "normal"})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -209,10 +209,10 @@ func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	projectID := tracker.ListProjects(admin)[0].ID
+	productID := tracker.ListProducts(admin)[0].ID
 
 	issue, err := tracker.CreateIssueWithAttachments(CreateIssue{
-		ProjectID: projectID,
+		ProductID: productID,
 		Title:     "Attached ticket",
 	}, []CreateAttachment{{
 		Filename:    "request.txt",
@@ -355,8 +355,8 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
-	projectID := tracker.ListProjects(admin)[0].ID
-	hooks := tracker.ListWebhooksForEvent("ticket.created", projectID)
+	productID := tracker.ListProducts(admin)[0].ID
+	hooks := tracker.ListWebhooksForEvent("ticket.created", productID)
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
 		t.Fatalf("event hooks = %#v", hooks)
 	}
@@ -516,7 +516,7 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	}
 }
 
-func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
+func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -549,34 +549,34 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("users = %#v", users)
 	}
 
-	project, err := tracker.CreateProject(CreateProject{Key: "OPS", Name: "Operations"})
+	product, err := tracker.CreateProduct(CreateProduct{Key: "OPS", Name: "Operations"})
 	if err != nil {
-		t.Fatalf("create project: %v", err)
+		t.Fatalf("create product: %v", err)
 	}
-	project, err = tracker.UpdateProject(project.ID, UpdateProject{Name: strPtr("Operations Desk")})
+	product, err = tracker.UpdateProduct(product.ID, UpdateProduct{Name: strPtr("Operations Desk")})
 	if err != nil {
-		t.Fatalf("update project: %v", err)
+		t.Fatalf("update product: %v", err)
 	}
-	if project.Name != "Operations Desk" {
-		t.Fatalf("project = %#v", project)
+	if product.Name != "Operations Desk" {
+		t.Fatalf("product = %#v", product)
 	}
-	if _, err := tracker.UpsertProjectMember(project.ID, UpsertProjectMember{UserID: user.ID, Role: "customer"}); err != nil {
+	if _, err := tracker.UpsertProductMember(product.ID, UpsertProductMember{UserID: user.ID, Role: "customer"}); err != nil {
 		t.Fatalf("upsert member: %v", err)
 	}
-	if role, ok := tracker.ProjectRole(user.ID, project.ID); !ok || role != "customer" {
-		t.Fatalf("project role = %q %v", role, ok)
+	if role, ok := tracker.ProductRole(user.ID, product.ID); !ok || role != "customer" {
+		t.Fatalf("product role = %q %v", role, ok)
 	}
-	if err := tracker.DeleteProjectMember(project.ID, user.ID); err != nil {
+	if err := tracker.DeleteProductMember(product.ID, user.ID); err != nil {
 		t.Fatalf("delete member: %v", err)
 	}
-	if _, ok := tracker.ProjectRole(user.ID, project.ID); ok {
-		t.Fatal("project role should be removed")
+	if _, ok := tracker.ProductRole(user.ID, product.ID); ok {
+		t.Fatal("product role should be removed")
 	}
 
 	enabled := false
 	hook, err := tracker.CreateWebhook(CreateWebhook{
-		ProjectID: &project.ID,
-		Name:      "project hook",
+		ProductID: &product.ID,
+		Name:      "product hook",
 		URL:       "https://hooks.example.test/incoming",
 		Events:    []string{"*"},
 		Enabled:   &enabled,
@@ -584,9 +584,9 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
-	hooks := tracker.ListWebhooks(&project.ID)
+	hooks := tracker.ListWebhooks(&product.ID)
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
-		t.Fatalf("project hooks = %#v", hooks)
+		t.Fatalf("product hooks = %#v", hooks)
 	}
 	enabled = true
 	hook, err = tracker.UpdateWebhook(hook.ID, UpdateWebhook{
@@ -612,7 +612,7 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 	if hook.URL != "https://hooks.example.test/renamed" || hook.Secret != secret || !slices.Equal(hook.Events, events) {
 		t.Fatalf("updated hook details = %#v", hook)
 	}
-	if err := tracker.RecordDelivery(WebhookDelivery{WebhookID: hook.ID, ProjectID: &project.ID, Event: "ticket.created", StatusCode: 204}); err != nil {
+	if err := tracker.RecordDelivery(WebhookDelivery{WebhookID: hook.ID, ProductID: &product.ID, Event: "ticket.created", StatusCode: 204}); err != nil {
 		t.Fatalf("record delivery: %v", err)
 	}
 	deliveries := tracker.ListDeliveries(10)
@@ -620,12 +620,12 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("deliveries = %#v", deliveries)
 	}
 
-	issue, err := tracker.CreateIssue(CreateIssue{ProjectID: project.ID, Title: "Numbered support ticket"})
+	issue, err := tracker.CreateIssue(CreateIssue{ProductID: product.ID, Title: "Numbered support ticket"})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
-	if gotID, ok := tracker.IssueIDByProjectNumber(project.ID, issue.Number); !ok || gotID != issue.ID {
-		t.Fatalf("ticket by project number = %d %v", gotID, ok)
+	if gotID, ok := tracker.IssueIDByProductNumber(product.ID, issue.Number); !ok || gotID != issue.ID {
+		t.Fatalf("ticket by product number = %d %v", gotID, ok)
 	}
 
 	queued, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
@@ -663,12 +663,12 @@ func TestStoreAdminProjectWebhookAndFailureLifecycle(t *testing.T) {
 	if err := tracker.DeleteUser(user.ID); err != nil {
 		t.Fatalf("delete user: %v", err)
 	}
-	if err := tracker.DeleteProject(project.ID); err != nil {
-		t.Fatalf("delete project: %v", err)
+	if err := tracker.DeleteProduct(product.ID); err != nil {
+		t.Fatalf("delete product: %v", err)
 	}
 }
 
-func TestProjectMembershipFiltersIssues(t *testing.T) {
+func TestProductMembershipFiltersIssues(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -677,22 +677,22 @@ func TestProjectMembershipFiltersIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	visibleProject := tracker.ListProjects(admin)[0]
-	hiddenProject, err := tracker.CreateProject(CreateProject{Key: "OPS", Name: "Operations"})
+	visibleProduct := tracker.ListProducts(admin)[0]
+	hiddenProduct, err := tracker.CreateProduct(CreateProduct{Key: "OPS", Name: "Operations"})
 	if err != nil {
-		t.Fatalf("create project: %v", err)
+		t.Fatalf("create product: %v", err)
 	}
 	user, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse"})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := tracker.UpsertProjectMember(visibleProject.ID, UpsertProjectMember{UserID: user.ID, Role: "viewer"}); err != nil {
+	if _, err := tracker.UpsertProductMember(visibleProduct.ID, UpsertProductMember{UserID: user.ID, Role: "viewer"}); err != nil {
 		t.Fatalf("add member: %v", err)
 	}
-	if _, err := tracker.CreateIssue(CreateIssue{ProjectID: visibleProject.ID, Title: "Visible"}); err != nil {
+	if _, err := tracker.CreateIssue(CreateIssue{ProductID: visibleProduct.ID, Title: "Visible"}); err != nil {
 		t.Fatalf("create visible issue: %v", err)
 	}
-	if _, err := tracker.CreateIssue(CreateIssue{ProjectID: hiddenProject.ID, Title: "Hidden"}); err != nil {
+	if _, err := tracker.CreateIssue(CreateIssue{ProductID: hiddenProduct.ID, Title: "Hidden"}); err != nil {
 		t.Fatalf("create hidden issue: %v", err)
 	}
 
@@ -700,9 +700,9 @@ func TestProjectMembershipFiltersIssues(t *testing.T) {
 	if len(issues) != 1 || issues[0].Title != "Visible" {
 		t.Fatalf("visible issues = %#v", issues)
 	}
-	projects := tracker.ListProjects(user)
-	if len(projects) != 1 || projects[0].ID != visibleProject.ID {
-		t.Fatalf("visible projects = %#v", projects)
+	products := tracker.ListProducts(user)
+	if len(products) != 1 || products[0].ID != visibleProduct.ID {
+		t.Fatalf("visible products = %#v", products)
 	}
 }
 
@@ -715,7 +715,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	projectID := tracker.ListProjects(admin)[0].ID
+	productID := tracker.ListProducts(admin)[0].ID
 	customer, err := tracker.CreateUser(CreateUser{Username: "bob", Password: "correct horse", Email: "bob@example.test", Role: "customer"})
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
@@ -724,14 +724,14 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create assignee: %v", err)
 	}
-	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: customer.ID, Role: "customer"}); err != nil {
+	if _, err := tracker.UpsertProductMember(productID, UpsertProductMember{UserID: customer.ID, Role: "customer"}); err != nil {
 		t.Fatalf("add customer member: %v", err)
 	}
-	if _, err := tracker.UpsertProjectMember(projectID, UpsertProjectMember{UserID: assignee.ID, Role: "agent"}); err != nil {
+	if _, err := tracker.UpsertProductMember(productID, UpsertProductMember{UserID: assignee.ID, Role: "agent"}); err != nil {
 		t.Fatalf("add assignee member: %v", err)
 	}
 	issue, err := tracker.CreateIssue(CreateIssue{
-		ProjectID: projectID,
+		ProductID: productID,
 		Title:     "Notify operators",
 		Reporter:  customer.Username,
 		Assignee:  assignee.Username,
@@ -758,7 +758,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	}
 
 	queued, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
-		ProjectID:      issue.ProjectID,
+		ProductID:      issue.ProductID,
 		IssueID:        issue.ID,
 		UserID:         assignee.ID,
 		RecipientEmail: assignee.Email,
@@ -793,7 +793,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 
 	sendAfter := time.Now().UTC().Add(time.Hour)
 	first, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
-		ProjectID:      issue.ProjectID,
+		ProductID:      issue.ProductID,
 		IssueID:        issue.ID,
 		UserID:         assignee.ID,
 		RecipientEmail: assignee.Email,
@@ -807,7 +807,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 		t.Fatalf("enqueue first coalesced email: %v", err)
 	}
 	second, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
-		ProjectID:      issue.ProjectID,
+		ProductID:      issue.ProductID,
 		IssueID:        issue.ID,
 		UserID:         assignee.ID,
 		RecipientEmail: assignee.Email,
@@ -844,9 +844,9 @@ func TestPortalTicketTokenAndPublicComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	projectID := tracker.ListProjects(admin)[0].ID
+	productID := tracker.ListProducts(admin)[0].ID
 	ticket, err := tracker.CreateIssue(CreateIssue{
-		ProjectID:      projectID,
+		ProductID:      productID,
 		Title:          "Cannot sign in",
 		Description:    "Login fails",
 		Source:         "portal",

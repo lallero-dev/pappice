@@ -23,13 +23,13 @@ var (
 
 type Issue struct {
 	ID             int64        `json:"id"`
-	ProjectID      int64        `json:"project_id"`
-	ProjectKey     string       `json:"project_key"`
+	ProductID      int64        `json:"product_id"`
+	ProductKey     string       `json:"product_key"`
 	Number         int64        `json:"number"`
 	Key            string       `json:"key"`
 	Title          string       `json:"title"`
 	Description    string       `json:"description"`
-	Project        string       `json:"project"`
+	Product        string       `json:"product"`
 	Status         string       `json:"status"`
 	Severity       string       `json:"-"`
 	Priority       string       `json:"priority"`
@@ -56,10 +56,10 @@ type Comment struct {
 }
 
 type CreateIssue struct {
-	ProjectID      int64  `json:"project_id"`
+	ProductID      int64  `json:"product_id"`
 	Title          string `json:"title"`
 	Description    string `json:"description"`
-	Project        string `json:"project"`
+	Product        string `json:"product"`
 	Severity       string `json:"-"`
 	Priority       string `json:"priority"`
 	Assignee       string `json:"assignee"`
@@ -106,7 +106,7 @@ type Filter struct {
 	Query     string
 	Status    string
 	Statuses  []string
-	ProjectID int64
+	ProductID int64
 	Assignee  string
 }
 
@@ -256,7 +256,7 @@ type CreateAPIToken struct {
 	Name string `json:"name"`
 }
 
-type Project struct {
+type Product struct {
 	ID          int64     `json:"id"`
 	Key         string    `json:"key"`
 	Name        string    `json:"name"`
@@ -266,19 +266,19 @@ type Project struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-type CreateProject struct {
+type CreateProduct struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
 
-type UpdateProject struct {
+type UpdateProduct struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 }
 
-type ProjectMember struct {
-	ProjectID   int64     `json:"project_id"`
+type ProductMember struct {
+	ProductID   int64     `json:"product_id"`
 	UserID      int64     `json:"user_id"`
 	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name"`
@@ -286,14 +286,14 @@ type ProjectMember struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-type UpsertProjectMember struct {
+type UpsertProductMember struct {
 	UserID int64  `json:"user_id"`
 	Role   string `json:"role"`
 }
 
 type Webhook struct {
 	ID              int64      `json:"id"`
-	ProjectID       *int64     `json:"project_id,omitempty"`
+	ProductID       *int64     `json:"product_id,omitempty"`
 	Name            string     `json:"name"`
 	URL             string     `json:"url"`
 	Secret          string     `json:"secret,omitempty"`
@@ -308,7 +308,7 @@ type Webhook struct {
 
 type PublicWebhook struct {
 	ID              int64      `json:"id"`
-	ProjectID       *int64     `json:"project_id,omitempty"`
+	ProductID       *int64     `json:"product_id,omitempty"`
 	Name            string     `json:"name"`
 	URL             string     `json:"url"`
 	Events          []string   `json:"events"`
@@ -322,7 +322,7 @@ type PublicWebhook struct {
 }
 
 type CreateWebhook struct {
-	ProjectID *int64   `json:"project_id"`
+	ProductID *int64   `json:"product_id"`
 	Name      string   `json:"name"`
 	URL       string   `json:"url"`
 	Secret    string   `json:"secret"`
@@ -341,7 +341,7 @@ type UpdateWebhook struct {
 type WebhookDelivery struct {
 	ID         int64     `json:"id"`
 	WebhookID  int64     `json:"webhook_id"`
-	ProjectID  *int64    `json:"project_id,omitempty"`
+	ProductID  *int64    `json:"product_id,omitempty"`
 	Event      string    `json:"event"`
 	IssueID    int64     `json:"ticket_id,omitempty"`
 	StatusCode int       `json:"status_code,omitempty"`
@@ -360,7 +360,7 @@ type EmailRecipient struct {
 
 type EmailNotification struct {
 	ID             int64      `json:"id"`
-	ProjectID      int64      `json:"project_id,omitempty"`
+	ProductID      int64      `json:"product_id,omitempty"`
 	IssueID        int64      `json:"ticket_id,omitempty"`
 	UserID         int64      `json:"user_id"`
 	RecipientEmail string     `json:"recipient_email"`
@@ -403,7 +403,7 @@ type EmailNotificationStats struct {
 }
 
 type CreateEmailNotification struct {
-	ProjectID      int64
+	ProductID      int64
 	IssueID        int64
 	UserID         int64
 	RecipientEmail string
@@ -448,7 +448,7 @@ var validGlobalRoles = map[string]struct{}{
 	"customer": {},
 }
 
-var validProjectRoles = map[string]struct{}{
+var validProductRoles = map[string]struct{}{
 	"owner":    {},
 	"agent":    {},
 	"customer": {},
@@ -515,7 +515,7 @@ var validAccountLinkPurposes = map[string]struct{}{
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,46}[a-z0-9]$`)
-var projectKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}$`)
+var productKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}$`)
 
 func Open(path string) (*Store, error) {
 	if path == "" {
@@ -600,17 +600,17 @@ func (s *Store) migrate() error {
 	if _, err := s.db.Exec(`UPDATE users SET role = 'customer' WHERE role = 'client'`); err != nil {
 		return err
 	}
-	if ok, err := s.projectRolesAreTicketing(); err != nil {
+	if ok, err := s.productRolesAreTicketing(); err != nil {
 		return err
 	} else if !ok {
-		if err := s.rebuildProjectMembersRoleConstraint(); err != nil {
+		if err := s.rebuildProductMembersRoleConstraint(); err != nil {
 			return err
 		}
 	}
-	if _, err := s.db.Exec(`UPDATE project_members SET role = 'agent' WHERE role = 'developer'`); err != nil {
+	if _, err := s.db.Exec(`UPDATE product_members SET role = 'agent' WHERE role = 'developer'`); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`UPDATE project_members SET role = 'customer' WHERE role = 'reporter'`); err != nil {
+	if _, err := s.db.Exec(`UPDATE product_members SET role = 'customer' WHERE role = 'reporter'`); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`UPDATE issues SET status = 'assigned' WHERE status IN ('acknowledged', 'confirmed', 'open', 'pending')`); err != nil {
@@ -676,7 +676,7 @@ func (s *Store) migrate() error {
 
 func (s *Store) columnExists(table, column string) (bool, error) {
 	switch table {
-	case "users", "issues", "comments", "project_members":
+	case "users", "issues", "comments", "product_members":
 	default:
 		return false, fmt.Errorf("unsupported table %q", table)
 	}
@@ -740,9 +740,9 @@ func (s *Store) usersRolesAreCurrent() (bool, error) {
 		(strings.Contains(sqlText, "'customer'") || strings.Contains(sqlText, `"customer"`)), nil
 }
 
-func (s *Store) projectRolesAreTicketing() (bool, error) {
+func (s *Store) productRolesAreTicketing() (bool, error) {
 	var sqlText string
-	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_members'`).Scan(&sqlText); err != nil {
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'product_members'`).Scan(&sqlText); err != nil {
 		return false, err
 	}
 	return !strings.Contains(sqlText, "CHECK") || strings.Contains(sqlText, "'agent'") || strings.Contains(sqlText, `"agent"`), nil
@@ -789,7 +789,7 @@ func (s *Store) rebuildUsersRoleConstraint() error {
 	return tx.Commit()
 }
 
-func (s *Store) rebuildProjectMembersRoleConstraint() error {
+func (s *Store) rebuildProductMembersRoleConstraint() error {
 	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
 		return err
 	}
@@ -801,30 +801,30 @@ func (s *Store) rebuildProjectMembersRoleConstraint() error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`
-		CREATE TABLE project_members_new (
-			project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		CREATE TABLE product_members_new (
+			product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
 			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			role TEXT NOT NULL,
 			created_at TEXT NOT NULL,
-			PRIMARY KEY (project_id, user_id)
+			PRIMARY KEY (product_id, user_id)
 		)`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO project_members_new (project_id, user_id, role, created_at)
-		SELECT project_id, user_id,
+		INSERT INTO product_members_new (product_id, user_id, role, created_at)
+		SELECT product_id, user_id,
 		       CASE role WHEN 'developer' THEN 'agent' WHEN 'reporter' THEN 'customer' ELSE role END,
 		       created_at
-		FROM project_members`); err != nil {
+		FROM product_members`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DROP TABLE project_members`); err != nil {
+	if _, err := tx.Exec(`DROP TABLE product_members`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`ALTER TABLE project_members_new RENAME TO project_members`); err != nil {
+	if _, err := tx.Exec(`ALTER TABLE product_members_new RENAME TO product_members`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id)`); err != nil {
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_product_members_user ON product_members(user_id)`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -835,7 +835,7 @@ func (s *Store) rebuildEmailNotifications() error {
 		ALTER TABLE email_notifications RENAME TO email_notifications_old;
 		CREATE TABLE email_notifications (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+			product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
 			issue_id INTEGER REFERENCES issues(id) ON DELETE CASCADE,
 			user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 			recipient_email TEXT NOT NULL,
@@ -853,10 +853,10 @@ func (s *Store) rebuildEmailNotifications() error {
 			sent_at TEXT
 		);
 		INSERT INTO email_notifications (
-			id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+			id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 			status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		)
-		SELECT id, project_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications_old;
 		DROP TABLE email_notifications_old;
@@ -905,7 +905,7 @@ func normalizeGlobalRole(role string) string {
 	}
 }
 
-func normalizeProjectRole(role string) string {
+func normalizeProductRole(role string) string {
 	switch strings.TrimSpace(role) {
 	case "developer":
 		return "agent"
@@ -1113,7 +1113,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
 	created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS projects (
+CREATE TABLE IF NOT EXISTS products (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	key TEXT NOT NULL UNIQUE,
 	name TEXT NOT NULL,
@@ -1122,17 +1122,17 @@ CREATE TABLE IF NOT EXISTS projects (
 	updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS project_members (
-	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS product_members (
+	product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
 	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	role TEXT NOT NULL,
 	created_at TEXT NOT NULL,
-	PRIMARY KEY (project_id, user_id)
+	PRIMARY KEY (product_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS issues (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
 	number INTEGER NOT NULL,
 	title TEXT NOT NULL,
 	description TEXT NOT NULL DEFAULT '',
@@ -1148,7 +1148,7 @@ CREATE TABLE IF NOT EXISTS issues (
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	closed_at TEXT,
-	UNIQUE (project_id, number)
+	UNIQUE (product_id, number)
 );
 
 CREATE TABLE IF NOT EXISTS comments (
@@ -1175,7 +1175,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 CREATE TABLE IF NOT EXISTS webhooks (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
 	name TEXT NOT NULL,
 	url TEXT NOT NULL,
 	secret TEXT NOT NULL,
@@ -1191,7 +1191,7 @@ CREATE TABLE IF NOT EXISTS webhooks (
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	webhook_id INTEGER NOT NULL,
-	project_id INTEGER,
+	product_id INTEGER,
 	event TEXT NOT NULL,
 	issue_id INTEGER,
 	status_code INTEGER,
@@ -1202,7 +1202,7 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 
 CREATE TABLE IF NOT EXISTS email_notifications (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
 	issue_id INTEGER REFERENCES issues(id) ON DELETE CASCADE,
 	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	recipient_email TEXT NOT NULL,
@@ -1220,13 +1220,13 @@ CREATE TABLE IF NOT EXISTS email_notifications (
 	sent_at TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_issues_project_updated ON issues(project_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_issues_product_updated ON issues(product_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_product_members_user ON product_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_comment ON attachments(comment_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_storage ON attachments(storage_key);
-CREATE INDEX IF NOT EXISTS idx_webhooks_project ON webhooks(project_id);
+CREATE INDEX IF NOT EXISTS idx_webhooks_product ON webhooks(product_id);
 CREATE INDEX IF NOT EXISTS idx_account_links_user_purpose ON account_links(user_id, purpose, used_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_user_id, created_at);
