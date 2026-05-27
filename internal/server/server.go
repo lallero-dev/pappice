@@ -174,7 +174,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/products", s.handleProducts)
 	s.mux.HandleFunc("/api/products/", s.handleProductByID)
 	s.mux.HandleFunc("/api/tickets", s.handleTickets)
-	s.mux.HandleFunc("/api/tickets/", s.handleTicketByID)
+	s.mux.HandleFunc("/api/tickets/", s.handleTicketPath)
 	s.mux.HandleFunc("/api/attachments/", s.handleAttachmentByID)
 	s.mux.HandleFunc("/api/users", s.handleUsers)
 	s.mux.HandleFunc("/api/users/", s.handleUserByID)
@@ -971,7 +971,7 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleTicketByID(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTicketPath(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireAuth(w, r)
 	if !ok {
 		return
@@ -979,6 +979,10 @@ func (s *Server) handleTicketByID(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tickets/"), "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
+		return
+	}
+	if len(parts) == 2 && parts[0] == "key" {
+		s.handleTicketByKey(w, r, auth, parts[1])
 		return
 	}
 	id, err := strconv.ParseInt(parts[0], 10, 64)
@@ -1005,6 +1009,23 @@ func (s *Server) handleTicketByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+
+func (s *Server) handleTicketByKey(w http.ResponseWriter, r *http.Request, auth authContext, key string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	issue, err := s.store.GetIssueByKey(key)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	if !s.canReadIssue(auth.User, issue) {
+		respondError(w, http.StatusNotFound, "not found")
+		return
+	}
+	respondJSON(w, http.StatusOK, s.issueForUser(auth.User, issue))
 }
 
 func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth authContext, issue store.Issue) {

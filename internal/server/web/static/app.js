@@ -8,6 +8,7 @@ import {
   relativeTime,
   splitList
 } from "./components.js";
+import { createRouter } from "./router.js";
 
 defineComponents();
 
@@ -24,6 +25,12 @@ const TICKET_SORT_LABELS = {
   status: "Status",
   title: "Title"
 };
+const router = createRouter({
+  adminSections: ADMIN_SECTIONS,
+  defaultAdminSection: DEFAULT_ADMIN_SECTION,
+  productSections: PRODUCT_SECTIONS,
+  defaultProductSection: DEFAULT_PRODUCT_SECTION
+});
 
 const state = {
   issues: [],
@@ -57,6 +64,7 @@ const state = {
   productDetailId: null,
   ticketProductId: null,
   selectedId: null,
+  selectedIssue: null,
   renderedTicketDetailId: null,
   sort: {
     key: "created_at",
@@ -287,7 +295,7 @@ async function request(path, options = {}) {
 async function boot() {
   bindEvents();
   await loadHealth();
-  const route = accountLinkRoute();
+  const route = router.accountLinkRoute();
   if (route) {
     await loadAccountLinkRoute(route);
     return;
@@ -310,74 +318,26 @@ async function loadSession() {
   await enterApp();
 }
 
-function accountLinkRoute() {
-  const match = window.location.pathname.match(/^\/account\/(setup|reset)\/([^/]+)\/?$/);
-  if (!match) return null;
-  return {
-    purpose: match[1],
-    token: decodeURIComponent(match[2])
-  };
-}
-
-function parseAppRoute() {
-  const trailingSlash = window.location.pathname.length > 1 && window.location.pathname.endsWith("/");
-  const parts = window.location.pathname.split("/").filter(Boolean).map(decodeRoutePart);
-  if (parts.length === 0) return { view: "issues", normalize: true };
-  switch (parts[0]) {
-    case "tickets":
-      return { view: "issues", normalize: trailingSlash || parts.length !== 1 };
-    case "admin": {
-      const section = validAdminSection(parts[1]) ? parts[1] : DEFAULT_ADMIN_SECTION;
-      return { view: "admin", section, normalize: trailingSlash || parts.length !== 2 || section !== parts[1] };
-    }
-    case "products": {
-      if (parts.length === 1) {
-        return { view: "product", mode: "index", normalize: trailingSlash };
-      }
-      const productId = Number(parts[1] || 0);
-      const section = validProductSection(parts[2]) ? parts[2] : DEFAULT_PRODUCT_SECTION;
-      return {
-        view: "product",
-        mode: "detail",
-        productId,
-        section,
-        normalize: trailingSlash || !Number.isInteger(productId) || productId < 1 || parts.length !== 3 || section !== parts[2]
-      };
-    }
-    default:
-      return { view: "issues", normalize: true };
-  }
-}
-
-function decodeRoutePart(part) {
-  try {
-    return decodeURIComponent(part);
-  } catch {
-    return part;
-  }
-}
-
-async function applyRouteFromPath() {
+async function applyRoute(route = router.current()) {
   if (!state.user) return;
-  const route = parseAppRoute();
   if (route.view === "admin") {
     if (!isAdmin()) {
       switchView("issues", { updateRoute: false });
-      updateRoutePath({ replace: true });
+      syncRoute({ replace: true });
       return;
     }
-    state.adminSection = route.section;
+    state.adminSection = route.adminSection;
     switchView("admin", { updateRoute: false });
-    updateRoutePath({ replace: route.normalize });
+    syncRoute({ replace: route.normalize });
     return;
   }
   if (route.view === "product") {
-    if (route.mode === "index") {
+    if (route.productMode === "index") {
       if (canAccessProductsView()) {
         state.productMode = "index";
         state.productDetailId = null;
         switchView("product", { updateRoute: false });
-        updateRoutePath({ replace: route.normalize });
+        syncRoute({ replace: route.normalize });
         return;
       }
     } else {
@@ -385,39 +345,57 @@ async function applyRouteFromPath() {
       if (product && canManageProduct(product.id)) {
         state.productMode = "detail";
         state.productDetailId = product.id;
-        state.productSection = route.section;
+        state.productSection = route.productSection;
         updateProductActions();
         switchView("product", { updateRoute: false });
-        updateRoutePath({ replace: route.normalize });
+        syncRoute({ replace: route.normalize });
         return;
       }
     }
     switchView("issues", { updateRoute: false });
-    updateRoutePath({ replace: true });
+    syncRoute({ replace: true });
     return;
   }
   switchView("issues", { updateRoute: false });
-  updateRoutePath({ replace: route.normalize });
+  const selected = await applyTicketRouteSelection(route.ticketKey);
+  syncRoute({ replace: route.normalize || (Boolean(route.ticketKey) && !selected) });
 }
 
-function updateRoutePath({ replace = false } = {}) {
+function syncRoute({ replace = false } = {}) {
   if (!state.user) return;
-  const nextPath = routePathForState();
-  if (window.location.pathname === nextPath && window.location.search === "" && window.location.hash === "") return;
-  if (replace) {
-    window.history.replaceState(null, "", nextPath);
-  } else {
-    window.history.pushState(null, "", nextPath);
-  }
+  router.navigate(routeForState(), { replace });
 }
 
-function routePathForState() {
-  if (state.view === "admin") return `/admin/${state.adminSection}`;
-  if (state.view === "product" && state.productMode === "detail" && state.productDetailId) {
-    return `/products/${state.productDetailId}/${state.productSection}`;
+function routeForState() {
+  const issue = selectedIssue();
+  return {
+    view: state.view,
+    adminSection: state.adminSection,
+    productMode: state.productMode,
+    productId: state.productDetailId,
+    productSection: state.productSection,
+    ticketKey: state.view === "issues" ? issue?.key || "" : ""
+  };
+}
+
+async function applyTicketRouteSelection(key) {
+  if (!key) {
+    setSelectedIssue(null, { updateRoute: false });
+    renderIssuesView();
+    return true;
   }
-  if (state.view === "product") return "/products";
-  return "/tickets";
+  let issue = state.issues.find((item) => item.key === key);
+  try {
+    if (!issue) issue = await request(`/api/tickets/key/${encodeURIComponent(key)}`);
+    setSelectedIssue(issue, { updateRoute: false });
+    return true;
+  } catch (error) {
+    setSelectedIssue(null, { updateRoute: false });
+    showError(error);
+    return false;
+  } finally {
+    renderIssuesView();
+  }
 }
 
 async function loadAccountLinkRoute(route) {
@@ -485,13 +463,14 @@ async function enterApp() {
     renderAssigneeFilter();
   }
   await loadProducts();
-  await applyRouteFromPath();
+  await applyRoute();
 }
 
 function showAuth(mode) {
   state.user = null;
   state.csrf = "";
   state.selectedId = null;
+  state.selectedIssue = null;
   document.body.classList.remove("app-mode");
   clearAppAlert();
   clearAuthError();
@@ -619,8 +598,11 @@ async function loadIssues({ renderDetail = true } = {}) {
   state.issues = payload.tickets || [];
   state.issueCounts = countIssues(countsPayload.tickets || []);
   const previousSelectedId = state.selectedId;
-  if (state.selectedId && !state.issues.some((issue) => issue.id === state.selectedId)) {
-    state.selectedId = null;
+  const listedSelection = state.issues.find((issue) => issue.id === state.selectedId);
+  if (listedSelection) {
+    state.selectedIssue = listedSelection;
+  } else if (state.selectedId && !state.selectedIssue) {
+    setSelectedIssue(null, { updateRoute: false });
   }
   if (renderDetail || state.selectedId !== previousSelectedId) {
     renderIssuesView();
@@ -965,7 +947,7 @@ function renderIssueList() {
     row.className = "issue-row";
     row.classList.toggle("active", issue.id === state.selectedId);
     row.addEventListener("click", () => {
-      state.selectedId = state.selectedId === issue.id ? null : issue.id;
+      setSelectedIssue(state.selectedId === issue.id ? null : issue);
       renderIssuesView();
     });
     const product = issueProductParts(issue);
@@ -1140,7 +1122,7 @@ async function createTicketFromForm(data, form, fallbackProductId) {
   if (createdStatus && !state.filters.statuses.includes(createdStatus)) {
     state.filters.statuses = [createdStatus];
   }
-  state.selectedId = created.id;
+  setSelectedIssue(created);
   await loadProducts();
 }
 
@@ -1581,7 +1563,7 @@ async function switchAdminSection(section) {
   if (!isAdmin()) return;
   state.adminSection = validAdminSection(section) ? section : DEFAULT_ADMIN_SECTION;
   renderAdminSections();
-  if (state.view === "admin") updateRoutePath();
+  if (state.view === "admin") syncRoute();
   await loadAdminSection(state.adminSection);
 }
 
@@ -1616,7 +1598,7 @@ function renderProductsView() {
 async function switchProductSection(section) {
   state.productSection = validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION;
   renderProductSections();
-  if (state.view === "product") updateRoutePath();
+  if (state.view === "product") syncRoute();
   if (state.productMode === "detail" && state.productDetailId && canManageProduct(state.productDetailId)) {
     await loadProductSection(state.productSection);
   }
@@ -2183,11 +2165,14 @@ function bindTicketAutosave(form, issue) {
 }
 
 async function saveTicketPatch(issue, patch) {
-  return request(`/api/tickets/${issue.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  const updated = await request(`/api/tickets/${issue.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  if (state.selectedId === updated.id) setSelectedIssue(updated, { updateRoute: false });
+  return updated;
 }
 
 function replaceIssue(updated) {
   state.issues = state.issues.map((issue) => issue.id === updated.id ? updated : issue);
+  if (state.selectedId === updated.id) state.selectedIssue = updated;
 }
 
 function bindCommentComposer(form, issue) {
@@ -2239,6 +2224,9 @@ async function sendTicketComment(issue, composer) {
   } else {
     await request(`/api/tickets/${issue.id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   }
+  const updated = await request(`/api/tickets/${issue.id}`);
+  setSelectedIssue(updated, { updateRoute: false });
+  replaceIssue(updated);
   await loadIssues();
 }
 
@@ -3024,7 +3012,7 @@ function bindEvents() {
       state.user = payload.user || null;
       state.accountLink = null;
       els.accountLinkForm.reset();
-      window.history.replaceState(null, "", "/");
+      router.navigate({ view: "issues" }, { replace: true });
       await enterApp();
     });
   });
@@ -3068,7 +3056,7 @@ function bindEvents() {
     if (!event.target.closest?.(".toolbar-menu")) closeTicketPopovers();
   });
   document.addEventListener("keydown", handleGlobalKeydown);
-  window.addEventListener("popstate", () => applyRouteFromPath().catch(showError));
+  router.listen((route) => applyRoute(route).catch(showError));
 
   els.issuesTab.addEventListener("click", () => switchView("issues"));
   els.productTab.addEventListener("click", () => openProductsIndex());
@@ -3089,7 +3077,7 @@ function bindEvents() {
   }, 180));
   els.productFilter.addEventListener("change", async () => {
     state.ticketProductId = Number(els.productFilter.value) || null;
-    state.selectedId = null;
+    setSelectedIssue(null);
     renderProductFilter();
     updateProductActions();
     await loadIssues();
@@ -3153,7 +3141,7 @@ function handleGlobalKeydown(event) {
 }
 
 function closeSelectedTicket() {
-  state.selectedId = null;
+  setSelectedIssue(null);
   renderIssuesView();
 }
 
@@ -3167,7 +3155,7 @@ function switchView(view, options = {}) {
   els.issuesTab.classList.toggle("active", view === "issues");
   els.adminTab.classList.toggle("active", view === "admin");
   els.productTab.classList.toggle("active", view === "product");
-  if (options.updateRoute !== false) updateRoutePath({ replace: Boolean(options.replaceRoute) });
+  if (options.updateRoute !== false) syncRoute({ replace: Boolean(options.replaceRoute) });
   if (view === "admin" && options.load !== false) loadAdmin().catch(showError);
   if (view === "product" && options.load !== false) loadProductAdmin().catch(showError);
 }
@@ -3208,7 +3196,14 @@ function currentProductDetail() {
 }
 
 function selectedIssue() {
-  return state.issues.find((issue) => issue.id === state.selectedId) || null;
+  return state.issues.find((issue) => issue.id === state.selectedId) ||
+    (state.selectedIssue?.id === state.selectedId ? state.selectedIssue : null);
+}
+
+function setSelectedIssue(issue, { updateRoute = true } = {}) {
+  state.selectedId = issue?.id || null;
+  state.selectedIssue = issue || null;
+  if (updateRoute) syncRoute();
 }
 
 function isAdmin() {

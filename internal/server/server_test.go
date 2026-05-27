@@ -802,6 +802,12 @@ func TestAdminProductIssueCommentAndNotificationFlow(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	issueID := decodeInt64(t, body, "id")
+	issueKey := decodeString(t, body, "key")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/key/"+issueKey, nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeInt64(t, body, "id") != issueID {
+		t.Fatalf("ticket by key returned wrong ticket: %s", body)
+	}
 
 	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, customerCookie, "", "")

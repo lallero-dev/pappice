@@ -37,6 +37,20 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if issue.ID != 1 {
 		t.Fatalf("issue ID = %d, want 1", issue.ID)
 	}
+	byKey, err := tracker.GetIssueByKey(issue.Key)
+	if err != nil {
+		t.Fatalf("get issue by key: %v", err)
+	}
+	if byKey.ID != issue.ID {
+		t.Fatalf("issue by key ID = %d, want %d", byKey.ID, issue.ID)
+	}
+	byLowerKey, err := tracker.GetIssueByKey("pme-1")
+	if err != nil {
+		t.Fatalf("get issue by lowercase key: %v", err)
+	}
+	if byLowerKey.ID != issue.ID {
+		t.Fatalf("issue by lowercase key ID = %d, want %d", byLowerKey.ID, issue.ID)
+	}
 
 	status := "assigned"
 	assignee := "alice"

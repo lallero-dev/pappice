@@ -85,8 +85,9 @@ async function main() {
   await addCustomerToProduct(page, selectedProductID);
   await verifyProductRouteReload(page, selectedProductID);
   await completeCustomerSetup(page, setupLink);
-  await createCustomerTicket(page);
+  const customerTicketKey = await createCustomerTicket(page);
   await verifyFixedTicketLayout(page);
+  await verifyTicketHashRoute(page, customerTicketKey);
   await logout(page);
   await loginAsAdmin(page);
   await staffReplyAndResolve(page);
@@ -317,7 +318,7 @@ async function completeCustomerSetup(cdp, setupLink) {
 }
 
 async function createCustomerTicket(cdp) {
-  await runInPage(cdp, async (input) => {
+  return runInPage(cdp, async (input) => {
     const { isScrolledToBottom, modalRoot, setValue, waitFor } = pageTools();
     await waitFor(() => document.querySelector("#newIssueButton") && !document.querySelector("#newIssueButton").hidden, "new ticket button");
     document.querySelector("#newIssueButton").click();
@@ -379,8 +380,26 @@ async function createCustomerTicket(cdp) {
     if (replyInput && getComputedStyle(replyInput).resize !== "none") {
       throw new Error("reply composer textarea should not be resizable");
     }
-    return true;
+    await waitFor(() => /^#[A-Z][A-Z0-9]{1,15}-[1-9][0-9]*$/.test(window.location.hash), "ticket hash route after create");
+    return decodeURIComponent(window.location.hash.slice(1));
   }, ticket);
+}
+
+async function verifyTicketHashRoute(cdp, ticketKey) {
+  await cdp.send("Page.reload", { ignoreCache: true });
+  await waitForDocumentReady(cdp);
+  await runInPage(cdp, async ({ ticketKey: expectedKey, title }) => {
+    const { waitFor } = pageTools();
+    await waitFor(() => {
+      const pane = document.querySelector("#ticketDetailPane");
+      return window.location.pathname === "/tickets" &&
+        decodeURIComponent(window.location.hash.slice(1)) === expectedKey &&
+        pane?.textContent.includes(title) &&
+        document.querySelector("#issueList .issue-row.active");
+    }, "ticket hash route reload", 12000);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitFor(() => window.location.hash === "" && document.querySelector("#ticketDetailPane")?.textContent.includes("No ticket selected"), "ticket hash clears on close");
+  }, { ticketKey, title: ticket.title });
 }
 
 async function verifyFixedTicketLayout(cdp) {

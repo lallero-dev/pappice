@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -195,6 +196,22 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 
 func (s *Store) GetIssue(id int64) (Issue, error) {
 	return s.getIssue(id)
+}
+
+func (s *Store) GetIssueByKey(key string) (Issue, error) {
+	productKey, number, ok := parseIssueKey(key)
+	if !ok {
+		return Issue{}, ErrNotFound
+	}
+	row := s.db.QueryRow(issueSelectSQL+` WHERE p.key = ? AND i.number = ?`, productKey, number)
+	issue, err := scanIssue(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Issue{}, ErrNotFound
+	}
+	if err != nil {
+		return Issue{}, err
+	}
+	return issue, s.hydrateIssue(&issue)
 }
 
 func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
@@ -568,6 +585,18 @@ func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 		}
 	}
 	return attachmentRows.Err()
+}
+
+func parseIssueKey(key string) (string, int64, bool) {
+	parts := strings.Split(strings.ToUpper(strings.TrimSpace(key)), "-")
+	if len(parts) != 2 || !productKeyPattern.MatchString(parts[0]) {
+		return "", 0, false
+	}
+	number, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || number < 1 {
+		return "", 0, false
+	}
+	return parts[0], number, true
 }
 
 const issueSelectSQL = `
