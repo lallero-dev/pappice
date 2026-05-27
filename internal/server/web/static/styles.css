@@ -1093,6 +1093,7 @@ button:focus-visible {
   grid-auto-rows: max-content;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: none;
   padding: 14px 12px;
   scroll-behavior: smooth;
   overscroll-behavior: contain;

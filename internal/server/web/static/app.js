@@ -1096,17 +1096,26 @@ function renderTicketDetail() {
 function scrollTicketConversationToBottom(root, { smooth = false } = {}) {
   const conversation = root.querySelector(".conversation-stream");
   if (!conversation) return;
-  requestAnimationFrame(() => {
-    const behavior = smooth && !prefersReducedMotion() ? "smooth" : "auto";
-    if (behavior === "smooth") {
-      conversation.scrollTo({ top: conversation.scrollHeight, behavior });
+  const behavior = smooth && !prefersReducedMotion() ? "smooth" : "auto";
+  const scroll = (mode = behavior) => {
+    const top = Math.max(0, conversation.scrollHeight - conversation.clientHeight);
+    if (mode === "smooth") {
+      conversation.scrollTo({ top, behavior: "smooth" });
       return;
     }
     const previousBehavior = conversation.style.scrollBehavior;
     conversation.style.scrollBehavior = "auto";
-    conversation.scrollTop = conversation.scrollHeight;
+    conversation.scrollTop = top;
     conversation.style.scrollBehavior = previousBehavior;
+  };
+  requestAnimationFrame(() => {
+    scroll();
+    requestAnimationFrame(() => scroll(behavior === "smooth" ? "smooth" : "auto"));
   });
+  window.setTimeout(() => scroll("auto"), smooth ? 450 : 80);
+  for (const image of conversation.querySelectorAll("img")) {
+    if (!image.complete) image.addEventListener("load", () => scroll("auto"), { once: true });
+  }
 }
 
 function prefersReducedMotion() {
