@@ -484,6 +484,13 @@ async function staffReplyAndResolve(cdp) {
     const transfer = new DataTransfer();
     transfer.items.add(new File(["first attachment"], "e2e-first.txt", { type: "text/plain" }));
     transfer.items.add(new File(["second attachment"], "e2e-second.txt", { type: "text/plain" }));
+    transfer.items.add(new File([new Uint8Array([
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00,
+      0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0xff, 0xff, 0xff, 0x2c, 0x00, 0x00, 0x00, 0x00,
+      0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44,
+      0x01, 0x00, 0x3b
+    ])], "e2e-image.gif", { type: "image/gif" }));
     const cancelTransfer = new DataTransfer();
     cancelTransfer.items.add(new File(["cancelled attachment"], "e2e-cancelled.txt", { type: "text/plain" }));
     conversationDropTarget.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: cancelTransfer }));
@@ -506,6 +513,7 @@ async function staffReplyAndResolve(cdp) {
       const chipNames = [...composer.querySelectorAll(".attachment-preview-chip")].map((chip) => chip.textContent);
       return chipNames.some((name) => name.includes("e2e-first.txt")) &&
         chipNames.some((name) => name.includes("e2e-second.txt")) &&
+        chipNames.some((name) => name.includes("e2e-image.gif")) &&
         !conversationPane.classList.contains("conversation-drop-active");
     }, "reply attachment chips after conversation drop");
     const visibility = detail.querySelector("[name='visibility']");
@@ -535,6 +543,10 @@ async function staffReplyAndResolve(cdp) {
         throw new Error("staff reply should be visually aligned to the right");
       }
     }
+    await waitFor(() => {
+      const preview = document.querySelector(".attachment-image-preview");
+      return preview?.getAttribute("src")?.includes("?preview=1");
+    }, "image attachment inline preview");
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";

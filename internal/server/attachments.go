@@ -128,10 +128,24 @@ func (s *Server) handleAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	w.Header().Set("Content-Type", defaultString(attachment.ContentType, "application/octet-stream"))
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": attachment.Filename}))
+	contentType := defaultString(attachment.ContentType, "application/octet-stream")
+	disposition := "attachment"
+	if r.URL.Query().Get("preview") == "1" && isInlinePreviewImage(contentType) {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": attachment.Filename}))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, attachment.Filename, stat.ModTime(), file)
+}
+
+func isInlinePreviewImage(contentType string) bool {
+	switch cleanContentType(contentType) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) canReadAttachment(user store.User, issue store.Issue, attachment store.Attachment) bool {

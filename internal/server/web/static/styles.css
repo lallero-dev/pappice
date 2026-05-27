@@ -1415,6 +1415,7 @@ button:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .message-bubble .attachment-list {
@@ -1423,6 +1424,31 @@ button:focus-visible {
 
 .attachment-list.empty {
   display: none;
+}
+
+.attachment-preview-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  width: 100%;
+}
+
+.attachment-image-link {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.attachment-image-preview {
+  aspect-ratio: 4 / 3;
+  background: #edf2f7;
+  display: block;
+  max-height: 220px;
+  object-fit: cover;
+  width: 100%;
 }
 
 .attachment-link {

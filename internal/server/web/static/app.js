@@ -2396,6 +2396,10 @@ function commentVisibilityControl(select) {
 function attachmentList(attachments) {
   if (!attachments || attachments.length === 0) return el("div", { className: "attachment-list empty" });
   const list = el("div", { className: "attachment-list" });
+  const previews = attachments.filter(isPreviewableImageAttachment);
+  if (previews.length > 0) {
+    list.append(el("div", { className: "attachment-preview-grid" }, previews.map(imageAttachmentPreview)));
+  }
   for (const attachment of attachments) {
     list.append(el("a", {
       className: "attachment-link",
@@ -2407,6 +2411,29 @@ function attachmentList(attachments) {
     ]));
   }
   return list;
+}
+
+function isPreviewableImageAttachment(attachment) {
+  return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(String(attachment.content_type || "").toLowerCase());
+}
+
+function imageAttachmentPreview(attachment) {
+  const url = `/api/attachments/${attachment.id}`;
+  const filename = attachment.filename || "Attached image";
+  return el("a", {
+    className: "attachment-image-link",
+    href: url,
+    download: filename,
+    title: filename
+  }, [
+    el("img", {
+      className: "attachment-image-preview",
+      src: `${url}?preview=1`,
+      alt: filename,
+      loading: "lazy",
+      decoding: "async"
+    })
+  ]);
 }
 
 function formatBytes(value) {

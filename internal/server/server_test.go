@@ -1518,20 +1518,56 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 		Field:    "attachments",
 		Filename: "request.txt",
 		Body:     "customer log content",
+	}, {
+		Field:    "attachments",
+		Filename: "pixel.gif",
+		Body:     "GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
 	}}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	var created store.Issue
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("decode created issue: %v", err)
 	}
-	if len(created.Attachments) != 1 || created.Attachments[0].Filename != "request.txt" {
+	if len(created.Attachments) != 2 {
 		t.Fatalf("created attachments = %#v body=%s", created.Attachments, body)
 	}
+	var textAttachmentID, imageAttachmentID int64
+	for _, attachment := range created.Attachments {
+		switch attachment.Filename {
+		case "request.txt":
+			textAttachmentID = attachment.ID
+		case "pixel.gif":
+			imageAttachmentID = attachment.ID
+			if attachment.ContentType != "image/gif" {
+				t.Fatalf("image attachment content type = %q", attachment.ContentType)
+			}
+		}
+	}
+	if textAttachmentID == 0 || imageAttachmentID == 0 {
+		t.Fatalf("created attachment ids text=%d image=%d attachments=%#v", textAttachmentID, imageAttachmentID, created.Attachments)
+	}
 
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(created.Attachments[0].ID), nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(textAttachmentID), nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("customer log content")) || !strings.Contains(resp.Header.Get("Content-Disposition"), "request.txt") {
 		t.Fatalf("download response headers=%v body=%s", resp.Header, body)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Disposition"), "attachment") {
+		t.Fatalf("download disposition = %q", resp.Header.Get("Content-Disposition"))
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(imageAttachmentID)+"?preview=1", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !strings.Contains(resp.Header.Get("Content-Type"), "image/gif") ||
+		!strings.Contains(resp.Header.Get("Content-Disposition"), "inline") ||
+		!bytes.HasPrefix(body, []byte("GIF89a")) {
+		t.Fatalf("image preview headers=%v body prefix=%q", resp.Header, body[:min(len(body), 8)])
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/attachments/"+itoa(textAttachmentID)+"?preview=1", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !strings.Contains(resp.Header.Get("Content-Disposition"), "attachment") {
+		t.Fatalf("text preview disposition should stay attachment, got %q", resp.Header.Get("Content-Disposition"))
 	}
 
 	resp, body = doMultipart(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]string{
