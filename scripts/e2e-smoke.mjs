@@ -127,7 +127,7 @@ async function selectFirstProduct(cdp) {
     }, "product filter options");
     const firstProduct = [...select.options].find((item) => item.value);
     setValue(select, firstProduct.value);
-    await waitFor(() => document.querySelector("#projectTab") && !document.querySelector("#projectTab").hidden, "product tab");
+    await waitFor(() => document.querySelector("#projectTab") && !document.querySelector("#projectTab").hidden, "products tab");
     return firstProduct.value;
   });
 }
@@ -140,10 +140,8 @@ async function createCustomerAccount(cdp) {
       const view = document.querySelector("#adminView");
       return view && !view.hidden;
     }, "admin view");
-    await waitFor(() => window.location.pathname === "/admin/products", "admin products route");
-    document.querySelector("[data-admin-section='accounts']").click();
-    await waitFor(() => document.querySelector("#userList")?.textContent.includes("admin"), "accounts admin section");
     await waitFor(() => window.location.pathname === "/admin/accounts", "admin accounts route");
+    await waitFor(() => document.querySelector("#userList")?.textContent.includes("admin"), "accounts admin section");
 
     document.querySelector("#addUserButton").click();
     const root = await waitFor(() => {
@@ -199,9 +197,6 @@ async function addCustomerToProduct(cdp, productID) {
   await runInPage(cdp, async ({ productID: selectedProductID, customerUsername }) => {
     const { modalRoot, setValue, waitFor } = pageTools();
     const productFilter = document.querySelector("#productFilter");
-    if (productFilter.value !== selectedProductID) {
-      setValue(productFilter, selectedProductID);
-    }
     const selectedProductLabel = [...productFilter.options].find((option) => option.value === selectedProductID)?.textContent || "";
     const separatorIndex = selectedProductLabel.indexOf(" / ");
     const selectedProductKey = separatorIndex > -1 ? selectedProductLabel.slice(0, separatorIndex) : selectedProductLabel;
@@ -210,7 +205,12 @@ async function addCustomerToProduct(cdp, productID) {
     await waitFor(() => {
       const view = document.querySelector("#projectView");
       return view && !view.hidden;
-    }, "product admin view");
+    }, "products view");
+    await waitFor(() => window.location.pathname === "/products", "products route");
+    const openButton = await waitFor(() => {
+      return document.querySelector(`[data-product-open='${selectedProductID}']`);
+    }, "product index open button");
+    openButton.click();
     await waitFor(() => window.location.pathname === `/products/${selectedProductID}/members`, "product members route");
     await waitFor(() => {
       const title = document.querySelector("#projectContextTitle")?.textContent.trim();
@@ -230,11 +230,44 @@ async function addCustomerToProduct(cdp, productID) {
     const userSelect = root.querySelector("[name='user_id']");
     const userOption = [...userSelect.options].find((option) => option.textContent.includes(customerUsername));
     if (!userOption) throw new Error(`customer ${customerUsername} missing from member account select`);
+    const customerUserID = userOption.value;
     setValue(userSelect, userOption.value);
     setValue(root.querySelector("[name='role']"), "customer");
     root.querySelector("form").requestSubmit();
     await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "add member modal closed", 12000);
-    await waitFor(() => document.querySelector("#memberList")?.textContent.includes(customerUsername), "customer product membership");
+    const memberRow = await waitFor(() => document.querySelector(`[data-member-user='${customerUserID}']`), "customer product membership");
+    if ([...memberRow.querySelectorAll("button")].some((button) => button.textContent.trim() === "Remove")) {
+      throw new Error("member removal should be inside the edit member modal");
+    }
+    memberRow.querySelector("button").click();
+    const editRoot = await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open] [name='role']") && rootNode?.querySelector("[data-member-action='delete']") ? rootNode : null;
+    }, "edit member modal");
+    setValue(editRoot.querySelector("[name='role']"), "viewer");
+    editRoot.querySelector("form").requestSubmit();
+    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "edit member modal closed", 12000);
+    await waitFor(() => document.querySelector(`[data-member-user='${customerUserID}']`)?.textContent.includes("Viewer"), "member role update");
+    document.querySelector(`[data-member-user='${customerUserID}'] button`).click();
+    const restoreRoot = await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open] [name='role']") && rootNode?.querySelector("[data-member-action='delete']") ? rootNode : null;
+    }, "restore member modal");
+    setValue(restoreRoot.querySelector("[name='role']"), "customer");
+    restoreRoot.querySelector("form").requestSubmit();
+    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "restore member modal closed", 12000);
+    await waitFor(() => document.querySelector(`[data-member-user='${customerUserID}']`)?.textContent.includes("Customer"), "member role restored");
+    document.querySelector(`[data-member-user='${customerUserID}'] button`).click();
+    const deleteRoot = await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open] [name='role']") && rootNode?.querySelector("[data-member-action='delete']") ? rootNode : null;
+    }, "member delete modal");
+    deleteRoot.querySelector("[data-member-action='delete']").click();
+    await waitFor(() => deleteRoot.querySelector(".account-confirm.danger-zone")?.textContent.includes("Remove member"), "member delete confirmation");
+    deleteRoot.querySelector(".account-confirm .ghost").click();
+    await waitFor(() => !deleteRoot.querySelector(".account-confirm"), "member delete confirmation dismissed");
+    document.querySelector("#modalHost").close();
+    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "member edit modal closed");
     document.querySelector("[data-product-section='webhooks']").click();
     await waitFor(() => window.location.pathname === `/products/${selectedProductID}/webhooks`, "product webhooks route");
     await waitFor(() => {

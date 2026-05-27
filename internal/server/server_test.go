@@ -147,10 +147,17 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/tickets/", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/admin/products", nil, nil, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/admin/accounts", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Pappice")) {
 		t.Fatalf("admin route should serve the main app: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/admin/products", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/products", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Pappice")) {
+		t.Fatalf("products route should serve the main app: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/products/1", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)

@@ -18,7 +18,7 @@
       </div>
       <nav class="topnav" id="topNav" hidden>
         <button class="nav-button active" id="issuesTab" type="button">Tickets</button>
-        <button class="nav-button" id="projectTab" type="button">Product</button>
+        <button class="nav-button" id="projectTab" type="button">Products</button>
       </nav>
       <div class="topbar-actions">
         <button class="nav-button topbar-admin-button" id="adminTab" type="button" hidden>Admin</button>
@@ -139,10 +139,6 @@
       <section class="admin-view" id="adminView" hidden>
         <div class="admin-shell">
           <aside class="admin-sidebar" aria-label="Admin sections">
-            <button class="admin-side-button" data-admin-section="products" type="button">
-              <strong>Products</strong>
-              <span>Support areas</span>
-            </button>
             <button class="admin-side-button" data-admin-section="accounts" type="button">
               <strong>Staff & Customers</strong>
               <span>Accounts and access</span>
@@ -170,15 +166,7 @@
           </aside>
 
           <div class="admin-section-stage">
-            <section class="admin-panel admin-section-panel" data-admin-panel="products">
-              <div class="panel-head">
-                <h2>Products</h2>
-                <button class="ghost-button" id="addProjectButton" type="button">New</button>
-              </div>
-              <div class="admin-list" id="projectList"></div>
-            </section>
-
-            <section class="admin-panel admin-section-panel" data-admin-panel="accounts" hidden>
+            <section class="admin-panel admin-section-panel" data-admin-panel="accounts">
               <div class="panel-head">
                 <h2>Staff & Customers</h2>
                 <button class="ghost-button" id="addUserButton" type="button">New</button>
@@ -256,52 +244,62 @@
       </section>
 
       <section class="admin-view" id="projectView" hidden>
-        <header class="project-context" aria-labelledby="projectContextTitle">
-          <div class="project-context-main">
-            <p class="project-context-kicker">Product settings</p>
-            <h1 id="projectContextTitle">Product</h1>
-            <div class="project-context-meta" id="projectContextMeta"></div>
+        <section class="admin-panel" id="productIndexPanel">
+          <div class="panel-head">
+            <h2>Products</h2>
+            <button class="ghost-button" id="addProjectButton" type="button">New</button>
           </div>
-        </header>
-        <div class="admin-shell product-shell">
-          <aside class="admin-sidebar" aria-label="Product sections">
-            <button class="admin-side-button" data-product-section="members" type="button">
-              <strong>Members</strong>
-              <span>Access and roles</span>
-            </button>
-            <button class="admin-side-button" data-product-section="webhooks" type="button">
-              <strong>Webhooks</strong>
-              <span>Product integrations</span>
-            </button>
-            <button class="admin-side-button" data-product-section="deliveries" type="button">
-              <strong>Deliveries</strong>
-              <span>Recent webhook attempts</span>
-            </button>
-          </aside>
+          <div class="admin-list product-index-list" id="productIndexList"></div>
+        </section>
 
-          <div class="admin-section-stage">
-            <section class="admin-panel product-section-panel" data-product-panel="members">
-              <div class="panel-head">
-                <h2>Members</h2>
-                <button class="ghost-button" id="addMemberButton" type="button">Add</button>
-              </div>
-              <div class="admin-list" id="memberList"></div>
-            </section>
+        <div id="productDetailView" hidden>
+          <header class="project-context" aria-labelledby="projectContextTitle">
+            <div class="project-context-main">
+              <p class="project-context-kicker">Product settings</p>
+              <h1 id="projectContextTitle">Product</h1>
+              <div class="project-context-meta" id="projectContextMeta"></div>
+            </div>
+          </header>
+          <div class="admin-shell product-shell">
+            <aside class="admin-sidebar" aria-label="Product sections">
+              <button class="admin-side-button" data-product-section="members" type="button">
+                <strong>Members</strong>
+                <span>Access and roles</span>
+              </button>
+              <button class="admin-side-button" data-product-section="webhooks" type="button">
+                <strong>Webhooks</strong>
+                <span>Product integrations</span>
+              </button>
+              <button class="admin-side-button" data-product-section="deliveries" type="button">
+                <strong>Deliveries</strong>
+                <span>Recent webhook attempts</span>
+              </button>
+            </aside>
 
-            <section class="admin-panel product-section-panel" data-product-panel="webhooks" hidden>
-              <div class="panel-head">
-                <h2>Product Webhooks</h2>
-                <button class="ghost-button" id="addWebhookButton" type="button">New</button>
-              </div>
-              <div class="admin-list" id="webhookList"></div>
-            </section>
+            <div class="admin-section-stage">
+              <section class="admin-panel product-section-panel" data-product-panel="members">
+                <div class="panel-head">
+                  <h2>Members</h2>
+                  <button class="ghost-button" id="addMemberButton" type="button">Add</button>
+                </div>
+                <div class="admin-list" id="memberList"></div>
+              </section>
 
-            <section class="admin-panel product-section-panel" data-product-panel="deliveries" hidden>
-              <div class="panel-head">
-                <h2>Deliveries</h2>
-              </div>
-              <div class="admin-list" id="deliveryList"></div>
-            </section>
+              <section class="admin-panel product-section-panel" data-product-panel="webhooks" hidden>
+                <div class="panel-head">
+                  <h2>Product Webhooks</h2>
+                  <button class="ghost-button" id="addWebhookButton" type="button">New</button>
+                </div>
+                <div class="admin-list" id="webhookList"></div>
+              </section>
+
+              <section class="admin-panel product-section-panel" data-product-panel="deliveries" hidden>
+                <div class="panel-head">
+                  <h2>Deliveries</h2>
+                </div>
+                <div class="admin-list" id="deliveryList"></div>
+              </section>
+            </div>
           </div>
         </div>
       </section>

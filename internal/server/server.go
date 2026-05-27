@@ -209,12 +209,12 @@ func isAppIndexPath(path string) bool {
 		path = strings.TrimRight(path, "/")
 	}
 	switch path {
-	case "/", "/tickets", "/admin":
+	case "/", "/tickets", "/admin", "/products":
 		return true
 	}
 	if strings.HasPrefix(path, "/admin/") {
 		switch strings.TrimPrefix(path, "/admin/") {
-		case "products", "accounts", "tokens", "webhooks", "email", "maintenance", "audit":
+		case "accounts", "tokens", "webhooks", "email", "maintenance", "audit":
 			return true
 		default:
 			return false

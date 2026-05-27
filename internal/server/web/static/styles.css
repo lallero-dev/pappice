@@ -1008,6 +1008,10 @@ button:focus-visible {
   padding: 7px;
 }
 
+.product-index-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .admin-row-main {
   min-width: 0;
   overflow: hidden;
