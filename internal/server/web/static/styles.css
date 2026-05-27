@@ -61,6 +61,16 @@ button:disabled {
   opacity: 0.6;
 }
 
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .topbar {
   align-items: center;
   background: #253746;
@@ -544,27 +554,188 @@ button:focus-visible {
 
 .ticket-list-toolbar {
   border-bottom: 1px solid var(--border-soft);
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr);
   padding: 10px;
 }
 
 .ticket-list-topbar {
-  align-items: end;
+  align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .ticket-list-toolbar .filter-control {
   gap: 4px;
 }
 
-.ticket-list-filter-row {
+.ticket-search-control {
+  min-width: 0;
+}
+
+.ticket-toolbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.toolbar-menu {
+  position: relative;
+}
+
+.toolbar-icon,
+.button-icon svg {
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
+.toolbar-icon-button,
+.toolbar-menu-button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: #26384a;
+  display: inline-flex;
+  gap: 7px;
+  justify-content: center;
+  min-height: 34px;
+  position: relative;
+}
+
+.toolbar-icon-button {
+  padding: 7px;
+  width: 36px;
+}
+
+.toolbar-menu-button {
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.toolbar-icon-button:hover,
+.toolbar-icon-button[aria-expanded="true"],
+.toolbar-menu-button:hover,
+.toolbar-menu-button[aria-expanded="true"] {
+  background: #f4f8fc;
+  border-color: #a9bfd3;
+}
+
+.toolbar-icon-button.active,
+.toolbar-menu-button.active {
+  background: #e9f2fb;
+  border-color: #9cc4e7;
+  color: var(--blue-dark);
+}
+
+.toolbar-button-badge {
+  align-items: center;
+  background: var(--blue);
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 4px;
+  position: absolute;
+  right: -6px;
+  top: -6px;
+}
+
+.ticket-toolbar-popover {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 260px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 7px);
+  z-index: 25;
+}
+
+.filter-popover {
+  min-width: min(320px, calc(100vw - 28px));
+}
+
+.filter-popover .status-filter-list {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.sort-popover {
+  min-width: 230px;
+}
+
+.popover-section {
+  display: grid;
+  gap: 7px;
+}
+
+.popover-section h3,
+.popover-section label {
+  color: #3b4856;
+  font-size: 12px;
+  font-weight: 750;
+  margin: 0;
+}
+
+.popover-clear-button {
+  justify-self: stretch;
+}
+
+.sort-menu-list {
+  display: grid;
+  gap: 2px;
+}
+
+.sort-menu-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  display: flex;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.sort-menu-item:hover {
+  background: #f3f6f9;
+}
+
+.sort-menu-item.active {
+  background: #edf6ff;
+  color: var(--blue-dark);
+  font-weight: 750;
+}
+
+.sort-menu-item.active::after {
+  content: "✓";
+  font-weight: 800;
+}
+
+.native-sort-select {
+  height: 1px;
+  left: 0;
+  min-height: 0;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 1px;
 }
 
 .issue-list {
@@ -1931,6 +2102,11 @@ button:focus-visible {
     overflow-x: auto;
   }
 
+  .filter-popover .status-filter-list {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
   .admin-sidebar {
     display: flex;
     overflow-x: auto;
@@ -1972,9 +2148,24 @@ button:focus-visible {
   .detail-controls,
   .ticket-detail-grid,
   .ticket-list-topbar,
-  .ticket-list-filter-row,
   .admin-list-tools {
     grid-template-columns: 1fr;
+  }
+
+  .ticket-list-topbar {
+    align-items: stretch;
+  }
+
+  .ticket-toolbar-actions {
+    justify-content: stretch;
+  }
+
+  .ticket-toolbar-actions > .toolbar-menu {
+    flex: 1;
+  }
+
+  .ticket-toolbar-actions > .toolbar-menu > button {
+    width: 100%;
   }
 
   .status-filter-list {

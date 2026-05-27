@@ -17,6 +17,13 @@ const DEFAULT_PRODUCT_SECTION = "members";
 const PRODUCT_SECTIONS = [DEFAULT_PRODUCT_SECTION, "webhooks", "deliveries"];
 const DEFAULT_TICKET_STATUSES = ["new", "assigned"];
 const TICKET_AUTOSAVE_DELAY_MS = 450;
+const TICKET_SORT_LABELS = {
+  updated_at: "Updated",
+  created_at: "Created",
+  priority: "Priority",
+  status: "Status",
+  title: "Title"
+};
 
 const state = {
   issues: [],
@@ -135,8 +142,15 @@ const els = {
   issueList: document.querySelector("#issueList"),
   ticketDetailPane: document.querySelector("#ticketDetailPane"),
   searchInput: document.querySelector("#searchInput"),
+  ticketFilterButton: document.querySelector("#ticketFilterButton"),
+  ticketFilterBadge: document.querySelector("#ticketFilterBadge"),
+  ticketFilterPopover: document.querySelector("#ticketFilterPopover"),
+  clearTicketFiltersButton: document.querySelector("#clearTicketFiltersButton"),
   productFilter: document.querySelector("#productFilter"),
   assigneeFilter: document.querySelector("#assigneeFilter"),
+  ticketSortButton: document.querySelector("#ticketSortButton"),
+  ticketSortPopover: document.querySelector("#ticketSortPopover"),
+  issueSortLabel: document.querySelector("#issueSortLabel"),
   issueSortSelect: document.querySelector("#issueSortSelect"),
   statusFilterList: document.querySelector("#statusFilterList"),
   addProductButton: document.querySelector("#addProductButton"),
@@ -533,6 +547,25 @@ function closeProfileMenu() {
   els.profileButton?.setAttribute("aria-expanded", "false");
 }
 
+function toggleTicketPopover(popover, button) {
+  if (!popover || !button) return;
+  const open = popover.hidden;
+  closeTicketPopovers();
+  popover.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+}
+
+function closeTicketPopovers() {
+  for (const [popover, button] of [
+    [els.ticketFilterPopover, els.ticketFilterButton],
+    [els.ticketSortPopover, els.ticketSortButton]
+  ]) {
+    if (!popover || !button) continue;
+    popover.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  }
+}
+
 async function loadHealth() {
   const meta = await request("/api/health");
   state.meta.statuses = meta.statuses || [];
@@ -734,6 +767,7 @@ function renderProductFilter() {
   if (state.products.length === 0) {
     els.productFilter.append(new Option("No products", ""));
     els.productFilter.disabled = true;
+    renderTicketFilterButton();
     return;
   }
   els.productFilter.disabled = false;
@@ -742,6 +776,7 @@ function renderProductFilter() {
     els.productFilter.append(new Option(`${product.key} / ${product.name}`, String(product.id)));
   }
   els.productFilter.value = state.ticketProductId ? String(state.ticketProductId) : "";
+  renderTicketFilterButton();
 }
 
 function updateProductActions() {
@@ -777,6 +812,7 @@ function renderCounts() {
     });
     els.statusFilterList.append(button);
   }
+  renderTicketFilterButton();
 }
 
 function defaultStatusFilters() {
@@ -805,6 +841,7 @@ function renderAssigneeFilter() {
   }
   els.assigneeFilter.value = current;
   els.assigneeFilter.disabled = options.length <= 1 && !current;
+  renderTicketFilterButton();
 }
 
 function countIssues(issues) {
@@ -844,7 +881,29 @@ function emptyActions(actionLabel, onAction) {
 }
 
 function hasActiveTicketFilters() {
-  return Boolean(state.filters.q || state.filters.assignee || !sameStatuses(state.filters.statuses, defaultStatusFilters()));
+  return Boolean(
+    state.filters.q ||
+    state.ticketProductId ||
+    state.filters.assignee ||
+    !sameStatuses(state.filters.statuses, defaultStatusFilters())
+  );
+}
+
+function activeTicketFilterCount() {
+  let count = 0;
+  if (state.ticketProductId) count += 1;
+  if (state.filters.assignee) count += 1;
+  if (!sameStatuses(state.filters.statuses, defaultStatusFilters())) count += 1;
+  return count;
+}
+
+function renderTicketFilterButton() {
+  if (!els.ticketFilterButton || !els.ticketFilterBadge) return;
+  const count = activeTicketFilterCount();
+  els.ticketFilterButton.classList.toggle("active", count > 0);
+  els.ticketFilterBadge.hidden = count === 0;
+  els.ticketFilterBadge.textContent = String(count);
+  if (els.clearTicketFiltersButton) els.clearTicketFiltersButton.disabled = !hasActiveTicketFilters();
 }
 
 function sameStatuses(left, right) {
@@ -857,8 +916,11 @@ function clearTicketFilters() {
   state.filters.q = "";
   state.filters.assignee = "";
   state.filters.statuses = defaultStatusFilters();
+  state.ticketProductId = null;
   els.searchInput.value = "";
+  els.productFilter.value = "";
   els.assigneeFilter.value = "";
+  updateProductActions();
   renderCounts();
   loadIssues().catch(showError);
 }
@@ -931,12 +993,20 @@ function renderSortHeaders() {
   if (els.issueSortSelect) {
     els.issueSortSelect.value = `${state.sort.key}:${state.sort.dir}`;
   }
+  if (els.issueSortLabel) {
+    els.issueSortLabel.textContent = `By ${TICKET_SORT_LABELS[state.sort.key] || labelize(state.sort.key)}`;
+  }
   for (const button of document.querySelectorAll("[data-sort-key]")) {
     const active = button.dataset.sortKey === state.sort.key;
     button.classList.toggle("active", active);
     button.classList.toggle("desc", active && state.sort.dir === "desc");
     button.classList.toggle("asc", active && state.sort.dir === "asc");
     button.setAttribute("aria-sort", active ? (state.sort.dir === "desc" ? "descending" : "ascending") : "none");
+  }
+  for (const button of document.querySelectorAll("[data-sort-dir]")) {
+    const active = button.dataset.sortDir === state.sort.dir;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   }
 }
 
@@ -2978,10 +3048,24 @@ function bindEvents() {
   });
   els.profileButton.addEventListener("click", (event) => {
     event.stopPropagation();
+    closeTicketPopovers();
     toggleProfileMenu();
   });
+  els.ticketFilterButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeProfileMenu();
+    toggleTicketPopover(els.ticketFilterPopover, els.ticketFilterButton);
+  });
+  els.ticketSortButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeProfileMenu();
+    toggleTicketPopover(els.ticketSortPopover, els.ticketSortButton);
+  });
+  els.ticketFilterPopover.addEventListener("click", (event) => event.stopPropagation());
+  els.ticketSortPopover.addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("click", (event) => {
     if (!els.profileMenu.hidden && !els.profileMenu.contains(event.target)) closeProfileMenu();
+    if (!event.target.closest?.(".toolbar-menu")) closeTicketPopovers();
   });
   document.addEventListener("keydown", handleGlobalKeydown);
   window.addEventListener("popstate", () => applyRouteFromPath().catch(showError));
@@ -3000,6 +3084,7 @@ function bindEvents() {
 
   els.searchInput.addEventListener("input", debounce(() => {
     state.filters.q = els.searchInput.value.trim();
+    renderTicketFilterButton();
     loadIssues().catch(showError);
   }, 180));
   els.productFilter.addEventListener("change", async () => {
@@ -3011,9 +3096,29 @@ function bindEvents() {
   });
   els.assigneeFilter.addEventListener("change", () => {
     state.filters.assignee = els.assigneeFilter.value.trim();
+    renderTicketFilterButton();
     loadIssues().catch(showError);
   });
   els.issueSortSelect.addEventListener("change", () => setIssueSortValue(els.issueSortSelect.value));
+  els.clearTicketFiltersButton.addEventListener("click", () => {
+    closeTicketPopovers();
+    clearTicketFilters();
+  });
+  for (const button of document.querySelectorAll("[data-sort-key]")) {
+    button.addEventListener("click", () => {
+      const dir = button.dataset.sortKey === state.sort.key
+        ? state.sort.dir
+        : button.dataset.sortDefaultDir || state.sort.dir;
+      setIssueSortValue(`${button.dataset.sortKey}:${dir}`);
+      closeTicketPopovers();
+    });
+  }
+  for (const button of document.querySelectorAll("[data-sort-dir]")) {
+    button.addEventListener("click", () => {
+      setIssueSortValue(`${state.sort.key}:${button.dataset.sortDir}`);
+      closeTicketPopovers();
+    });
+  }
   els.emailSearchInput.addEventListener("input", runEmailSearch);
   els.emailStatusFilter.addEventListener("change", () => {
     state.emailPage.status = els.emailStatusFilter.value;
@@ -3035,6 +3140,10 @@ function handleGlobalKeydown(event) {
   if (event.key !== "Escape") return;
   if (!els.profilePopover.hidden) {
     closeProfileMenu();
+    return;
+  }
+  if (!els.ticketFilterPopover.hidden || !els.ticketSortPopover.hidden) {
+    closeTicketPopovers();
     return;
   }
   if (els.modalHost?.isOpen?.()) return;

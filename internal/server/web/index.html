@@ -107,33 +107,73 @@
                   <span class="button-icon" aria-hidden="true">+</span>
                   <span>New Ticket</span>
                 </button>
-                <div class="filter-control">
-                  <label for="searchInput">Search</label>
+                <div class="filter-control ticket-search-control">
+                  <label class="visually-hidden" for="searchInput">Search</label>
                   <input id="searchInput" type="search" autocomplete="off" placeholder="title, requester, description">
                 </div>
-              </div>
-              <div class="filter-control status-filter-control">
-                <label>Status</label>
-                <div class="status-filter-list" id="statusFilterList" aria-label="Status filters"></div>
-              </div>
-              <div class="ticket-list-filter-row">
-                <div class="filter-control">
-                  <label for="productFilter">Product</label>
-                  <select id="productFilter"></select>
-                </div>
-                <div class="filter-control">
-                  <label for="assigneeFilter">Assignee</label>
-                  <select id="assigneeFilter"></select>
-                </div>
-                <div class="filter-control">
-                  <label for="issueSortSelect">Sort</label>
-                  <select id="issueSortSelect">
-                    <option value="updated_at:desc">Updated</option>
-                    <option value="created_at:desc">Created</option>
-                    <option value="priority:asc">Priority</option>
-                    <option value="status:asc">Status</option>
-                    <option value="title:asc">Title</option>
-                  </select>
+                <div class="ticket-toolbar-actions">
+                  <div class="toolbar-menu">
+                    <button class="toolbar-icon-button" id="ticketFilterButton" type="button" aria-label="Filters" aria-haspopup="dialog" aria-expanded="false" title="Filters">
+                      <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M4 5h16l-7 8v5l-4 2v-7L4 5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                      </svg>
+                      <span class="toolbar-button-badge" id="ticketFilterBadge" hidden>0</span>
+                    </button>
+                    <div class="ticket-toolbar-popover filter-popover" id="ticketFilterPopover" role="dialog" aria-label="Ticket filters" hidden>
+                      <section class="popover-section">
+                        <h3>Status</h3>
+                        <div class="status-filter-list" id="statusFilterList" aria-label="Status filters"></div>
+                      </section>
+                      <section class="popover-section">
+                        <label for="productFilter">Product</label>
+                        <select id="productFilter"></select>
+                      </section>
+                      <section class="popover-section">
+                        <label for="assigneeFilter">Assignee</label>
+                        <select id="assigneeFilter"></select>
+                      </section>
+                      <button class="ghost-button popover-clear-button" id="clearTicketFiltersButton" type="button">Reset filters</button>
+                    </div>
+                  </div>
+                  <div class="toolbar-menu">
+                    <button class="toolbar-menu-button" id="ticketSortButton" type="button" aria-haspopup="dialog" aria-expanded="false" title="Sort tickets">
+                      <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M5 7h14M8 12h8M11 17h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      <span id="issueSortLabel">By Created</span>
+                    </button>
+                    <select class="native-sort-select" id="issueSortSelect" aria-hidden="true" tabindex="-1">
+                      <option value="updated_at:desc">Updated</option>
+                      <option value="updated_at:asc">Updated ascending</option>
+                      <option value="created_at:desc">Created</option>
+                      <option value="created_at:asc">Created ascending</option>
+                      <option value="priority:desc">Priority descending</option>
+                      <option value="priority:asc">Priority</option>
+                      <option value="status:desc">Status descending</option>
+                      <option value="status:asc">Status</option>
+                      <option value="title:desc">Title descending</option>
+                      <option value="title:asc">Title</option>
+                    </select>
+                    <div class="ticket-toolbar-popover sort-popover" id="ticketSortPopover" role="dialog" aria-label="Ticket sorting" hidden>
+                      <section class="popover-section">
+                        <h3>Sort by</h3>
+                        <div class="sort-menu-list">
+                          <button class="sort-menu-item" type="button" data-sort-key="updated_at" data-sort-default-dir="desc">Updated</button>
+                          <button class="sort-menu-item" type="button" data-sort-key="created_at" data-sort-default-dir="desc">Created</button>
+                          <button class="sort-menu-item" type="button" data-sort-key="priority" data-sort-default-dir="asc">Priority</button>
+                          <button class="sort-menu-item" type="button" data-sort-key="status" data-sort-default-dir="asc">Status</button>
+                          <button class="sort-menu-item" type="button" data-sort-key="title" data-sort-default-dir="asc">Title</button>
+                        </div>
+                      </section>
+                      <section class="popover-section">
+                        <h3>Sort order</h3>
+                        <div class="sort-menu-list">
+                          <button class="sort-menu-item" type="button" data-sort-dir="desc">Descending</button>
+                          <button class="sort-menu-item" type="button" data-sort-dir="asc">Ascending</button>
+                        </div>
+                      </section>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
