@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,11 @@ const (
 	defaultMaxUploadSize   = 10 << 20
 	defaultMaxUploadFiles  = 5
 	defaultVersion         = "dev"
+)
+
+var (
+	appAdminSections   = []string{"accounts", "tokens", "webhooks", "email", "maintenance", "audit"}
+	appProductSections = []string{"members", "webhooks", "deliveries"}
 )
 
 type RateLimit struct {
@@ -213,12 +219,7 @@ func isAppIndexPath(path string) bool {
 		return true
 	}
 	if strings.HasPrefix(path, "/admin/") {
-		switch strings.TrimPrefix(path, "/admin/") {
-		case "accounts", "tokens", "webhooks", "email", "maintenance", "audit":
-			return true
-		default:
-			return false
-		}
+		return slices.Contains(appAdminSections, strings.TrimPrefix(path, "/admin/"))
 	}
 	if strings.HasPrefix(path, "/products/") {
 		parts := strings.Split(strings.Trim(strings.TrimPrefix(path, "/products/"), "/"), "/")
@@ -232,12 +233,7 @@ func isAppIndexPath(path string) bool {
 		if len(parts) == 1 {
 			return true
 		}
-		switch parts[1] {
-		case "members", "webhooks", "deliveries":
-			return true
-		default:
-			return false
-		}
+		return slices.Contains(appProductSections, parts[1])
 	}
 	return false
 }

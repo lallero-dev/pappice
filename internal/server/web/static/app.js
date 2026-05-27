@@ -11,6 +11,12 @@ import {
 
 defineComponents();
 
+const DEFAULT_ADMIN_SECTION = "accounts";
+const ADMIN_SECTIONS = [DEFAULT_ADMIN_SECTION, "tokens", "webhooks", "email", "maintenance", "audit"];
+const DEFAULT_PRODUCT_SECTION = "members";
+const PRODUCT_SECTIONS = [DEFAULT_PRODUCT_SECTION, "webhooks", "deliveries"];
+const DEFAULT_TICKET_STATUSES = ["new", "assigned"];
+
 const state = {
   issues: [],
   issueCounts: { all: 0 },
@@ -37,11 +43,11 @@ const state = {
   accountLink: null,
   csrf: "",
   view: "issues",
-  adminSection: "accounts",
-  productSection: "members",
+  adminSection: DEFAULT_ADMIN_SECTION,
+  productSection: DEFAULT_PRODUCT_SECTION,
   productMode: "index",
   productDetailId: null,
-  selectedProjectId: null,
+  ticketProjectId: null,
   selectedId: null,
   sort: {
     key: "created_at",
@@ -61,7 +67,7 @@ const state = {
   },
   filters: {
     q: "",
-    statuses: ["new", "assigned"],
+    statuses: [...DEFAULT_TICKET_STATUSES],
     assignee: ""
   },
   emailPage: {
@@ -303,7 +309,7 @@ function parseAppRoute() {
     case "tickets":
       return { view: "issues", normalize: trailingSlash || parts.length !== 1 };
     case "admin": {
-      const section = validAdminSection(parts[1]) ? parts[1] : "accounts";
+      const section = validAdminSection(parts[1]) ? parts[1] : DEFAULT_ADMIN_SECTION;
       return { view: "admin", section, normalize: trailingSlash || parts.length !== 2 || section !== parts[1] };
     }
     case "products": {
@@ -311,7 +317,7 @@ function parseAppRoute() {
         return { view: "project", mode: "index", normalize: trailingSlash };
       }
       const projectId = Number(parts[1] || 0);
-      const section = validProductSection(parts[2]) ? parts[2] : "members";
+      const section = validProductSection(parts[2]) ? parts[2] : DEFAULT_PRODUCT_SECTION;
       return {
         view: "project",
         mode: "detail",
@@ -537,8 +543,8 @@ async function loadHealth() {
 async function loadProjects() {
   const payload = await request("/api/projects");
   state.projects = payload.projects || [];
-  if (state.selectedProjectId && !state.projects.some((project) => project.id === state.selectedProjectId)) {
-    state.selectedProjectId = null;
+  if (state.ticketProjectId && !state.projects.some((project) => project.id === state.ticketProjectId)) {
+    state.ticketProjectId = null;
   }
   if (state.productDetailId && !state.projects.some((project) => project.id === state.productDetailId)) {
     state.productDetailId = null;
@@ -561,7 +567,7 @@ async function loadIssues() {
   if (state.filters.q) params.set("q", state.filters.q);
   if (state.filters.assignee) params.set("assignee", state.filters.assignee);
   for (const status of state.filters.statuses) params.append("status", status);
-  const projectID = state.selectedProjectId || null;
+  const projectID = state.ticketProjectId || null;
   if (projectID) params.set("project_id", String(projectID));
   const countParams = new URLSearchParams();
   if (projectID) countParams.set("project_id", String(projectID));
@@ -569,7 +575,7 @@ async function loadIssues() {
     request(`/api/tickets?${params.toString()}`),
     request(`/api/tickets?${countParams.toString()}`)
   ]);
-  if (projectID !== (state.selectedProjectId || null)) return;
+  if (projectID !== (state.ticketProjectId || null)) return;
   state.issues = payload.tickets || [];
   state.issueCounts = countIssues(countsPayload.tickets || []);
   if (state.selectedId && !state.issues.some((issue) => issue.id === state.selectedId)) {
@@ -588,7 +594,7 @@ async function loadAdmin() {
 
 async function loadAdminSection(section) {
   switch (section) {
-    case "accounts":
+    case DEFAULT_ADMIN_SECTION:
       await loadUsers();
       return;
     case "tokens":
@@ -607,7 +613,7 @@ async function loadAdminSection(section) {
       await loadAuditEvents();
       return;
     default:
-      state.adminSection = "accounts";
+      state.adminSection = DEFAULT_ADMIN_SECTION;
       renderAdminSections();
       await loadUsers();
   }
@@ -620,8 +626,8 @@ async function loadProjectAdmin() {
 }
 
 async function loadProductSection(section) {
-  switch (validProductSection(section) ? section : "members") {
-    case "members":
+  switch (validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION) {
+    case DEFAULT_PRODUCT_SECTION:
       await Promise.all([loadUsers(), loadMembers()]);
       return;
     case "webhooks":
@@ -631,7 +637,7 @@ async function loadProductSection(section) {
       await loadProjectDeliveries();
       return;
     default:
-      state.productSection = "members";
+      state.productSection = DEFAULT_PRODUCT_SECTION;
       renderProductSections();
       await Promise.all([loadUsers(), loadMembers()]);
   }
@@ -724,7 +730,7 @@ function renderProductFilter() {
   for (const project of state.projects) {
     els.productFilter.append(new Option(`${project.key} / ${project.name}`, String(project.id)));
   }
-  els.productFilter.value = state.selectedProjectId ? String(state.selectedProjectId) : "";
+  els.productFilter.value = state.ticketProjectId ? String(state.ticketProjectId) : "";
 }
 
 function updateProjectActions() {
@@ -762,7 +768,7 @@ function renderCounts() {
 }
 
 function defaultStatusFilters() {
-  const defaults = ["new", "assigned"].filter((status) => state.meta.statuses.includes(status));
+  const defaults = DEFAULT_TICKET_STATUSES.filter((status) => state.meta.statuses.includes(status));
   return defaults.length > 0 ? defaults : state.meta.statuses.slice(0, 1);
 }
 
@@ -1051,7 +1057,7 @@ function openTicketModal(issue = null) {
         const payload = ticketCreatePayload(data, projectId);
         const body = ticketCreateRequestBody(payload, form);
         const created = await request(`/api/projects/${payload.project_id}/tickets`, { method: "POST", body });
-        state.selectedProjectId = payload.project_id;
+        state.ticketProjectId = payload.project_id;
         state.selectedId = created.id;
         await loadProjects();
         return;
@@ -1135,8 +1141,8 @@ function ticketModalContent({ issue, creating, editable, canComment, projectId, 
 }
 
 function initialTicketProjectId(creatableProjects) {
-  if (state.selectedProjectId && creatableProjects.some((project) => project.id === state.selectedProjectId)) {
-    return state.selectedProjectId;
+  if (state.ticketProjectId && creatableProjects.some((project) => project.id === state.ticketProjectId)) {
+    return state.ticketProjectId;
   }
   return creatableProjects[0]?.id || null;
 }
@@ -1258,14 +1264,14 @@ function renderAdminSections() {
 
 async function switchAdminSection(section) {
   if (!isAdmin()) return;
-  state.adminSection = validAdminSection(section) ? section : "accounts";
+  state.adminSection = validAdminSection(section) ? section : DEFAULT_ADMIN_SECTION;
   renderAdminSections();
   if (state.view === "admin") updateRoutePath();
   await loadAdminSection(state.adminSection);
 }
 
 function validAdminSection(section) {
-  return ["accounts", "tokens", "webhooks", "email", "maintenance", "audit"].includes(section);
+  return ADMIN_SECTIONS.includes(section);
 }
 
 function renderProductSections() {
@@ -1293,7 +1299,7 @@ function renderProductsView() {
 }
 
 async function switchProductSection(section) {
-  state.productSection = validProductSection(section) ? section : "members";
+  state.productSection = validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION;
   renderProductSections();
   if (state.view === "project") updateRoutePath();
   if (state.productMode === "detail" && state.productDetailId && canManageProject(state.productDetailId)) {
@@ -1302,7 +1308,7 @@ async function switchProductSection(section) {
 }
 
 function validProductSection(section) {
-  return ["members", "webhooks", "deliveries"].includes(section);
+  return PRODUCT_SECTIONS.includes(section);
 }
 
 function renderProductIndex() {
@@ -2467,7 +2473,7 @@ function bindEvents() {
     loadIssues().catch(showError);
   }, 180));
   els.productFilter.addEventListener("change", async () => {
-    state.selectedProjectId = Number(els.productFilter.value) || null;
+    state.ticketProjectId = Number(els.productFilter.value) || null;
     state.selectedId = null;
     renderProductFilter();
     updateProjectActions();
@@ -2515,11 +2521,11 @@ function openProductsIndex() {
   switchView("project");
 }
 
-async function openProductDetail(projectId, section = "members") {
+async function openProductDetail(projectId, section = DEFAULT_PRODUCT_SECTION) {
   if (!canManageProject(projectId)) return;
   state.productMode = "detail";
   state.productDetailId = projectId;
-  state.productSection = validProductSection(section) ? section : "members";
+  state.productSection = validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION;
   switchView("project", { load: false });
   await loadProjectAdmin();
 }
@@ -2536,7 +2542,7 @@ async function refreshCurrent() {
   await loadProjects();
 }
 
-function currentProject(projectId = state.selectedProjectId) {
+function currentProject(projectId) {
   return state.projects.find((project) => project.id === projectId) || null;
 }
 
@@ -2556,11 +2562,11 @@ function isCustomer() {
   return state.user?.role === "customer";
 }
 
-function projectRole(projectId = state.selectedProjectId) {
+function projectRole(projectId) {
   return currentProject(projectId)?.role || "";
 }
 
-function canManageProject(projectId = state.selectedProjectId) {
+function canManageProject(projectId) {
   return Boolean(projectId) && !isCustomer() && (isAdmin() || projectRole(projectId) === "owner");
 }
 
@@ -2572,7 +2578,7 @@ function canAccessProductsView() {
   return isAdmin() || manageableProjects().length > 0;
 }
 
-function canCreateIssue(projectId = state.selectedProjectId) {
+function canCreateIssue(projectId = state.ticketProjectId) {
   if (!projectId) {
     return state.projects.some((project) => canCreateIssue(project.id));
   }
@@ -2584,7 +2590,7 @@ function canCommentTicket(issue = null) {
 }
 
 function canEditTicket(issue = null) {
-  const projectId = issue?.project_id || state.selectedProjectId;
+  const projectId = issue?.project_id || state.ticketProjectId;
   return Boolean(projectId) && !isCustomer() && (isAdmin() || ["owner", "agent"].includes(projectRole(projectId)));
 }
 
