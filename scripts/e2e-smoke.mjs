@@ -276,6 +276,51 @@ async function addCustomerToProduct(cdp, productID) {
       return document.querySelector("[data-product-section='webhooks']")?.classList.contains("active") &&
         !document.querySelector("[data-product-panel='webhooks']")?.hidden;
     }, "product webhooks section");
+    document.querySelector("#addWebhookButton").click();
+    const webhookRoot = await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open] [name='secret']") ? rootNode : null;
+    }, "new product webhook modal");
+    setValue(webhookRoot.querySelector("[name='name']"), "E2E webhook");
+    setValue(webhookRoot.querySelector("[name='url']"), "https://hooks.example.test/e2e");
+    setValue(webhookRoot.querySelector("[name='secret']"), "e2e-custom-secret");
+    setValue(webhookRoot.querySelector("[name='events']"), "ticket.created");
+    webhookRoot.querySelector("form").requestSubmit();
+    await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open]") &&
+        rootNode.textContent.includes("Webhook Secret Created") &&
+        rootNode.querySelector("input[readonly]")?.value === "e2e-custom-secret";
+    }, "webhook secret shown once");
+    document.querySelector("#modalHost").close();
+    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "webhook secret modal closed");
+    const webhookRow = await waitFor(() => {
+      return [...document.querySelectorAll("#webhookList .admin-row")]
+        .find((candidate) => candidate.textContent.includes("E2E webhook"));
+    }, "created webhook row");
+    webhookRow.querySelector("button").click();
+    const editWebhookRoot = await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open]") &&
+        rootNode.textContent.includes("Stored secrets are not shown again") &&
+        [...rootNode.querySelectorAll("button")].some((button) => button.textContent.includes("Rotate")) ? rootNode : null;
+    }, "edit webhook modal");
+    [...editWebhookRoot.querySelectorAll("button")]
+      .find((button) => button.textContent.includes("Rotate"))
+      .click();
+    await waitFor(() => editWebhookRoot.textContent.includes("Rotate webhook secret?"), "webhook rotate confirmation");
+    [...editWebhookRoot.querySelectorAll(".account-confirm button")]
+      .find((button) => button.textContent.includes("Rotate"))
+      .click();
+    await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open]") &&
+        rootNode.textContent.includes("Webhook Secret Rotated") &&
+        rootNode.querySelector("input[readonly]")?.value &&
+        rootNode.querySelector("input[readonly]").value !== "e2e-custom-secret";
+    }, "rotated webhook secret shown once");
+    document.querySelector("#modalHost").close();
+    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "webhook rotate modal closed");
   }, { productID, customerUsername: customer.username });
 }
 

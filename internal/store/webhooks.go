@@ -159,6 +159,29 @@ func (s *Store) UpdateWebhook(id int64, patch UpdateWebhook) (Webhook, error) {
 	return s.GetWebhook(id)
 }
 
+func (s *Store) RotateWebhookSecret(id int64) (Webhook, string, error) {
+	if _, err := s.GetWebhook(id); err != nil {
+		return Webhook{}, "", err
+	}
+	secret, err := security.RandomToken()
+	if err != nil {
+		return Webhook{}, "", err
+	}
+	now := time.Now().UTC()
+	result, err := s.db.Exec(`UPDATE webhooks SET secret = ?, updated_at = ? WHERE id = ?`, secret, formatTime(now), id)
+	if err != nil {
+		return Webhook{}, "", err
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return Webhook{}, "", ErrNotFound
+	}
+	hook, err := s.GetWebhook(id)
+	if err != nil {
+		return Webhook{}, "", err
+	}
+	return hook, secret, nil
+}
+
 func (s *Store) DeleteWebhook(id int64) error {
 	result, err := s.db.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
 	if err != nil {

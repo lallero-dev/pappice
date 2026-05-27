@@ -637,6 +637,13 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if hook.URL != "https://hooks.example.test/renamed" || hook.Secret != secret || !slices.Equal(hook.Events, events) {
 		t.Fatalf("updated hook details = %#v", hook)
 	}
+	rotated, rotatedSecret, err := tracker.RotateWebhookSecret(hook.ID)
+	if err != nil {
+		t.Fatalf("rotate webhook secret: %v", err)
+	}
+	if rotatedSecret == "" || rotatedSecret == secret || rotated.Secret != rotatedSecret {
+		t.Fatalf("rotated hook = %#v secret=%q", rotated, rotatedSecret)
+	}
 	if err := tracker.RecordDelivery(WebhookDelivery{WebhookID: hook.ID, ProductID: &product.ID, Event: "ticket.created", StatusCode: 204}); err != nil {
 		t.Fatalf("record delivery: %v", err)
 	}

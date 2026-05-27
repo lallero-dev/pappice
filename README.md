@@ -167,6 +167,10 @@ Webhook payloads are signed with `X-Pappice-Signature`. Supported ticket events:
 - `ticket.commented`
 - `ticket.assigned`
 
+Webhook secrets are created in `Admin -> Global Webhooks` or
+`Products -> Webhooks`. Leave the secret field empty to let Pappice generate
+one, then store the one-time value shown after creation or rotation.
+
 Webhook URLs must be HTTPS and public by default. Development-only escape
 hatches are available with `PAPPICE_ALLOW_INSECURE_WEBHOOKS` and
 `PAPPICE_ALLOW_PRIVATE_WEBHOOKS`.

@@ -313,6 +313,7 @@ func TestAPIMethodContracts(t *testing.T) {
 		{"global webhooks", http.MethodPut, "/api/webhooks", "GET, POST"},
 		{"single webhook", http.MethodGet, "/api/webhooks/" + itoa(hookID), "PATCH, DELETE"},
 		{"webhook test", http.MethodGet, "/api/webhooks/" + itoa(hookID) + "/test", http.MethodPost},
+		{"webhook secret", http.MethodGet, "/api/webhooks/" + itoa(hookID) + "/secret", http.MethodPost},
 		{"webhook deliveries", http.MethodPost, "/api/webhook-deliveries", http.MethodGet},
 		{"email notifications", http.MethodPost, "/api/email-notifications", http.MethodGet},
 		{"email retry", http.MethodGet, "/api/email-notifications/" + itoa(notificationID) + "/retry", http.MethodPost},
@@ -1153,7 +1154,8 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	hookID := decodeNestedInt64(t, body, "webhook", "id")
-	if hookID == 0 || decodeString(t, body, "secret") == "" {
+	createdSecret := decodeString(t, body, "secret")
+	if hookID == 0 || createdSecret == "" {
 		t.Fatalf("webhook create response = %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID)+"/webhooks", nil, adminCookie, "", "")
@@ -1161,11 +1163,20 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 	if !bytes.Contains(body, []byte("product-hook")) {
 		t.Fatalf("product webhooks missing hook: %s", body)
 	}
+	if bytes.Contains(body, []byte(createdSecret)) {
+		t.Fatalf("product webhooks leaked secret: %s", body)
+	}
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/webhooks/"+itoa(hookID)+"/test", nil, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	if webhookHits.Load() != 1 || !signatureSeen.Load() {
 		t.Fatalf("webhook hits=%d signature=%v", webhookHits.Load(), signatureSeen.Load())
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/webhooks/"+itoa(hookID)+"/secret", nil, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	rotatedSecret := decodeString(t, body, "secret")
+	if rotatedSecret == "" || rotatedSecret == createdSecret {
+		t.Fatalf("webhook rotate response = %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID)+"/webhook-deliveries", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)

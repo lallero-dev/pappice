@@ -1470,6 +1470,10 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
+	if len(parts) == 2 && parts[1] == "secret" {
+		s.handleWebhookSecret(w, r, auth, hook)
+		return
+	}
 	if len(parts) == 2 && parts[1] == "test" {
 		s.handleWebhookTest(w, r, auth, hook)
 		return
@@ -1501,6 +1505,20 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w, http.MethodPatch, http.MethodDelete)
 	}
+}
+
+func (s *Server) handleWebhookSecret(w http.ResponseWriter, r *http.Request, auth authContext, hook store.Webhook) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	updated, secret, err := s.store.RotateWebhookSecret(hook.ID)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	s.audit(r, auth.User, "webhook.secret_rotated", "webhook", updated.ID, updated.Name, nil)
+	respondJSON(w, http.StatusOK, map[string]any{"webhook": store.ToPublicWebhook(updated), "secret": secret})
 }
 
 func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request, auth authContext, hook store.Webhook) {
