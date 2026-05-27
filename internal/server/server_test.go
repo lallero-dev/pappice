@@ -469,21 +469,21 @@ func TestAPIValidationContracts(t *testing.T) {
 
 func TestHealthExposesBranding(t *testing.T) {
 	_, server, client := newTestServer(t, Options{Branding: Branding{
-		Name:     "lallero.dev",
+		Name:     "Acme Support",
 		Subtitle: "support desk",
-		Mark:     "LD",
+		Mark:     "AS",
 		Color:    "#111827",
 	}})
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/health", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if got := decodeNestedString(t, body, "branding", "name"); got != "lallero.dev" {
+	if got := decodeNestedString(t, body, "branding", "name"); got != "Acme Support" {
 		t.Fatalf("branding.name = %q body=%s", got, body)
 	}
 	if got := decodeNestedString(t, body, "branding", "subtitle"); got != "support desk" {
 		t.Fatalf("branding.subtitle = %q body=%s", got, body)
 	}
-	if got := decodeNestedString(t, body, "branding", "mark"); got != "LD" {
+	if got := decodeNestedString(t, body, "branding", "mark"); got != "AS" {
 		t.Fatalf("branding.mark = %q body=%s", got, body)
 	}
 	if got := decodeNestedString(t, body, "branding", "color"); got != "#111827" {

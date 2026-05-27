@@ -1,0 +1,19 @@
+[Unit]
+Description=Pappice backup
+Documentation=https://github.com/lallero-dev/pappice
+
+[Service]
+Type=oneshot
+User=pappice
+Group=pappice
+WorkingDirectory=/opt/pappice
+EnvironmentFile=/etc/pappice/pappice.env
+ExecStart=/opt/pappice/scripts/backup.sh
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pappice /var/backups/pappice
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native

@@ -1,0 +1,28 @@
+[Unit]
+Description=Pappice customer support
+Documentation=https://github.com/lallero-dev/pappice
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pappice
+Group=pappice
+WorkingDirectory=/opt/pappice
+EnvironmentFile=/etc/pappice/pappice.env
+ExecStartPre=/usr/local/bin/pappice doctor
+ExecStart=/usr/local/bin/pappice serve
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pappice /var/backups/pappice
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

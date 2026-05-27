@@ -94,7 +94,7 @@ limits, and development-only webhook settings before starting the server.
 ## Branding
 
 Set `PAPPICE_BRAND_NAME`, `PAPPICE_BRAND_SUBTITLE`, `PAPPICE_BRAND_MARK`, and
-`PAPPICE_BRAND_COLOR` to brand a deployment, for example `lallero.dev`.
+`PAPPICE_BRAND_COLOR` to brand a deployment, for example `Acme Support`.
 Branding changes the visible instance identity without changing the software
 name or requiring a custom build.
 
@@ -127,6 +127,12 @@ scripts/restore.sh pappice-backups/20260101T120000Z
 Use `scripts/restore.sh latest` to restore the newest snapshot. The restore
 script moves the current database, WAL/SHM files, and upload directory into a
 `restore-pre-<timestamp>` folder before replacing them.
+
+## Deployment
+
+Production templates for `systemd`, nginx, and `/etc/pappice/pappice.env` live
+in [deploy/](./deploy/README.md). The default production shape is public HTTPS
+in nginx and local HTTPS from nginx to Pappice on `127.0.0.1:8388`.
 
 ## Email
 
@@ -197,4 +203,4 @@ request. Do not commit `.env`, SQLite databases, certificates, or SMTP secrets.
 Pappice is released under the GNU General Public License v3.0 only
 (`GPL-3.0-only`). See [LICENSE](./LICENSE).
 
-Copyright 2026 Paolo Marrone, [lallero.dev](https://lallero.dev).
+Copyright 2026 Paolo Marrone.
