@@ -303,6 +303,7 @@ func TestAPIMethodContracts(t *testing.T) {
 		{"tickets", http.MethodPut, "/api/tickets", "GET, POST"},
 		{"single ticket", http.MethodPost, "/api/tickets/" + itoa(issueID), "GET, PATCH"},
 		{"ticket comments", http.MethodGet, "/api/tickets/" + itoa(issueID) + "/comments", http.MethodPost},
+		{"ticket read", http.MethodGet, "/api/tickets/" + itoa(issueID) + "/read", http.MethodPost},
 		{"attachments", http.MethodPost, "/api/attachments/1", http.MethodGet},
 		{"users", http.MethodPut, "/api/users", "GET, POST"},
 		{"single user", http.MethodGet, "/api/users/" + itoa(userID), "PATCH, DELETE"},
@@ -1326,6 +1327,27 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("Public staff reply")) {
 		t.Fatalf("customer ticket missing public reply: %s", body)
+	}
+	if !decodeBool(t, body, "has_unread") || decodeInt64(t, body, "unread_count") != 1 {
+		t.Fatalf("customer ticket unread state missing staff public reply: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?unread=1", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Public staff reply")) {
+		t.Fatalf("customer unread list missing ticket: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/read", nil, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeBool(t, body, "has_unread") || decodeInt64(t, body, "unread_count") != 0 {
+		t.Fatalf("customer ticket should be read after mark-read: %s", body)
+	}
+	if decodeString(t, body, "last_read_at") == "" {
+		t.Fatalf("customer ticket read response missing last_read_at: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?unread=1", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Need help")) {
+		t.Fatalf("customer unread list should be empty after mark-read: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)

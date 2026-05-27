@@ -17,7 +17,10 @@
         </div>
       </div>
       <nav class="topnav" id="topNav" hidden>
-        <button class="nav-button active" id="issuesTab" type="button">Tickets</button>
+        <button class="nav-button active" id="issuesTab" type="button">
+          <span>Tickets</span>
+          <span class="nav-count-badge" id="ticketsUnreadBadge" hidden>0</span>
+        </button>
         <button class="nav-button" id="productTab" type="button">Products</button>
       </nav>
       <div class="topbar-actions">
@@ -131,6 +134,12 @@
                       <section class="popover-section">
                         <label for="assigneeFilter">Assignee</label>
                         <select id="assigneeFilter"></select>
+                      </section>
+                      <section class="popover-section">
+                        <label class="checkbox-row">
+                          <input id="unreadFilter" type="checkbox">
+                          <span>Unread only</span>
+                        </label>
                       </section>
                       <button class="ghost-button popover-clear-button" id="clearTicketFiltersButton" type="button">Reset filters</button>
                     </div>

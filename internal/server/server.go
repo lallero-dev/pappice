@@ -850,8 +850,12 @@ func (s *Server) handleProductIssues(w http.ResponseWriter, r *http.Request, aut
 			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
+		tickets := s.issuesForUser(auth.User, issues)
+		if queryUnread(query) {
+			tickets = unreadIssues(tickets)
+		}
 		respondJSON(w, http.StatusOK, map[string]any{
-			"tickets":    s.issuesForUser(auth.User, issues),
+			"tickets":    tickets,
 			"statuses":   store.Statuses(),
 			"priorities": store.Priorities(),
 		})
@@ -920,7 +924,11 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
 		}, auth.User)
-		respondJSON(w, http.StatusOK, map[string]any{"tickets": s.issuesForUser(auth.User, issues)})
+		tickets := s.issuesForUser(auth.User, issues)
+		if queryUnread(query) {
+			tickets = unreadIssues(tickets)
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"tickets": tickets})
 	case http.MethodPost:
 		var input store.CreateIssue
 		var uploads []storedUpload
@@ -1008,6 +1016,10 @@ func (s *Server) handleTicketPath(w http.ResponseWriter, r *http.Request) {
 		s.handleComments(w, r, auth, issue)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "read" {
+		s.handleTicketRead(w, r, auth, issue)
+		return
+	}
 	http.NotFound(w, r)
 }
 
@@ -1091,6 +1103,7 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 			return store.Issue{}, false
 		}
 		next.Author = defaultString(auth.User.DisplayName, auth.User.Username)
+		next.AuthorUserID = auth.User.ID
 		comment = &next
 	}
 
@@ -1117,6 +1130,13 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 		s.emitIssueWebhook("ticket.commented", updated, auth.User)
 	}
 	s.enqueueTicketPatchEmails(input, updated, auth.User, result.Previous, result.AssignmentChanged, result.PublicComment)
+	if result.HasComment {
+		if err := s.store.MarkIssueRead(updated.ID, auth.User.ID, time.Now().UTC()); err == nil {
+			if refreshed, err := s.store.GetIssue(updated.ID); err == nil {
+				updated = refreshed
+			}
+		}
+	}
 	return updated, true
 }
 
@@ -1186,6 +1206,23 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		return
 	}
 	respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, updated))
+}
+
+func (s *Server) handleTicketRead(w http.ResponseWriter, r *http.Request, auth authContext, issue store.Issue) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if err := s.store.MarkIssueRead(issue.ID, auth.User.ID, time.Now().UTC()); err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	updated, err := s.store.GetIssue(issue.ID)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, s.issueForUser(auth.User, updated))
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -1824,19 +1861,105 @@ func (s *Server) isCustomerTicketCreator(user store.User, productID int64) bool 
 }
 
 func (s *Server) issueForUser(user store.User, issue store.Issue) store.Issue {
-	if s.canEditIssue(user, issue.ProductID) {
+	issues := s.issuesForUser(user, []store.Issue{issue})
+	if len(issues) == 0 {
 		return issue
 	}
-	issue.Comments = publicComments(issue.Comments)
-	return issue
+	return issues[0]
 }
 
 func (s *Server) issuesForUser(user store.User, issues []store.Issue) []store.Issue {
 	result := make([]store.Issue, 0, len(issues))
 	for _, issue := range issues {
-		result = append(result, s.issueForUser(user, issue))
+		if !s.canEditIssue(user, issue.ProductID) {
+			issue.Comments = publicComments(issue.Comments)
+		}
+		result = append(result, issue)
+	}
+	s.annotateUnread(user, result)
+	return result
+}
+
+func (s *Server) annotateUnread(user store.User, issues []store.Issue) {
+	ids := make([]int64, 0, len(issues))
+	for _, issue := range issues {
+		ids = append(ids, issue.ID)
+	}
+	readTimes, err := s.store.IssueReadTimes(user.ID, ids)
+	if err != nil {
+		return
+	}
+	for index := range issues {
+		lastRead := readTimes[issues[index].ID]
+		if !lastRead.IsZero() {
+			readAt := lastRead
+			issues[index].LastReadAt = &readAt
+		}
+		issues[index].UnreadCount = unreadActivityCount(user, issues[index], lastRead)
+		issues[index].HasUnread = issues[index].UnreadCount > 0
+	}
+}
+
+func unreadIssues(issues []store.Issue) []store.Issue {
+	result := make([]store.Issue, 0, len(issues))
+	for _, issue := range issues {
+		if issue.HasUnread {
+			result = append(result, issue)
+		}
 	}
 	return result
+}
+
+func unreadActivityCount(user store.User, issue store.Issue, lastRead time.Time) int {
+	count := 0
+	if issue.CreatedAt.After(lastRead) && !issueOpenedByUser(user, issue) {
+		count++
+	}
+	for _, comment := range issue.Comments {
+		if comment.CreatedAt.After(lastRead) && !commentByUser(user, comment) {
+			count++
+		}
+	}
+	return count
+}
+
+func issueOpenedByUser(user store.User, issue store.Issue) bool {
+	values := userAuthorValues(user)
+	for _, value := range []string{issue.Reporter, issue.RequesterName, issue.RequesterEmail, emailLocalPart(issue.RequesterEmail)} {
+		if values[normalizeAuthor(value)] {
+			return true
+		}
+	}
+	return false
+}
+
+func commentByUser(user store.User, comment store.Comment) bool {
+	if comment.AuthorUserID > 0 {
+		return comment.AuthorUserID == user.ID
+	}
+	return userAuthorValues(user)[normalizeAuthor(comment.Author)]
+}
+
+func userAuthorValues(user store.User) map[string]bool {
+	values := map[string]bool{}
+	for _, value := range []string{user.Username, user.DisplayName, user.Email, emailLocalPart(user.Email)} {
+		if normalized := normalizeAuthor(value); normalized != "" {
+			values[normalized] = true
+		}
+	}
+	return values
+}
+
+func normalizeAuthor(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func emailLocalPart(email string) string {
+	local, _, ok := strings.Cut(strings.TrimSpace(email), "@")
+	if !ok {
+		return ""
+	}
+	return local
 }
 
 func publicComments(comments []store.Comment) []store.Comment {
@@ -1922,6 +2045,11 @@ func queryStatuses(query url.Values) []string {
 		}
 	}
 	return statuses
+}
+
+func queryUnread(query url.Values) bool {
+	value := strings.ToLower(strings.TrimSpace(query.Get("unread")))
+	return value == "1" || value == "true" || value == "yes"
 }
 
 func paginationParams(r *http.Request, defaultLimit, maxLimit int) (int, int) {

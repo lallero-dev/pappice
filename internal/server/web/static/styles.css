@@ -142,10 +142,14 @@ button:disabled {
 }
 
 .nav-button {
+  align-items: center;
   background: #314657;
   border: 1px solid #4b6072;
   border-radius: 6px;
   color: white;
+  display: inline-flex;
+  gap: 7px;
+  justify-content: center;
   min-height: 34px;
   padding: 7px 12px;
 }
@@ -155,6 +159,25 @@ button:disabled {
   background: #ffffff;
   border-color: #ffffff;
   color: #253746;
+}
+
+.nav-count-badge {
+  align-items: center;
+  background: #ffffff;
+  border-radius: 999px;
+  color: #253746;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  justify-content: center;
+  min-width: 20px;
+  padding: 1px 6px;
+}
+
+.nav-button.active .nav-count-badge,
+.nav-button:hover .nav-count-badge {
+  background: #253746;
+  color: #ffffff;
 }
 
 .primary-button,
@@ -688,6 +711,19 @@ button:focus-visible {
   margin: 0;
 }
 
+.checkbox-row {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  margin: 0;
+  min-height: 0;
+  width: auto;
+}
+
 .popover-clear-button {
   justify-self: stretch;
 }
@@ -764,6 +800,20 @@ button:focus-visible {
   background: #edf6ff;
 }
 
+.issue-row.unread .issue-row-title {
+  font-weight: 850;
+}
+
+.issue-unread-dot {
+  background: var(--blue);
+  border-radius: 999px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 8px;
+  margin-right: 6px;
+  width: 8px;
+}
+
 .issue-row-product,
 .issue-row-time,
 .issue-row-title,
@@ -773,7 +823,9 @@ button:focus-visible {
 }
 
 .issue-row-product {
+  align-items: center;
   color: var(--blue-dark);
+  display: flex;
   font-size: 12px;
   font-weight: 800;
   overflow: hidden;
@@ -1119,6 +1171,35 @@ button:focus-visible {
 
 .message-row.from-other {
   justify-content: flex-start;
+}
+
+.conversation-unread-divider {
+  align-items: center;
+  color: #b42318;
+  display: grid;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 10px;
+  grid-template-columns: 1fr auto 1fr;
+  letter-spacing: 0.04em;
+  margin: 2px 4px;
+  text-transform: uppercase;
+}
+
+.conversation-unread-divider::before,
+.conversation-unread-divider::after {
+  background: #e5484d;
+  content: "";
+  display: block;
+  height: 1px;
+}
+
+.conversation-unread-divider span {
+  background: #fff1f0;
+  border: 1px solid #ffcdc7;
+  border-radius: 999px;
+  line-height: 1;
+  padding: 5px 9px;
 }
 
 .message-avatar {

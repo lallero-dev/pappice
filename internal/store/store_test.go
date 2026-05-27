@@ -51,6 +51,17 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if byLowerKey.ID != issue.ID {
 		t.Fatalf("issue by lowercase key ID = %d, want %d", byLowerKey.ID, issue.ID)
 	}
+	readAt := time.Now().UTC()
+	if err := tracker.MarkIssueRead(issue.ID, admin.ID, readAt); err != nil {
+		t.Fatalf("mark issue read: %v", err)
+	}
+	readTimes, err := tracker.IssueReadTimes(admin.ID, []int64{issue.ID})
+	if err != nil {
+		t.Fatalf("issue read times: %v", err)
+	}
+	if got := readTimes[issue.ID]; got.IsZero() || got.Sub(readAt).Abs() > time.Second {
+		t.Fatalf("read time = %v, want near %v", got, readAt)
+	}
 
 	status := "assigned"
 	assignee := "alice"

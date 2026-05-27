@@ -406,13 +406,17 @@ func normalizeComment(input AddComment, allowEmptyBody bool) (AddComment, bool, 
 	if !isValid(validCommentVisibility, visibility) {
 		return AddComment{}, false, fmt.Errorf("%w: invalid comment visibility %q", ErrValidation, visibility)
 	}
-	return AddComment{Author: author, Body: body, Visibility: visibility}, visibility == "public", nil
+	return AddComment{Author: author, AuthorUserID: input.AuthorUserID, Body: body, Visibility: visibility}, visibility == "public", nil
 }
 
 func addCommentTx(tx *sql.Tx, id int64, input AddComment, now time.Time) (int64, error) {
+	var authorUserID sql.NullInt64
+	if input.AuthorUserID > 0 {
+		authorUserID = sql.NullInt64{Int64: input.AuthorUserID, Valid: true}
+	}
 	result, err := tx.Exec(
-		`INSERT INTO comments (issue_id, author, body, visibility, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, input.Author, input.Body, input.Visibility, formatTime(now),
+		`INSERT INTO comments (issue_id, author, author_user_id, body, visibility, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, input.Author, authorUserID, input.Body, input.Visibility, formatTime(now),
 	)
 	if err != nil {
 		return 0, normalizeSQLError(err)
@@ -538,15 +542,19 @@ func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 	issue.Attachments = nil
 	issue.Comments = nil
 
-	commentRows, err := queryer.Query(`SELECT id, author, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
+	commentRows, err := queryer.Query(`SELECT id, author, author_user_id, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
 	if err != nil {
 		return err
 	}
 	defer commentRows.Close()
 	for commentRows.Next() {
 		var comment Comment
+		var authorUserID sql.NullInt64
 		var created string
-		if err := commentRows.Scan(&comment.ID, &comment.Author, &comment.Body, &comment.Visibility, &created); err == nil {
+		if err := commentRows.Scan(&comment.ID, &comment.Author, &authorUserID, &comment.Body, &comment.Visibility, &created); err == nil {
+			if authorUserID.Valid {
+				comment.AuthorUserID = authorUserID.Int64
+			}
 			if comment.Visibility == "" {
 				comment.Visibility = "public"
 			}

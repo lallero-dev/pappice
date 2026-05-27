@@ -477,15 +477,28 @@ async function staffReplyAndResolve(cdp) {
       return [...document.querySelectorAll("#issueList .issue-row")]
         .find((candidate) => candidate.textContent.includes(input.title));
     }, "ticket row for staff update", 12000);
+    if (!row.classList.contains("unread")) {
+      throw new Error("new customer ticket should be unread for staff");
+    }
     row.click();
     const detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
       return pane?.querySelector("form [name='status']") ? pane : null;
     }, "ticket detail pane");
+    await waitFor(() => {
+      return !document.querySelector("#issueList .issue-row.active")?.classList.contains("unread");
+    }, "ticket marked read after opening");
     const incomingMessage = [...detail.querySelectorAll(".message-row")]
       .find((candidate) => candidate.textContent.includes(input.description));
     if (!incomingMessage?.classList.contains("from-other")) {
       throw new Error("customer message should be aligned as incoming for staff");
+    }
+    const unreadDivider = detail.querySelector(".conversation-unread-divider");
+    if (!unreadDivider?.textContent.includes("Unread")) {
+      throw new Error("ticket conversation should mark where unread messages start");
+    }
+    if (unreadDivider.compareDocumentPosition(incomingMessage) !== Node.DOCUMENT_POSITION_FOLLOWING) {
+      throw new Error("unread divider should appear before the first unread message");
     }
     const incomingAvatarRect = incomingMessage.querySelector(".message-avatar").getBoundingClientRect();
     const incomingConversation = detail.querySelector(".conversation-stream");

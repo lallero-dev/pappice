@@ -85,7 +85,8 @@ const state = {
   filters: {
     q: "",
     statuses: [...DEFAULT_TICKET_STATUSES],
-    assignee: ""
+    assignee: "",
+    unread: false
   },
   emailPage: {
     q: "",
@@ -111,6 +112,7 @@ const els = {
   brandSubtitle: document.querySelector("#brandSubtitle"),
   topNav: document.querySelector("#topNav"),
   issuesTab: document.querySelector("#issuesTab"),
+  ticketsUnreadBadge: document.querySelector("#ticketsUnreadBadge"),
   productTab: document.querySelector("#productTab"),
   adminTab: document.querySelector("#adminTab"),
   profileMenu: document.querySelector("#profileMenu"),
@@ -156,6 +158,7 @@ const els = {
   clearTicketFiltersButton: document.querySelector("#clearTicketFiltersButton"),
   productFilter: document.querySelector("#productFilter"),
   assigneeFilter: document.querySelector("#assigneeFilter"),
+  unreadFilter: document.querySelector("#unreadFilter"),
   ticketSortButton: document.querySelector("#ticketSortButton"),
   ticketSortPopover: document.querySelector("#ticketSortPopover"),
   issueSortLabel: document.querySelector("#issueSortLabel"),
@@ -579,24 +582,29 @@ async function loadIssues({ renderDetail = true } = {}) {
   if (state.products.length === 0) {
     state.issues = [];
     state.issueCounts = countIssues([]);
+    renderTicketsUnreadBadge(0);
     renderIssuesView();
     return;
   }
   const params = new URLSearchParams();
   if (state.filters.q) params.set("q", state.filters.q);
   if (state.filters.assignee) params.set("assignee", state.filters.assignee);
+  if (state.filters.unread) params.set("unread", "1");
   for (const status of state.filters.statuses) params.append("status", status);
   const productID = state.ticketProductId || null;
   if (productID) params.set("product_id", String(productID));
   const countParams = new URLSearchParams();
   if (productID) countParams.set("product_id", String(productID));
-  const [payload, countsPayload] = await Promise.all([
+  const unreadParams = new URLSearchParams({ unread: "1" });
+  const [payload, countsPayload, unreadPayload] = await Promise.all([
     request(`/api/tickets?${params.toString()}`),
-    request(`/api/tickets?${countParams.toString()}`)
+    request(`/api/tickets?${countParams.toString()}`),
+    request(`/api/tickets?${unreadParams.toString()}`)
   ]);
   if (productID !== (state.ticketProductId || null)) return;
   state.issues = payload.tickets || [];
   state.issueCounts = countIssues(countsPayload.tickets || []);
+  renderTicketsUnreadBadge((unreadPayload.tickets || []).length);
   const previousSelectedId = state.selectedId;
   const listedSelection = state.issues.find((issue) => issue.id === state.selectedId);
   if (listedSelection) {
@@ -867,6 +875,7 @@ function hasActiveTicketFilters() {
     state.filters.q ||
     state.ticketProductId ||
     state.filters.assignee ||
+    state.filters.unread ||
     !sameStatuses(state.filters.statuses, defaultStatusFilters())
   );
 }
@@ -875,6 +884,7 @@ function activeTicketFilterCount() {
   let count = 0;
   if (state.ticketProductId) count += 1;
   if (state.filters.assignee) count += 1;
+  if (state.filters.unread) count += 1;
   if (!sameStatuses(state.filters.statuses, defaultStatusFilters())) count += 1;
   return count;
 }
@@ -885,7 +895,14 @@ function renderTicketFilterButton() {
   els.ticketFilterButton.classList.toggle("active", count > 0);
   els.ticketFilterBadge.hidden = count === 0;
   els.ticketFilterBadge.textContent = String(count);
+  if (els.unreadFilter) els.unreadFilter.checked = state.filters.unread;
   if (els.clearTicketFiltersButton) els.clearTicketFiltersButton.disabled = !hasActiveTicketFilters();
+}
+
+function renderTicketsUnreadBadge(count) {
+  if (!els.ticketsUnreadBadge) return;
+  els.ticketsUnreadBadge.hidden = count === 0;
+  els.ticketsUnreadBadge.textContent = String(count);
 }
 
 function sameStatuses(left, right) {
@@ -898,10 +915,12 @@ function clearTicketFilters() {
   state.filters.q = "";
   state.filters.assignee = "";
   state.filters.statuses = defaultStatusFilters();
+  state.filters.unread = false;
   state.ticketProductId = null;
   els.searchInput.value = "";
   els.productFilter.value = "";
   els.assigneeFilter.value = "";
+  els.unreadFilter.checked = false;
   updateProductActions();
   renderCounts();
   loadIssues().catch(showError);
@@ -946,13 +965,18 @@ function renderIssueList() {
     row.type = "button";
     row.className = "issue-row";
     row.classList.toggle("active", issue.id === state.selectedId);
+    row.classList.toggle("unread", Boolean(issue.has_unread));
     row.addEventListener("click", () => {
       setSelectedIssue(state.selectedId === issue.id ? null : issue);
       renderIssuesView();
     });
     const product = issueProductParts(issue);
+    const productLabel = el("span", { className: "issue-row-product" }, product.key);
+    if (issue.has_unread) {
+      productLabel.prepend(el("span", { className: "issue-unread-dot", title: "Unread" }));
+    }
     row.append(
-      el("span", { className: "issue-row-product" }, product.key),
+      productLabel,
       el("span", { className: "issue-row-time" }, relativeTime(issue.updated_at)),
       el("span", { className: "issue-row-title" }, issue.title || "Untitled ticket"),
       el("span", { className: "issue-row-summary" }, ticketSummary(issue)),
@@ -1091,6 +1115,15 @@ function renderTicketDetail() {
   els.ticketDetailPane.append(form);
   state.renderedTicketDetailId = issue.id;
   scrollTicketConversationToBottom(form, { smooth: !isNewlyOpenedTicket });
+  markTicketRead(issue).catch(showError);
+}
+
+async function markTicketRead(issue) {
+  if (!issue?.id || !issue.has_unread) return;
+  const updated = await request(`/api/tickets/${issue.id}/read`, { method: "POST" });
+  setSelectedIssue(updated, { updateRoute: false });
+  replaceIssue(updated);
+  await loadIssues({ renderDetail: false });
 }
 
 function scrollTicketConversationToBottom(root, { smooth = false } = {}) {
@@ -2318,7 +2351,12 @@ function assigneeOptions(current = "") {
 
 function comments(issue) {
   const list = el("div", { className: "comment-list conversation-stream" });
-  for (const message of conversationMessages(issue)) {
+  const messages = conversationMessages(issue);
+  const unreadIndex = firstUnreadMessageIndex(issue, messages);
+  messages.forEach((message, index) => {
+    if (index === unreadIndex) {
+      list.append(unreadDivider());
+    }
     const rowClasses = [
       "message-row",
       message.side === "current" ? "from-current" : "from-other",
@@ -2340,7 +2378,7 @@ function comments(issue) {
     );
     row.append(avatar, item);
     list.append(row);
-  }
+  });
   return list;
 }
 
@@ -2353,6 +2391,7 @@ function conversationMessages(issue) {
     label: `opened ${relativeTime(issue.created_at)}`,
     visibility: "public",
     attachments: issue.attachments || [],
+    createdAt: issue.created_at,
     side: isCurrentUserMessage(issue, { author: opener, opening: true }) ? "current" : "other",
     className: "opening-message"
   }];
@@ -2366,11 +2405,34 @@ function conversationMessages(issue) {
       label: relativeTime(comment.created_at),
       visibility: internal ? "internal" : "public",
       attachments: comment.attachments || [],
+      createdAt: comment.created_at,
       side: isCurrentUserMessage(issue, comment) ? "current" : "other",
       className: internal ? "internal" : ""
     });
   }
   return messages;
+}
+
+function firstUnreadMessageIndex(issue, messages) {
+  if (!issue.has_unread) return -1;
+  const lastRead = timestampValue(issue.last_read_at);
+  return messages.findIndex((message) => {
+    return message.side !== "current" && timestampValue(message.createdAt) > lastRead;
+  });
+}
+
+function unreadDivider() {
+  return el("div", {
+    className: "conversation-unread-divider",
+    role: "separator",
+    "aria-label": "Unread messages"
+  }, el("span", {}, "Unread"));
+}
+
+function timestampValue(value) {
+  if (!value) return 0;
+  const valueMs = Date.parse(value);
+  return Number.isFinite(valueMs) ? valueMs : 0;
 }
 
 function initials(value) {
@@ -3093,6 +3155,11 @@ function bindEvents() {
   });
   els.assigneeFilter.addEventListener("change", () => {
     state.filters.assignee = els.assigneeFilter.value.trim();
+    renderTicketFilterButton();
+    loadIssues().catch(showError);
+  });
+  els.unreadFilter.addEventListener("change", () => {
+    state.filters.unread = els.unreadFilter.checked;
     renderTicketFilterButton();
     loadIssues().catch(showError);
   });

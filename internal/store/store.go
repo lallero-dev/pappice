@@ -41,18 +41,22 @@ type Issue struct {
 	CustomerToken  string       `json:"-"`
 	Attachments    []Attachment `json:"attachments,omitempty"`
 	Comments       []Comment    `json:"comments"`
+	UnreadCount    int          `json:"unread_count"`
+	HasUnread      bool         `json:"has_unread"`
+	LastReadAt     *time.Time   `json:"last_read_at,omitempty"`
 	CreatedAt      time.Time    `json:"created_at"`
 	UpdatedAt      time.Time    `json:"updated_at"`
 	ClosedAt       *time.Time   `json:"closed_at,omitempty"`
 }
 
 type Comment struct {
-	ID          int64        `json:"id"`
-	Author      string       `json:"author"`
-	Body        string       `json:"body"`
-	Visibility  string       `json:"visibility"`
-	Attachments []Attachment `json:"attachments,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
+	ID           int64        `json:"id"`
+	Author       string       `json:"author"`
+	AuthorUserID int64        `json:"-"`
+	Body         string       `json:"body"`
+	Visibility   string       `json:"visibility"`
+	Attachments  []Attachment `json:"attachments,omitempty"`
+	CreatedAt    time.Time    `json:"created_at"`
 }
 
 type CreateIssue struct {
@@ -79,9 +83,10 @@ type UpdateIssue struct {
 }
 
 type AddComment struct {
-	Author     string `json:"author"`
-	Body       string `json:"body"`
-	Visibility string `json:"visibility"`
+	Author       string `json:"author"`
+	AuthorUserID int64  `json:"-"`
+	Body         string `json:"body"`
+	Visibility   string `json:"visibility"`
 }
 
 type SaveIssueInput struct {
@@ -644,6 +649,7 @@ func (s *Store) migrate() error {
 		{"issues", "requester_email", `ALTER TABLE issues ADD COLUMN requester_email TEXT NOT NULL DEFAULT ''`},
 		{"issues", "customer_token", `ALTER TABLE issues ADD COLUMN customer_token TEXT`},
 		{"comments", "visibility", `ALTER TABLE comments ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`},
+		{"comments", "author_user_id", `ALTER TABLE comments ADD COLUMN author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`},
 	} {
 		ok, err := s.columnExists(migration.table, migration.column)
 		if err != nil {
@@ -1155,9 +1161,17 @@ CREATE TABLE IF NOT EXISTS comments (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
 	author TEXT NOT NULL,
+	author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 	body TEXT NOT NULL,
 	visibility TEXT NOT NULL DEFAULT 'public',
 	created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ticket_reads (
+	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	last_read_at TEXT NOT NULL,
+	PRIMARY KEY (issue_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -1223,6 +1237,7 @@ CREATE TABLE IF NOT EXISTS email_notifications (
 CREATE INDEX IF NOT EXISTS idx_issues_product_updated ON issues(product_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_product_members_user ON product_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_reads_user ON ticket_reads(user_id, issue_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_comment ON attachments(comment_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_storage ON attachments(storage_key);
