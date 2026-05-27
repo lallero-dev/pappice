@@ -419,6 +419,36 @@ async function staffReplyAndResolve(cdp) {
     }, "ticket detail pane");
     setValue(detail.querySelector("[name='status']"), "resolved");
     setValue(detail.querySelector("[name='body']"), input.reply);
+    const composer = detail.querySelector(".comment-form");
+    const conversationDropTarget = detail.querySelector(".conversation-stream");
+    const conversationPane = detail.querySelector(".ticket-main");
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["first attachment"], "e2e-first.txt", { type: "text/plain" }));
+    transfer.items.add(new File(["second attachment"], "e2e-second.txt", { type: "text/plain" }));
+    const cancelTransfer = new DataTransfer();
+    cancelTransfer.items.add(new File(["cancelled attachment"], "e2e-cancelled.txt", { type: "text/plain" }));
+    conversationDropTarget.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: cancelTransfer }));
+    await waitFor(() => conversationPane.classList.contains("conversation-drop-active"), "conversation attachment cancelled drop highlight");
+    conversationDropTarget.dispatchEvent(new DragEvent("dragleave", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: cancelTransfer,
+      relatedTarget: document.body
+    }));
+    await waitFor(() => !conversationPane.classList.contains("conversation-drop-active"), "conversation attachment cancelled drop clears");
+    conversationDropTarget.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    await waitFor(() => conversationPane.classList.contains("conversation-drop-active"), "conversation attachment drop highlight");
+    await waitFor(() => {
+      return getComputedStyle(conversationPane, "::before").backgroundColor !== "rgba(0, 0, 0, 0)" &&
+        getComputedStyle(conversationPane, "::after").content.includes("Drop files to attach");
+    }, "conversation attachment drop label");
+    conversationDropTarget.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    await waitFor(() => {
+      const chipNames = [...composer.querySelectorAll(".attachment-preview-chip")].map((chip) => chip.textContent);
+      return chipNames.some((name) => name.includes("e2e-first.txt")) &&
+        chipNames.some((name) => name.includes("e2e-second.txt")) &&
+        !conversationPane.classList.contains("conversation-drop-active");
+    }, "reply attachment chips after conversation drop");
     const visibility = detail.querySelector("[name='visibility']");
     if (visibility) setValue(visibility, "public");
     const submit = detail.querySelector("[data-comment-send]");

@@ -1163,7 +1163,7 @@ function ticketDetailContent({ issue, creating, editable, canComment, projectId,
   wrap.classList.toggle("ticket-create", creating);
   const header = el("div", { className: "detail-header" });
   if (editable) {
-    header.append(ticketTextField("Title", "title", issue?.title || "", {
+    header.append(ticketTextField("", "title", issue?.title || "", {
       autocomplete: "off",
       className: "ticket-title-input",
       maxlength: 160,
@@ -1173,7 +1173,6 @@ function ticketDetailContent({ issue, creating, editable, canComment, projectId,
   } else {
     header.append(el("h3", {}, issue.title));
   }
-  if (!creating) header.append(detailMeta(issue));
 
   const main = el("section", { className: "ticket-main" });
   if (creating) {
@@ -1185,11 +1184,11 @@ function ticketDetailContent({ issue, creating, editable, canComment, projectId,
     main.append(ticketAttachmentField("Attachments", "attachments"));
   }
   if (!creating) {
-    main.append(
-      el("h4", { className: "section-title" }, "Conversation"),
-      comments(issue),
-      canComment ? commentComposer(issue) : el("div")
-    );
+    const conversation = comments(issue);
+    const composer = canComment ? commentComposer(issue) : el("div");
+    main.append(conversation, composer);
+    const attachmentInput = composer.querySelector(".attachment-input");
+    if (attachmentInput) bindAttachmentDropZone(main, attachmentInput, "conversation-drop-active");
   }
 
   const side = el("aside", { className: "ticket-side" });
@@ -1265,7 +1264,132 @@ function ticketAttachmentField(label, name) {
   if (allowed.length > 0 && !allowed.includes("*") && !allowed.includes("*/*")) {
     control.accept = allowed.join(",");
   }
-  return ticketControlField(label, control);
+  const preview = el("div", { className: "attachment-preview empty" });
+  const trigger = el("button", { className: "attachment-trigger", type: "button" }, [
+    el("span", { className: "attachment-trigger-icon", "aria-hidden": "true" })
+  ]);
+  trigger.setAttribute("aria-label", "Attach files");
+  trigger.title = "Attach files";
+  const picker = el("div", { className: "attachment-picker" }, [
+    control,
+    trigger,
+    preview
+  ]);
+  let filesBeforeBrowse = null;
+  let syncingFiles = false;
+  trigger.addEventListener("click", () => {
+    filesBeforeBrowse = Array.from(control.files || []);
+    control.click();
+  });
+  control.addEventListener("change", () => {
+    if (syncingFiles) {
+      renderAttachmentPreview(control, preview);
+      return;
+    }
+    if (filesBeforeBrowse) {
+      const previous = filesBeforeBrowse;
+      filesBeforeBrowse = null;
+      if (previous.length > 0) {
+        syncingFiles = true;
+        setAttachmentFiles(control, mergeAttachmentFiles(previous, Array.from(control.files || [])));
+        syncingFiles = false;
+        return;
+      }
+    }
+    renderAttachmentPreview(control, preview);
+  });
+  bindAttachmentDropZone(picker, control, "dragging");
+  return el("div", { className: "ticket-form-field attachment-field" }, [
+    el("span", {}, label),
+    picker
+  ]);
+}
+
+function renderAttachmentPreview(input, preview) {
+  const files = Array.from(input.files || []);
+  preview.classList.toggle("empty", files.length === 0);
+  preview.replaceChildren();
+  if (files.length === 0) return;
+  files.forEach((file, index) => {
+    const remove = el("button", { className: "attachment-remove", type: "button", "aria-label": `Remove ${file.name}` }, "x");
+    remove.addEventListener("click", () => {
+      const next = Array.from(input.files || []).filter((_, fileIndex) => fileIndex !== index);
+      setAttachmentFiles(input, next);
+    });
+    preview.append(el("span", { className: "attachment-preview-chip", title: file.name || "Attachment" }, [
+      el("span", { className: "attachment-chip-name" }, file.name || "Attachment"),
+      remove
+    ]));
+  });
+}
+
+function mergeAttachmentFiles(...groups) {
+  const seen = new Set();
+  const files = [];
+  for (const file of groups.flat()) {
+    const key = [file.name, file.size, file.lastModified, file.type].join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    files.push(file);
+  }
+  return files;
+}
+
+function appendAttachmentFiles(input, files) {
+  setAttachmentFiles(input, mergeAttachmentFiles(Array.from(input.files || []), Array.from(files || [])));
+}
+
+const handledAttachmentDropEvents = new WeakSet();
+
+function bindAttachmentDropZone(target, input, activeClass = "attachment-drop-active") {
+  let cleanupTimer = 0;
+  const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
+  const deactivate = () => {
+    window.clearTimeout(cleanupTimer);
+    cleanupTimer = 0;
+    target.classList.remove(activeClass);
+  };
+  const scheduleCleanup = () => {
+    window.clearTimeout(cleanupTimer);
+    cleanupTimer = window.setTimeout(deactivate, 5000);
+  };
+  const activate = (event) => {
+    if (!hasFiles(event)) return false;
+    event.preventDefault();
+    target.classList.add(activeClass);
+    scheduleCleanup();
+    return true;
+  };
+  target.addEventListener("dragenter", (event) => {
+    activate(event);
+  });
+  target.addEventListener("dragover", (event) => {
+    if (!activate(event)) return;
+    event.dataTransfer.dropEffect = "copy";
+  });
+  target.addEventListener("dragleave", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (event.relatedTarget && target.contains(event.relatedTarget)) return;
+    deactivate();
+  });
+  target.addEventListener("drop", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    deactivate();
+    if (handledAttachmentDropEvents.has(event)) return;
+    handledAttachmentDropEvents.add(event);
+    if (event.dataTransfer?.files?.length) appendAttachmentFiles(input, event.dataTransfer.files);
+  });
+}
+
+function setAttachmentFiles(input, files) {
+  const maxFiles = Number(state.meta.uploads?.max_files || 0);
+  const selected = maxFiles > 0 ? files.slice(0, maxFiles) : files;
+  const transfer = new DataTransfer();
+  for (const file of selected) transfer.items.add(file);
+  input.files = transfer.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function ticketSelectControl(name, value, options, controlOptions = {}) {
@@ -2000,18 +2124,26 @@ function assigneeOptions(current = "") {
 function comments(issue) {
   const list = el("div", { className: "comment-list conversation-stream" });
   for (const message of conversationMessages(issue)) {
-    const row = el("div", { className: `message-row ${message.side === "customer" ? "from-customer" : "from-support"}` });
+    const rowClasses = [
+      "message-row",
+      message.side === "customer" ? "from-customer" : "from-support",
+      message.className ? `message-${message.className}` : ""
+    ].filter(Boolean).join(" ");
+    const row = el("div", { className: rowClasses });
+    const avatar = el("span", { className: "message-avatar", title: message.author }, message.avatar);
     const item = el("article", { className: `comment message-bubble ${message.className}` });
     item.append(
       el("div", { className: "comment-head message-head" }, [
-        el("strong", {}, message.author),
+        el("span", { className: "message-head-main" }, [
+          el("strong", {}, message.author)
+        ]),
         el("span", { className: "comment-time" }, message.label),
-        message.visibility === "internal" ? badge("internal", "priority-normal") : el("span")
+        message.visibility === "internal" ? el("span", { className: "message-flag internal-flag" }, "Internal") : el("span")
       ]),
       el("p", {}, message.body),
       attachmentList(message.attachments || [])
     );
-    row.append(item);
+    row.append(avatar, item);
     list.append(row);
   }
   return list;
@@ -2021,6 +2153,7 @@ function conversationMessages(issue) {
   const opener = issue.requester_name || issue.requester || "Requester";
   const messages = [{
     author: opener,
+    avatar: initials(opener),
     body: String(issue.description || "").trim() || "No description.",
     label: `opened ${relativeTime(issue.created_at)}`,
     visibility: "public",
@@ -2030,8 +2163,10 @@ function conversationMessages(issue) {
   }];
   for (const comment of issue.comments || []) {
     const internal = comment.visibility === "internal";
+    const author = comment.author || "Support";
     messages.push({
-      author: comment.author || "Support",
+      author,
+      avatar: initials(author),
       body: String(comment.body || "").trim() || "Attachment only",
       label: relativeTime(comment.created_at),
       visibility: internal ? "internal" : "public",
@@ -2041,6 +2176,12 @@ function conversationMessages(issue) {
     });
   }
   return messages;
+}
+
+function initials(value) {
+  const parts = String(value || "?").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return parts.slice(0, 2).map((part) => part.slice(0, 1).toUpperCase()).join("");
 }
 
 function isRequesterSide(issue, entry) {
@@ -2077,16 +2218,40 @@ function commentComposer(issue) {
   const visibility = document.createElement("select");
   visibility.name = "visibility";
   visibility.dataset.ticketControl = "true";
+  visibility.setAttribute("aria-label", "Reply visibility");
   visibility.append(new Option("Public reply", "public"), new Option("Internal note", "internal"));
   visibility.value = "public";
   const attachments = ticketAttachmentField("Attachments", "attachments");
-  const entry = el("div", { className: "comment-entry" }, [body, send]);
+  const actions = [send];
   if (canEditTicket(issue)) {
-    wrap.append(entry, attachments, el("div", { className: "comment-actions" }, [visibility]));
-    return wrap;
+    actions.unshift(commentVisibilityControl(visibility));
   }
+  const entry = el("div", { className: "comment-entry" }, [
+    body,
+    el("div", { className: "comment-action-rail" }, actions)
+  ]);
   wrap.append(entry, attachments);
+  const attachmentInput = attachments.querySelector(".attachment-input");
+  if (attachmentInput) bindAttachmentDropZone(wrap, attachmentInput);
   return wrap;
+}
+
+function commentVisibilityControl(select) {
+  const control = el("label", { className: "comment-visibility-control" }, [
+    el("span", { className: "visibility-icon", "aria-hidden": "true" }),
+    select
+  ]);
+  const update = () => {
+    const internal = select.value === "internal";
+    control.classList.toggle("visibility-public", !internal);
+    control.classList.toggle("visibility-internal", internal);
+    const label = internal ? "Internal note" : "Public reply";
+    control.title = label;
+    select.title = label;
+  };
+  select.addEventListener("change", update);
+  update();
+  return control;
 }
 
 function attachmentList(attachments) {
