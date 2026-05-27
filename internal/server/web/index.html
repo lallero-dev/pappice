@@ -99,39 +99,51 @@
 
     <main class="shell" id="appView" hidden>
       <section class="workspace" id="issueView">
-        <div class="toolbar">
-          <div class="filter-control">
-            <label for="searchInput">Search</label>
-            <input id="searchInput" type="search" autocomplete="off" placeholder="title, requester, description">
-          </div>
-          <div class="filter-control">
-            <label>Status</label>
-            <div class="status-filter-list" id="statusFilterList" aria-label="Status filters"></div>
-          </div>
-          <div class="filter-control">
-            <label for="productFilter">Product</label>
-            <select id="productFilter"></select>
-          </div>
-          <div class="filter-control">
-            <label for="assigneeFilter">Assignee</label>
-            <select id="assigneeFilter"></select>
-          </div>
-          <div class="toolbar-actions">
-            <button class="primary-button" id="newIssueButton" type="button" hidden>New Ticket</button>
-          </div>
-        </div>
-
-        <div class="content-grid">
-          <section class="issue-pane" aria-label="Tickets">
-            <div class="table-head">
-              <button class="sort-header" type="button" data-sort-key="created_at">Created</button>
-              <button class="sort-header" type="button" data-sort-key="product">Product</button>
-              <button class="sort-header" type="button" data-sort-key="title">Ticket</button>
-              <button class="sort-header" type="button" data-sort-key="status">Status</button>
-              <button class="sort-header" type="button" data-sort-key="priority">Priority</button>
-              <button class="sort-header" type="button" data-sort-key="updated_at">Updated</button>
+        <div class="ticket-layout">
+          <section class="ticket-list-pane" aria-label="Tickets">
+            <div class="ticket-list-toolbar">
+              <div class="ticket-list-topbar">
+                <button class="primary-button toolbar-create-button" id="newIssueButton" type="button" hidden>
+                  <span class="button-icon" aria-hidden="true">+</span>
+                  <span>New Ticket</span>
+                </button>
+                <div class="filter-control">
+                  <label for="searchInput">Search</label>
+                  <input id="searchInput" type="search" autocomplete="off" placeholder="title, requester, description">
+                </div>
+              </div>
+              <div class="filter-control status-filter-control">
+                <label>Status</label>
+                <div class="status-filter-list" id="statusFilterList" aria-label="Status filters"></div>
+              </div>
+              <div class="ticket-list-filter-row">
+                <div class="filter-control">
+                  <label for="productFilter">Product</label>
+                  <select id="productFilter"></select>
+                </div>
+                <div class="filter-control">
+                  <label for="assigneeFilter">Assignee</label>
+                  <select id="assigneeFilter"></select>
+                </div>
+                <div class="filter-control">
+                  <label for="issueSortSelect">Sort</label>
+                  <select id="issueSortSelect">
+                    <option value="updated_at:desc">Updated</option>
+                    <option value="created_at:desc">Created</option>
+                    <option value="priority:asc">Priority</option>
+                    <option value="status:asc">Status</option>
+                    <option value="title:asc">Title</option>
+                  </select>
+                </div>
+              </div>
             </div>
             <div class="issue-list" id="issueList"></div>
+          </section>
+
+          <section class="ticket-detail-pane" id="ticketDetailPane" aria-label="Ticket detail">
+            <div class="filter-control">
+              Select a ticket to read the conversation.
+            </div>
           </section>
         </div>
       </section>

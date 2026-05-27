@@ -86,6 +86,7 @@ async function main() {
   await verifyProductRouteReload(page, selectedProductID);
   await completeCustomerSetup(page, setupLink);
   await createCustomerTicket(page);
+  await verifyFixedTicketLayout(page);
   await logout(page);
   await loginAsAdmin(page);
   await staffReplyAndResolve(page);
@@ -317,22 +318,46 @@ async function completeCustomerSetup(cdp, setupLink) {
 
 async function createCustomerTicket(cdp) {
   await runInPage(cdp, async (input) => {
-    const { modalRoot, setValue, waitFor } = pageTools();
+    const { setValue, waitFor } = pageTools();
     await waitFor(() => document.querySelector("#newIssueButton") && !document.querySelector("#newIssueButton").hidden, "new ticket button");
     document.querySelector("#newIssueButton").click();
-    const root = await waitFor(() => {
-      const rootNode = modalRoot();
-      return rootNode?.querySelector("dialog[open]") ? rootNode : null;
-    }, "new ticket modal");
-    setValue(root.querySelector("[name='title']"), input.title);
-    setValue(root.querySelector("[name='description']"), input.description);
-    const submit = root.querySelector("button.primary");
+    const detail = await waitFor(() => {
+      const pane = document.querySelector("#ticketDetailPane");
+      return pane?.querySelector("form [name='title']") ? pane : null;
+    }, "new ticket draft");
+    await waitFor(() => document.querySelector("#issueList .issue-row.draft"), "draft ticket row");
+    setValue(detail.querySelector("[name='title']"), input.title);
+    setValue(detail.querySelector("[name='description']"), input.description);
+    const submit = detail.querySelector("button.primary-button");
     await waitFor(() => !submit.disabled, "enabled create ticket button");
-    root.querySelector("form").requestSubmit();
-    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "new ticket modal closed", 12000);
+    detail.querySelector("form").requestSubmit();
     await waitFor(() => document.querySelector("#issueList")?.textContent.includes(input.title), "created ticket in list", 12000);
+    await waitFor(() => !document.querySelector("#issueList .issue-row.draft"), "draft ticket row removed", 12000);
     return true;
   }, ticket);
+}
+
+async function verifyFixedTicketLayout(cdp) {
+  await runInPage(cdp, async () => {
+    const { waitFor } = pageTools();
+    await waitFor(() => document.body.classList.contains("app-mode"), "fixed app mode");
+    await waitFor(() => document.querySelector(".conversation-stream"), "ticket conversation stream");
+    const root = document.scrollingElement || document.documentElement;
+    const extraScroll = root.scrollHeight - root.clientHeight;
+    if (extraScroll > 2) {
+      throw new Error(`app document should not scroll; overflow is ${extraScroll}px`);
+    }
+    const detailPane = document.querySelector("#ticketDetailPane");
+    const conversation = document.querySelector(".conversation-stream");
+    if (getComputedStyle(detailPane).overflowY !== "hidden") {
+      throw new Error("ticket detail pane should keep overflow inside child regions");
+    }
+    const conversationOverflow = getComputedStyle(conversation).overflowY;
+    if (!["auto", "scroll"].includes(conversationOverflow)) {
+      throw new Error(`conversation stream should be internally scrollable; got ${conversationOverflow}`);
+    }
+    return true;
+  });
 }
 
 async function logout(cdp) {
@@ -378,24 +403,38 @@ async function loginAsAdmin(cdp) {
 
 async function staffReplyAndResolve(cdp) {
   await runInPage(cdp, async (input) => {
-    const { modalRoot, setValue, waitFor } = pageTools();
+    const { setValue, waitFor } = pageTools();
+    await waitFor(() => {
+      const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
+      return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
+    }, "no ticket selected by default");
     const row = await waitFor(() => {
       return [...document.querySelectorAll("#issueList .issue-row")]
         .find((candidate) => candidate.textContent.includes(input.title));
     }, "ticket row for staff update", 12000);
     row.click();
-    const root = await waitFor(() => {
-      const rootNode = modalRoot();
-      return rootNode?.querySelector("dialog[open]") ? rootNode : null;
-    }, "ticket edit modal");
-    setValue(root.querySelector("[name='status']"), "resolved");
-    setValue(root.querySelector("[name='body']"), input.reply);
-    const visibility = root.querySelector("[name='visibility']");
+    const detail = await waitFor(() => {
+      const pane = document.querySelector("#ticketDetailPane");
+      return pane?.querySelector("form [name='status']") ? pane : null;
+    }, "ticket detail pane");
+    setValue(detail.querySelector("[name='status']"), "resolved");
+    setValue(detail.querySelector("[name='body']"), input.reply);
+    const visibility = detail.querySelector("[name='visibility']");
     if (visibility) setValue(visibility, "public");
-    const submit = root.querySelector("button.primary");
-    await waitFor(() => !submit.disabled, "enabled save changes button");
-    root.querySelector("form").requestSubmit();
-    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "ticket edit modal closed", 12000);
+    const submit = detail.querySelector("[data-comment-send]");
+    await waitFor(() => !submit.disabled, "enabled send reply button");
+    submit.click();
+    await waitFor(() => {
+      const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
+      const stillListed = [...document.querySelectorAll("#issueList .issue-row")]
+        .some((candidate) => candidate.textContent.includes(input.title));
+      return detailText.includes(input.reply) || !stillListed;
+    }, "saved ticket update", 12000);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitFor(() => {
+      const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
+      return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
+    }, "ticket closed with escape");
     return true;
   }, ticket);
 }
