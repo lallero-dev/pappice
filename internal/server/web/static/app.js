@@ -16,7 +16,6 @@ const ADMIN_SECTIONS = [DEFAULT_ADMIN_SECTION, "tokens", "webhooks", "email", "m
 const DEFAULT_PRODUCT_SECTION = "members";
 const PRODUCT_SECTIONS = [DEFAULT_PRODUCT_SECTION, "webhooks", "deliveries"];
 const DEFAULT_TICKET_STATUSES = ["new", "assigned"];
-const DRAFT_TICKET_ID = "draft";
 const TICKET_AUTOSAVE_DELAY_MS = 450;
 
 const state = {
@@ -50,8 +49,8 @@ const state = {
   productMode: "index",
   productDetailId: null,
   ticketProjectId: null,
-  ticketDraft: null,
   selectedId: null,
+  renderedTicketDetailId: null,
   sort: {
     key: "created_at",
     dir: "desc"
@@ -479,7 +478,6 @@ function showAuth(mode) {
   state.user = null;
   state.csrf = "";
   state.selectedId = null;
-  state.ticketDraft = null;
   document.body.classList.remove("app-mode");
   clearAppAlert();
   clearAuthError();
@@ -559,9 +557,6 @@ async function loadProjects() {
     state.productDetailId = null;
     state.productMode = "index";
   }
-  if (state.ticketDraft && !state.projects.some((project) => project.id === state.ticketDraft.project_id)) {
-    discardTicketDraft({ render: false });
-  }
   renderProductFilter();
   renderProductIndex();
   updateProjectActions();
@@ -591,8 +586,7 @@ async function loadIssues({ renderDetail = true } = {}) {
   state.issues = payload.tickets || [];
   state.issueCounts = countIssues(countsPayload.tickets || []);
   const previousSelectedId = state.selectedId;
-  const draftSelected = state.selectedId === DRAFT_TICKET_ID && state.ticketDraft;
-  if (state.selectedId && !draftSelected && !state.issues.some((issue) => issue.id === state.selectedId)) {
+  if (state.selectedId && !state.issues.some((issue) => issue.id === state.selectedId)) {
     state.selectedId = null;
   }
   if (renderDetail || state.selectedId !== previousSelectedId) {
@@ -882,9 +876,8 @@ function renderIssueList() {
     }));
     return;
   }
-  const draft = state.ticketDraft;
   const issues = sortedIssues();
-  if (issues.length === 0 && !draft) {
+  if (issues.length === 0) {
     if (hasActiveTicketFilters()) {
       els.issueList.append(emptyState({
         title: "No tickets match these filters",
@@ -900,15 +893,14 @@ function renderIssueList() {
         ? "Create the first ticket for this view."
         : "Tickets will appear here when customers or staff open them.",
       actionLabel: canCreateIssue() ? "New Ticket" : "",
-      onAction: canCreateIssue() ? openTicketDraft : null
+      onAction: canCreateIssue() ? openTicketCreateModal : null
     }));
     return;
   }
-  for (const issue of draft ? [draft, ...issues] : issues) {
+  for (const issue of issues) {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "issue-row";
-    row.classList.toggle("draft", issue.id === DRAFT_TICKET_ID);
     row.classList.toggle("active", issue.id === state.selectedId);
     row.addEventListener("click", () => {
       state.selectedId = state.selectedId === issue.id ? null : issue.id;
@@ -918,7 +910,7 @@ function renderIssueList() {
     row.append(
       el("span", { className: "issue-row-product" }, product.key),
       el("span", { className: "issue-row-time" }, relativeTime(issue.updated_at)),
-      el("span", { className: "issue-row-title" }, issue.title || (issue.id === DRAFT_TICKET_ID ? "Untitled draft" : "Untitled ticket")),
+      el("span", { className: "issue-row-title" }, issue.title || "Untitled ticket"),
       el("span", { className: "issue-row-summary" }, ticketSummary(issue)),
       el("span", { className: "issue-row-footer" }, [
         badge(issue.status, `status-${issue.status}`),
@@ -931,7 +923,6 @@ function renderIssueList() {
 }
 
 function ticketSummary(issue) {
-  if (issue.id === DRAFT_TICKET_ID) return issue.description || "Draft ticket";
   const latest = [...(issue.comments || [])].reverse().find((comment) => String(comment.body || "").trim() !== "");
   return latest?.body || issue.description || "No description.";
 }
@@ -1021,6 +1012,7 @@ function renderTicketDetail() {
   const issue = selectedIssue();
   els.ticketDetailPane.replaceChildren();
   if (!issue) {
+    state.renderedTicketDetailId = null;
     els.ticketDetailPane.append(emptyState({
       title: "No ticket selected",
       body: state.issues.length === 0
@@ -1030,125 +1022,49 @@ function renderTicketDetail() {
     return;
   }
 
-  const creating = issue.id === DRAFT_TICKET_ID;
-  const editable = creating || canEditTicket(issue);
-  const canComment = !creating && canCommentTicket(issue);
+  const isNewlyOpenedTicket = state.renderedTicketDetailId !== issue.id;
+  const editable = canEditTicket(issue);
+  const canComment = canCommentTicket(issue);
   const form = el("form", { className: "ticket-detail-form" });
-  const creatableProjects = creating ? state.projects.filter((project) => canCreateIssue(project.id)) : [];
   form.append(ticketDetailContent({
     issue,
-    creating,
     editable,
-    canComment,
-    projectId: issue.project_id,
-    creatableProjects
+    canComment
   }));
 
-  if (creating) {
-    const submit = el("button", { className: "primary-button", type: "submit" }, "Create Ticket");
-    const actions = [submit];
-    const discard = el("button", { className: "ghost-button", type: "button" }, "Discard");
-    discard.addEventListener("click", () => discardTicketDraft());
-    actions.unshift(discard);
-    form.append(el("div", { className: "ticket-savebar" }, actions));
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      submit.disabled = true;
-      submit.setAttribute("aria-busy", "true");
-      try {
-        const data = Object.fromEntries(new FormData(form).entries());
-        await createTicketFromDraft(data, form, issue.project_id);
-      } catch (error) {
-        showError(error);
-      } finally {
-        submit.disabled = false;
-        submit.removeAttribute("aria-busy");
-      }
-    });
-    bindTicketSaveState({ projectId: issue.project_id, form, submitButton: submit });
-    bindDraftState(form);
-  } else {
-    form.addEventListener("submit", (event) => event.preventDefault());
-    if (editable) bindTicketAutosave(form, issue);
-    if (canComment) bindCommentComposer(form, issue);
-  }
+  form.addEventListener("submit", (event) => event.preventDefault());
+  if (editable) bindTicketAutosave(form, issue);
+  if (canComment) bindCommentComposer(form, issue);
 
   els.ticketDetailPane.append(form);
+  state.renderedTicketDetailId = issue.id;
+  scrollTicketConversationToBottom(form, { smooth: !isNewlyOpenedTicket });
 }
 
-function bindDraftState(form) {
-  const update = () => {
-    if (!state.ticketDraft) return;
-    const data = Object.fromEntries(new FormData(form).entries());
-    const projectId = Number(data.project_id || state.ticketDraft.project_id);
-    const project = currentProject(projectId);
-    state.ticketDraft = {
-      ...state.ticketDraft,
-      project_id: projectId,
-      project_key: project?.key || state.ticketDraft.project_key,
-      project: project?.key || state.ticketDraft.project,
-      title: String(data.title || "").trim(),
-      description: String(data.description || "").trim(),
-      priority: String(data.priority || state.ticketDraft.priority || "normal").trim() || "normal",
-      assignee: String(data.assignee || "").trim(),
-      updated_at: new Date().toISOString()
-    };
-    renderIssueList();
-  };
-  form.querySelectorAll("[data-ticket-control]").forEach((control) => {
-    control.addEventListener("input", update);
-    control.addEventListener("change", update);
+function scrollTicketConversationToBottom(root, { smooth = false } = {}) {
+  const conversation = root.querySelector(".conversation-stream");
+  if (!conversation) return;
+  requestAnimationFrame(() => {
+    const behavior = smooth && !prefersReducedMotion() ? "smooth" : "auto";
+    if (behavior === "smooth") {
+      conversation.scrollTo({ top: conversation.scrollHeight, behavior });
+      return;
+    }
+    const previousBehavior = conversation.style.scrollBehavior;
+    conversation.style.scrollBehavior = "auto";
+    conversation.scrollTop = conversation.scrollHeight;
+    conversation.style.scrollBehavior = previousBehavior;
   });
-  update();
 }
 
-function openTicketDraft() {
-  const creatableProjects = state.projects.filter((project) => canCreateIssue(project.id));
-  const projectId = initialTicketProjectId(creatableProjects);
-  if (!projectId) {
-    showError(new Error("Create a product before adding tickets"));
-    return;
-  }
-  if (!state.ticketDraft) {
-    const project = currentProject(projectId);
-    const now = new Date().toISOString();
-    state.ticketDraft = {
-      id: DRAFT_TICKET_ID,
-      project_id: projectId,
-      project_key: project?.key || "",
-      project: project?.key || "",
-      title: "",
-      description: "",
-      status: "new",
-      priority: "normal",
-      assignee: "",
-      requester: state.user?.display_name || state.user?.username || "",
-      requester_name: state.user?.display_name || state.user?.username || "",
-      requester_email: state.user?.email || "",
-      source: isCustomer() ? "portal" : "staff",
-      comments: [],
-      attachments: [],
-      created_at: now,
-      updated_at: now
-    };
-  }
-  state.selectedId = DRAFT_TICKET_ID;
-  renderIssuesView();
+function prefersReducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
 }
 
-function discardTicketDraft({ render = true } = {}) {
-  state.ticketDraft = null;
-  if (state.selectedId === DRAFT_TICKET_ID) {
-    state.selectedId = null;
-  }
-  if (render) renderIssuesView();
-}
-
-async function createTicketFromDraft(data, form, fallbackProjectId) {
+async function createTicketFromForm(data, form, fallbackProjectId) {
   const payload = ticketCreatePayload(data, fallbackProjectId);
   const body = ticketCreateRequestBody(payload, form);
   const created = await request(`/api/projects/${payload.project_id}/tickets`, { method: "POST", body });
-  state.ticketDraft = null;
   state.ticketProjectId = payload.project_id;
   const createdStatus = created.status || "new";
   if (createdStatus && !state.filters.statuses.includes(createdStatus)) {
@@ -1158,16 +1074,15 @@ async function createTicketFromDraft(data, form, fallbackProjectId) {
   await loadProjects();
 }
 
-function ticketDetailContent({ issue, creating, editable, canComment, projectId, creatableProjects }) {
+function ticketDetailContent({ issue, editable, canComment }) {
   const wrap = el("div", { className: "ticket-detail" });
-  wrap.classList.toggle("ticket-create", creating);
   const header = el("div", { className: "detail-header" });
   if (editable) {
     header.append(ticketTextField("", "title", issue?.title || "", {
       autocomplete: "off",
       className: "ticket-title-input",
       maxlength: 160,
-      placeholder: "Brief summary",
+      placeholder: "Title",
       required: true
     }));
   } else {
@@ -1175,60 +1090,166 @@ function ticketDetailContent({ issue, creating, editable, canComment, projectId,
   }
 
   const main = el("section", { className: "ticket-main" });
-  if (creating) {
-    main.append(ticketTextareaField("Message", "description", issue?.description || "", {
-      className: "ticket-description-input",
-      placeholder: "Describe the request, impact, and useful context.",
-      rows: 6
-    }));
-    main.append(ticketAttachmentField("Attachments", "attachments"));
-  }
-  if (!creating) {
-    const conversation = comments(issue);
-    const composer = canComment ? commentComposer(issue) : el("div");
-    main.append(conversation, composer);
-    const attachmentInput = composer.querySelector(".attachment-input");
-    if (attachmentInput) bindAttachmentDropZone(main, attachmentInput, "conversation-drop-active");
-  }
+  const conversation = comments(issue);
+  const composer = canComment ? commentComposer(issue) : el("div");
+  main.append(conversation, composer);
+  const attachmentInput = composer.querySelector(".attachment-input");
+  if (attachmentInput) bindAttachmentDropZone(main, attachmentInput, "conversation-drop-active");
 
   const side = el("aside", { className: "ticket-side" });
-  if (creating) {
-    side.append(sideSection("Product", ticketSelectControl("project_id", String(projectId), ticketProductOptions(creatableProjects), {
-      ariaLabel: "Product",
-      required: true
-    })));
-  }
   if (editable && !isCustomer()) {
-    side.append(sideSection("Workflow", workflowEditor(issue || { assignee: "", priority: "normal", status: "new" }, { creating })));
+    side.append(sideSection("Workflow", workflowEditor(issue || { assignee: "", priority: "normal", status: "new" })));
   }
-  if (!creating) {
-    const requester = requesterBlock(issue);
-    if (requester) {
-      side.append(sideSection("Requester", requester));
-    }
-    const facts = [
-      factBlock("Product", issue.project_key || issue.project || "Product"),
-      factBlock("Created", relativeTime(issue.created_at)),
-      factBlock("Updated", relativeTime(issue.updated_at))
-    ];
-    if (!canEditTicket(issue)) facts.splice(1, 0, factBlock("Assignee", issue.assignee || "Unassigned"));
-    side.append(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
+  const requester = requesterBlock(issue);
+  if (requester) {
+    side.append(sideSection("Requester", requester));
   }
+  const facts = [
+    factBlock("Product", issue.project_key || issue.project || "Product"),
+    factBlock("Created", relativeTime(issue.created_at)),
+    factBlock("Updated", relativeTime(issue.updated_at))
+  ];
+  if (!canEditTicket(issue)) facts.splice(1, 0, factBlock("Assignee", issue.assignee || "Unassigned"));
+  side.append(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
 
   const conversationPanel = el("section", { className: "ticket-conversation-panel" }, [header, main]);
   wrap.append(el("div", { className: "ticket-detail-grid" }, [conversationPanel, side]));
   return wrap;
 }
 
-function initialTicketProjectId(creatableProjects) {
-  if (state.ticketProjectId && creatableProjects.some((project) => project.id === state.ticketProjectId)) {
-    return state.ticketProjectId;
-  }
-  return creatableProjects[0]?.id || null;
-}
-
 function ticketProductOptions(projects) {
   return projects.map((project) => ({ value: String(project.id), label: `${project.key} / ${project.name}` }));
+}
+
+function openTicketCreateModal() {
+  const creatableProjects = state.projects.filter((project) => canCreateIssue(project.id));
+  if (creatableProjects.length === 0) {
+    showError(new Error("Create a product before adding tickets"));
+    return;
+  }
+  const content = el("div", { className: "ticket-create-modal" }, [
+    ticketCreateFlow({
+      issue: { title: "", description: "", priority: "" },
+      projectId: null,
+      creatableProjects
+    })
+  ]);
+  const confirmArea = el("div", { className: "ticket-create-confirm-area" });
+  content.append(confirmArea);
+  let submitButton = null;
+  let footer = null;
+  els.modalHost.open({
+    title: "New Ticket",
+    content,
+    submitText: "Create Ticket",
+    size: "compact",
+    onSubmit: async (data, form) => {
+      showTicketCreateConfirm(confirmArea, {
+        data,
+        form,
+        footer,
+        submitButton
+      });
+      return false;
+    }
+  });
+  footer = els.modalHost.shadowRoot?.querySelector("footer");
+  submitButton = els.modalHost.shadowRoot?.querySelector("footer .primary");
+  bindTicketCreateState({ root: content, submitButton });
+}
+
+function showTicketCreateConfirm(container, { data, form, footer, submitButton }) {
+  const payload = ticketCreatePayload(data);
+  const files = selectedTicketFiles(form);
+  const project = currentProject(payload.project_id);
+  const cancel = el("button", { className: "ghost", type: "button" }, "Keep Editing");
+  const confirm = el("button", { className: "primary", type: "button", "data-ticket-create-confirm": "true" }, "Create Ticket");
+  if (footer) footer.hidden = true;
+  cancel.addEventListener("click", () => {
+    container.replaceChildren();
+    if (footer) footer.hidden = false;
+  });
+  confirm.addEventListener("click", async () => {
+    confirm.disabled = true;
+    if (submitButton) submitButton.disabled = true;
+    confirm.setAttribute("aria-busy", "true");
+    try {
+      await createTicketFromForm(data, form);
+      els.modalHost.close();
+    } catch (error) {
+      showError(error);
+      confirm.disabled = false;
+      if (submitButton) submitButton.disabled = false;
+      confirm.removeAttribute("aria-busy");
+    }
+  });
+  container.replaceChildren(el("div", { className: "account-confirm ticket-create-confirm" }, [
+    el("strong", {}, "Create this ticket?"),
+    el("p", {}, "The ticket will be opened and visible to the people who can access this product."),
+    el("dl", { className: "confirm-detail-list" }, [
+      el("dt", {}, "Product"),
+      el("dd", {}, project ? `${project.key} / ${project.name}` : "Selected product"),
+      el("dt", {}, "Priority"),
+      el("dd", {}, labelize(payload.priority)),
+      el("dt", {}, "Attachments"),
+      el("dd", {}, files.length === 0 ? "None" : String(files.length))
+    ]),
+    el("div", { className: "account-confirm-actions" }, [cancel, confirm])
+  ]));
+}
+
+function ticketCreateFlow({ issue, projectId, creatableProjects }) {
+  const productOptions = [
+    { value: "", label: "Choose product" },
+    ...ticketProductOptions(creatableProjects)
+  ];
+  const priorityOptions = [
+    { value: "", label: "Choose priority" },
+    ...selectOptions(state.meta.priorities)
+  ];
+  const projectValue = projectId && creatableProjects.some((project) => project.id === projectId) ? String(projectId) : "";
+  return el("div", { className: "ticket-create-flow" }, [
+    ticketCreateStep("1", "Product", [
+      ticketSelectField("", "project_id", projectValue, productOptions, {
+        ariaLabel: "Product",
+        required: true
+      })
+    ]),
+    ticketCreateStep("2", "Priority", [
+      ticketSelectField("", "priority", issue?.priority || "", priorityOptions, {
+        ariaLabel: "Priority",
+        required: true
+      })
+    ]),
+    ticketCreateStep("3", "Issue", [
+      ticketTextField("", "title", issue?.title || "", {
+        autocomplete: "off",
+        className: "ticket-title-input",
+        maxlength: 160,
+        placeholder: "Title",
+        required: true
+      }),
+      ticketTextareaField("", "description", issue?.description || "", {
+        className: "ticket-description-input",
+        placeholder: "Describe the request, impact, and useful context.",
+        required: true,
+        rows: 7
+      }),
+      ticketAttachmentField("", "attachments")
+    ])
+  ]);
+}
+
+function ticketCreateStep(number, title, content) {
+  return el("section", { className: "ticket-create-step", "data-create-step": number }, [
+    el("span", { className: "ticket-create-step-number" }, number),
+    el("div", { className: "ticket-create-step-body" }, [
+      el("div", { className: "ticket-create-step-head" }, [
+        el("h4", {}, title)
+      ]),
+      el("div", { className: "ticket-create-step-content" }, content)
+    ])
+  ]);
 }
 
 function ticketTextField(label, name, value, options = {}) {
@@ -1266,7 +1287,7 @@ function ticketAttachmentField(label, name) {
   }
   const preview = el("div", { className: "attachment-preview empty" });
   const trigger = el("button", { className: "attachment-trigger", type: "button" }, [
-    el("span", { className: "attachment-trigger-icon", "aria-hidden": "true" })
+    attachmentIcon()
   ]);
   trigger.setAttribute("aria-label", "Attach files");
   trigger.title = "Attach files";
@@ -1303,6 +1324,25 @@ function ticketAttachmentField(label, name) {
     el("span", {}, label),
     picker
   ]);
+}
+
+function attachmentIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "attachment-trigger-icon");
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "100%");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M12 14V8.5C12 7.67157 12.6716 7 13.5 7C14.3284 7 15 7.67157 15 8.5V14C15 15.6569 13.6569 17 12 17C10.3431 17 9 15.6569 9 14V10M8.8 22H15.2C16.8802 22 17.7202 22 18.362 21.673C18.9265 21.3854 19.3854 20.9265 19.673 20.362C20 19.7202 20 18.8802 20 17.2V6.8C20 5.11984 20 4.27976 19.673 3.63803C19.3854 3.07354 18.9265 2.6146 18.362 2.32698C17.7202 2 16.8802 2 15.2 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22Z");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
 }
 
 function renderAttachmentPreview(input, preview) {
@@ -1898,11 +1938,10 @@ function renderPager(container, page, onChange) {
   );
 }
 
-function workflowEditor(issue, { creating = false } = {}) {
-  const controls = [];
-  if (!creating) {
-    controls.push(ticketSelectField("Status", "status", issue.status, selectOptions(state.meta.statuses), { required: true }));
-  }
+function workflowEditor(issue) {
+  const controls = [
+    ticketSelectField("Status", "status", issue.status, selectOptions(state.meta.statuses), { required: true })
+  ];
   controls.push(
     ticketSelectField("Priority", "priority", issue.priority || "normal", selectOptions(state.meta.priorities), { required: true }),
     ticketSelectField("Assignee", "assignee", issue.assignee || "", assigneeOptions(issue.assignee))
@@ -1911,15 +1950,71 @@ function workflowEditor(issue, { creating = false } = {}) {
   return el("div", { className: "workflow-editor" }, [controlList]);
 }
 
+async function confirmTicketComment(issue, composer) {
+  const data = {
+    body: composer.querySelector("[name='body']")?.value || "",
+    visibility: composer.querySelector("[name='visibility']")?.value || "public"
+  };
+  const comment = ticketCommentPayload(issue, data);
+  const files = selectedCommentFiles(composer);
+  if (!comment && files.length === 0) return false;
+  const internal = String(data.visibility || "public") === "internal";
+  return confirmSendAction({
+    title: internal ? "Save this internal note?" : "Send this reply?",
+    body: internal
+      ? "The note will stay internal and customers will not see it."
+      : "The reply will be added to the ticket conversation.",
+    confirmLabel: internal ? "Save Note" : "Send Reply",
+    details: [
+      ["Ticket", issue.key || `#${issue.id}`],
+      ["Visibility", internal ? "Internal note" : "Public reply"],
+      ["Attachments", files.length === 0 ? "None" : String(files.length)]
+    ]
+  });
+}
+
+function confirmSendAction({ title, body, confirmLabel, details = [] }) {
+  if (!els.modalHost) return Promise.resolve(window.confirm(body));
+  return new Promise((resolve) => {
+    let settled = false;
+    let dialog = null;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      dialog?.removeEventListener("close", handleClose);
+      resolve(value);
+    };
+    const handleClose = () => finish(false);
+    const detailList = details.length > 0
+      ? el("dl", { className: "confirm-detail-list" }, details.flatMap(([label, value]) => [
+        el("dt", {}, label),
+        el("dd", {}, value)
+      ]))
+      : el("div");
+    els.modalHost.open({
+      title,
+      submitText: confirmLabel,
+      content: el("div", { className: "send-confirm" }, [
+        el("p", {}, body),
+        detailList
+      ]),
+      onSubmit: async () => finish(true)
+    });
+    dialog = els.modalHost.shadowRoot?.querySelector("dialog");
+    dialog?.addEventListener("close", handleClose, { once: true });
+  });
+}
+
 function ticketCreatePayload(data, fallbackProjectId) {
   const payload = {
     description: String(data.description || "").trim(),
+    priority: String(data.priority || "normal").trim() || "normal",
     project_id: Number(data.project_id || fallbackProjectId),
     title: String(data.title || "").trim()
   };
   if (!isCustomer()) {
-    payload.assignee = String(data.assignee || "").trim();
-    payload.priority = String(data.priority || "normal").trim() || "normal";
+    const assignee = String(data.assignee || "").trim();
+    if (assignee) payload.assignee = assignee;
   }
   return payload;
 }
@@ -2038,6 +2133,11 @@ function bindCommentComposer(form, issue) {
   form.addEventListener("submit", async (event) => {
     if (event.submitter !== sendButton) return;
     event.preventDefault();
+    const confirmed = await confirmTicketComment(issue, composer);
+    if (!confirmed) {
+      update();
+      return;
+    }
     sendButton.disabled = true;
     sendButton.setAttribute("aria-busy", "true");
     try {
@@ -2090,17 +2190,45 @@ function selectedCommentFiles(composer) {
   return files;
 }
 
-function bindTicketSaveState({ projectId, form, submitButton }) {
+function bindTicketCreateState({ root, submitButton }) {
+  const product = root.querySelector("[name='project_id']");
+  const priority = root.querySelector("[name='priority']");
+  const title = root.querySelector("[name='title']");
+  const description = root.querySelector("[name='description']");
+  const steps = Array.from(root.querySelectorAll("[data-create-step]"));
+  const confirmArea = root.querySelector(".ticket-create-confirm-area");
+  const footer = root.getRootNode()?.querySelector?.("footer");
   const update = () => {
-    const data = Object.fromEntries(new FormData(form).entries());
-    const hasTitle = String(data.title || "").trim() !== "";
-    submitButton.disabled = !hasTitle || !Number(data.project_id || projectId);
+    confirmArea?.replaceChildren();
+    if (footer) footer.hidden = false;
+    const hasProduct = Boolean(product?.value);
+    const hasPriority = Boolean(priority?.value);
+    const hasTitle = String(title?.value || "").trim() !== "";
+    const hasDescription = String(description?.value || "").trim() !== "";
+    updateTicketCreateStep(steps[0], { enabled: true, active: !hasProduct, complete: hasProduct });
+    updateTicketCreateStep(steps[1], { enabled: hasProduct, active: hasProduct && !hasPriority, complete: hasProduct && hasPriority });
+    updateTicketCreateStep(steps[2], {
+      enabled: hasProduct && hasPriority,
+      active: hasProduct && hasPriority,
+      complete: hasProduct && hasPriority && hasTitle && hasDescription
+    });
+    if (submitButton) submitButton.disabled = !(hasProduct && hasPriority && hasTitle && hasDescription);
   };
-  form.querySelectorAll("[data-ticket-control]").forEach((control) => {
+  root.querySelectorAll("[data-ticket-control]").forEach((control) => {
     control.addEventListener("input", update);
     control.addEventListener("change", update);
   });
   update();
+}
+
+function updateTicketCreateStep(step, { enabled, active, complete }) {
+  if (!step) return;
+  step.classList.toggle("disabled", !enabled);
+  step.classList.toggle("active", enabled && active);
+  step.classList.toggle("complete", complete);
+  step.querySelectorAll("input, select, textarea, button").forEach((control) => {
+    control.disabled = !enabled;
+  });
 }
 
 function assigneeOptions(current = "") {
@@ -2126,7 +2254,7 @@ function comments(issue) {
   for (const message of conversationMessages(issue)) {
     const rowClasses = [
       "message-row",
-      message.side === "customer" ? "from-customer" : "from-support",
+      message.side === "current" ? "from-current" : "from-other",
       message.className ? `message-${message.className}` : ""
     ].filter(Boolean).join(" ");
     const row = el("div", { className: rowClasses });
@@ -2158,7 +2286,7 @@ function conversationMessages(issue) {
     label: `opened ${relativeTime(issue.created_at)}`,
     visibility: "public",
     attachments: issue.attachments || [],
-    side: isRequesterSide(issue, { author: opener }) ? "customer" : "support",
+    side: isCurrentUserMessage(issue, { author: opener, opening: true }) ? "current" : "other",
     className: "opening-message"
   }];
   for (const comment of issue.comments || []) {
@@ -2171,7 +2299,7 @@ function conversationMessages(issue) {
       label: relativeTime(comment.created_at),
       visibility: internal ? "internal" : "public",
       attachments: comment.attachments || [],
-      side: !internal && isRequesterSide(issue, comment) ? "customer" : "support",
+      side: isCurrentUserMessage(issue, comment) ? "current" : "other",
       className: internal ? "internal" : ""
     });
   }
@@ -2184,17 +2312,28 @@ function initials(value) {
   return parts.slice(0, 2).map((part) => part.slice(0, 1).toUpperCase()).join("");
 }
 
-function isRequesterSide(issue, entry) {
-  if (issue.source === "portal" && !entry.author) return true;
+function isCurrentUserMessage(issue, entry) {
+  const currentValues = currentUserAuthorValues();
   const author = normalizeAuthor(entry.author);
-  if (!author) return issue.source === "portal";
+  if (author && currentValues.includes(author)) return true;
+  if (!entry.opening) return false;
   const requesterValues = [
     issue.requester,
     issue.requester_name,
     issue.requester_email,
     String(issue.requester_email || "").split("@")[0]
   ].map(normalizeAuthor).filter(Boolean);
-  return requesterValues.includes(author);
+  return requesterValues.some((value) => currentValues.includes(value));
+}
+
+function currentUserAuthorValues() {
+  const email = state.user?.email || "";
+  return [
+    state.user?.display_name,
+    state.user?.username,
+    email,
+    String(email).split("@")[0]
+  ].map(normalizeAuthor).filter(Boolean);
 }
 
 function normalizeAuthor(value) {
@@ -2829,7 +2968,7 @@ function bindEvents() {
   for (const button of els.productSectionButtons) {
     button.addEventListener("click", () => switchProductSection(button.getAttribute("data-product-section")).catch(showError));
   }
-  els.newIssueButton.addEventListener("click", () => openTicketDraft());
+  els.newIssueButton.addEventListener("click", () => openTicketCreateModal());
   els.modalHost.addEventListener("pappice-modal-error", (event) => showError(event.detail));
 
   els.searchInput.addEventListener("input", debounce(() => {
@@ -2838,7 +2977,7 @@ function bindEvents() {
   }, 180));
   els.productFilter.addEventListener("change", async () => {
     state.ticketProjectId = Number(els.productFilter.value) || null;
-    state.selectedId = state.ticketDraft ? DRAFT_TICKET_ID : null;
+    state.selectedId = null;
     renderProductFilter();
     updateProjectActions();
     await loadIssues();
@@ -2933,7 +3072,6 @@ function currentProductDetail() {
 }
 
 function selectedIssue() {
-  if (state.selectedId === DRAFT_TICKET_ID) return state.ticketDraft;
   return state.issues.find((issue) => issue.id === state.selectedId) || null;
 }
 

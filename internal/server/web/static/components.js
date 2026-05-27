@@ -57,8 +57,8 @@ export class PappiceModal extends HTMLElement {
       this.errorNode.hidden = true;
       this.errorNode.textContent = "";
       try {
-        await onSubmit(data, this.form);
-        this.close();
+        const result = await onSubmit(data, this.form);
+        if (result !== false) this.close();
       } catch (error) {
         this.errorNode.textContent = error?.message || "Request failed";
         this.errorNode.hidden = false;

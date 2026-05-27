@@ -593,10 +593,6 @@ button:focus-visible {
   background: #edf6ff;
 }
 
-.issue-row.draft {
-  border-left: 3px solid var(--blue);
-}
-
 .issue-row-product,
 .issue-row-time,
 .issue-row-title,
@@ -718,19 +714,6 @@ button:focus-visible {
   padding: 0;
 }
 
-.ticket-create .ticket-detail-grid {
-  overflow: hidden;
-}
-
-.ticket-create .ticket-main {
-  gap: 10px;
-  overflow: visible;
-}
-
-.ticket-create .ticket-conversation-panel {
-  overflow: auto;
-}
-
 .detail-header {
   display: grid;
   gap: 10px;
@@ -759,6 +742,7 @@ button:focus-visible {
 }
 
 .ticket-conversation-panel {
+  align-content: stretch;
   display: grid;
   gap: 16px;
   grid-template-rows: auto minmax(0, 1fr);
@@ -782,10 +766,6 @@ button:focus-visible {
   min-height: 0;
   overflow: hidden;
   position: relative;
-}
-
-.ticket-create .ticket-main {
-  grid-template-rows: auto auto;
 }
 
 .ticket-main.conversation-drop-active {
@@ -933,28 +913,39 @@ button:focus-visible {
 
 .comment-list,
 .conversation-stream {
+  align-content: start;
   background: #f6f8fb;
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   display: grid;
   gap: 14px;
+  grid-auto-rows: max-content;
   min-height: 0;
   overflow: auto;
   padding: 14px 12px;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comment-list,
+  .conversation-stream {
+    scroll-behavior: auto;
+  }
 }
 
 .message-row {
   display: flex;
   gap: 9px;
   min-width: 0;
+  width: 100%;
 }
 
-.message-row.from-customer {
-  flex-direction: row-reverse;
+.message-row.from-current {
   justify-content: flex-end;
 }
 
-.message-row.from-support {
+.message-row.from-other {
   justify-content: flex-start;
 }
 
@@ -974,10 +965,11 @@ button:focus-visible {
   width: 30px;
 }
 
-.message-row.from-customer .message-avatar {
+.message-row.from-current .message-avatar {
   background: #d9ecff;
   border-color: #b7d6f0;
   color: var(--blue-dark);
+  order: 2;
 }
 
 .message-row.message-internal .message-avatar {
@@ -997,9 +989,10 @@ button:focus-visible {
   padding: 10px 12px;
 }
 
-.message-row.from-customer .message-bubble {
+.message-row.from-current .message-bubble {
   background: #eaf4ff;
   border-color: #bdd8f1;
+  order: 1;
 }
 
 .message-bubble.opening-message {
@@ -1008,7 +1001,7 @@ button:focus-visible {
   box-shadow: inset 3px 0 0 #9fc7e7, 0 4px 12px rgba(15, 23, 42, 0.05);
 }
 
-.message-bubble.internal {
+.message-row.message-internal .message-bubble {
   background: #fff8e8;
   border-color: #e6c777;
   box-shadow: inset 3px 0 0 #e1b94e, 0 4px 12px rgba(15, 23, 42, 0.05);
@@ -1105,9 +1098,17 @@ button:focus-visible {
 }
 
 .comment-form .attachment-picker {
-  border-style: solid;
-  min-height: 36px;
-  padding: 4px 5px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-height: 30px;
+  padding: 0 1px;
+}
+
+.comment-form .attachment-picker.dragging,
+.comment-form .attachment-picker:focus-within {
+  background: transparent;
+  box-shadow: none;
 }
 
 .comment-form .attachment-trigger {
@@ -1176,18 +1177,9 @@ button:focus-visible {
 }
 
 .attachment-trigger-icon {
-  display: inline-block;
+  display: block;
   height: 18px;
-  position: relative;
-  transform: rotate(35deg);
-  width: 16px;
-}
-
-.attachment-trigger-icon::before,
-.attachment-trigger-icon::after {
-  border: 2px solid currentColor;
-  content: "";
-  position: absolute;
+  width: 18px;
 }
 
 .attachment-preview {
@@ -1204,24 +1196,6 @@ button:focus-visible {
 
 .attachment-preview.empty {
   display: none;
-}
-
-.attachment-trigger-icon::before {
-  border-left: 0;
-  border-radius: 0 9px 9px 0;
-  height: 13px;
-  left: 6px;
-  top: 1px;
-  width: 7px;
-}
-
-.attachment-trigger-icon::after {
-  border-right: 0;
-  border-radius: 9px 0 0 9px;
-  height: 9px;
-  left: 2px;
-  top: 5px;
-  width: 7px;
 }
 
 .attachment-preview-chip {
@@ -1377,7 +1351,7 @@ button:focus-visible {
   background: transparent;
   min-height: 64px;
   padding: 0;
-  resize: vertical;
+  resize: none;
 }
 
 .comment-input:focus {
@@ -1545,11 +1519,13 @@ button:focus-visible {
 }
 
 .admin-sidebar {
+  align-content: start;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   display: grid;
   gap: 4px;
+  grid-auto-rows: max-content;
   min-height: 0;
   overflow: auto;
   padding: 8px;
@@ -1708,8 +1684,10 @@ button:focus-visible {
 }
 
 .admin-list {
+  align-content: start;
   display: grid;
   gap: 6px;
+  grid-auto-rows: max-content;
   max-height: none;
   min-height: 0;
   overflow: auto;

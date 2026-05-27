@@ -9,6 +9,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 dialog {
   border: 1px solid #cbd5df;
   border-radius: 10px;
@@ -32,7 +36,9 @@ dialog.compact {
 }
 
 dialog::backdrop {
-  background: rgb(18 31 45 / 48%);
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+  background: rgb(18 31 45 / 36%);
 }
 
 form {
@@ -74,6 +80,7 @@ header {
 }
 
 section[part="body"] {
+  max-height: calc(92vh - 116px);
   min-height: 0;
   overscroll-behavior: contain;
   overflow-y: auto;
@@ -82,6 +89,10 @@ section[part="body"] {
 
 dialog.wide section[part="body"] {
   max-height: calc(100vh - 128px);
+}
+
+dialog.compact section[part="body"] {
+  max-height: calc(100vh - 146px);
 }
 
 h2 {
@@ -222,6 +233,47 @@ button:disabled {
   color: #1f2933;
 }
 
+.send-confirm {
+  display: grid;
+  gap: 12px;
+}
+
+.send-confirm p {
+  margin: 0;
+}
+
+.confirm-detail-list {
+  border: 1px solid #dde4ec;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  margin: 0;
+  overflow: hidden;
+}
+
+.confirm-detail-list dt,
+.confirm-detail-list dd {
+  border-bottom: 1px solid #dde4ec;
+  margin: 0;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.confirm-detail-list dt {
+  background: #f8fafc;
+  color: #667085;
+  font-weight: 750;
+}
+
+.confirm-detail-list dd {
+  overflow-wrap: anywhere;
+}
+
+.confirm-detail-list dt:last-of-type,
+.confirm-detail-list dd:last-of-type {
+  border-bottom: 0;
+}
+
 .ticket-detail {
   display: grid;
   gap: 16px;
@@ -244,6 +296,10 @@ button:disabled {
   gap: 6px;
 }
 
+.ticket-form-field > span:empty {
+  display: none;
+}
+
 .ticket-form-field > span {
   color: #3b4856;
   font-size: 12px;
@@ -260,28 +316,117 @@ button:disabled {
 .ticket-description-input {
   line-height: 1.55;
   min-height: 150px;
+  resize: none;
 }
 
-.ticket-create {
-  gap: 14px;
-}
-
-.ticket-create .ticket-detail-grid {
-  align-items: start;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 310px);
-}
-
-.ticket-create .ticket-main {
+.ticket-create-modal {
+  display: grid;
   gap: 10px;
 }
 
-.ticket-create .ticket-title-input {
-  font-size: 15px;
-  font-weight: 600;
+.ticket-create-flow {
+  display: grid;
+  gap: 10px;
 }
 
-.ticket-create .ticket-description-input {
-  min-height: 150px;
+.ticket-create-step {
+  background: #ffffff;
+  border: 1px solid #dde4ec;
+  border-radius: 9px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  padding: 12px;
+}
+
+.ticket-create-step.active {
+  border-color: #93bee4;
+  box-shadow: 0 0 0 2px rgba(35, 103, 164, 0.08);
+}
+
+.ticket-create-step.complete {
+  border-color: #b9dec5;
+}
+
+.ticket-create-step.disabled {
+  background: #e7edf3;
+  border-color: #c4cfdb;
+  color: #4f5f70;
+  filter: blur(1px);
+  opacity: 1;
+}
+
+.ticket-create-step.disabled .ticket-create-step-number {
+  background: #d5dee8;
+  border-color: #aebdcb;
+  color: #465668;
+}
+
+.ticket-create-step.disabled input,
+.ticket-create-step.disabled select,
+.ticket-create-step.disabled textarea,
+.ticket-create-step.disabled button {
+  background: #dce5ee;
+  border-color: #b6c4d2;
+  color: #526174;
+}
+
+.ticket-create-step.disabled .ticket-create-step-content {
+  opacity: 0.72;
+}
+
+.ticket-create-step-number {
+  align-items: center;
+  background: #eaf4ff;
+  border: 1px solid #bdd8f1;
+  border-radius: 999px;
+  color: #194d7b;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 850;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.ticket-create-step.complete .ticket-create-step-number {
+  background: #eaf7ef;
+  border-color: #b9dec5;
+  color: #2f855a;
+}
+
+.ticket-create-step-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ticket-create-step-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.ticket-create-step h4 {
+  color: #27384a;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.ticket-create-step-content {
+  display: grid;
+  gap: 9px;
+}
+
+.ticket-create-confirm-area:empty {
+  display: none;
+}
+
+.ticket-create-confirm .confirm-detail-list {
+  margin-top: 2px;
 }
 
 .detail-meta {
@@ -360,8 +505,118 @@ button:disabled {
 }
 
 .attachment-input {
-  background: #f8fafc;
-  border-style: dashed;
+  height: 1px;
+  left: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 1px;
+}
+
+.attachment-picker {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  gap: 6px;
+  min-height: 30px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 1px;
+  position: relative;
+}
+
+.attachment-trigger {
+  align-items: center;
+  background: #f7fafc;
+  border: 1px solid #dde4ec;
+  border-radius: 999px;
+  color: #22313f;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-weight: 700;
+  height: 30px;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+.attachment-trigger:hover {
+  background: #edf4fa;
+  border-color: #c5d8e9;
+}
+
+.attachment-trigger-icon {
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
+.attachment-preview {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1px;
+  scrollbar-width: thin;
+}
+
+.attachment-preview.empty {
+  display: none;
+}
+
+.attachment-preview-chip {
+  align-items: center;
+  background: #eef5fc;
+  border: 1px solid #dde4ec;
+  border-radius: 999px;
+  color: #22313f;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  height: 25px;
+  max-width: 180px;
+  min-width: 0;
+  padding: 0 4px 0 9px;
+}
+
+.attachment-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-remove {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #667085;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  height: 18px;
+  justify-content: center;
+  line-height: 1;
+  min-height: 18px;
+  padding: 0;
+  width: 18px;
+}
+
+.attachment-remove:hover {
+  background: #fff1f0;
+  border-color: #ffd0cc;
+  color: #b42318;
 }
 
 .attachment-list {

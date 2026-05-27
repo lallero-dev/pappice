@@ -1788,7 +1788,6 @@ func (s *Server) prepareIssueInput(w http.ResponseWriter, user store.User, proje
 		return true, false
 	}
 	input.Assignee = ""
-	input.Priority = "normal"
 	input.Source = "portal"
 	input.RequesterName = defaultString(user.DisplayName, user.Username)
 	input.RequesterEmail = requesterEmail

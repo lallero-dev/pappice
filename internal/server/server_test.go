@@ -1380,7 +1380,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("decode customer ticket: %v", err)
 	}
-	if created.Priority != "normal" || created.Assignee != "" || created.Source != "portal" {
+	if created.Priority != "urgent" || created.Assignee != "" || created.Source != "portal" {
 		t.Fatalf("customer-controlled fields were not normalized: %#v", created)
 	}
 
@@ -1410,7 +1410,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 
 	for name, patch := range map[string]map[string]any{
 		"status":      {"status": "assigned"},
-		"priority":    {"priority": "urgent"},
+		"priority":    {"priority": "low"},
 		"assignee":    {"assignee": "admin"},
 		"title":       {"title": "Customer renamed ticket"},
 		"description": {"description": "Customer edited description"},
@@ -1432,7 +1432,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 		bytes.Contains(body, []byte("Customer renamed ticket")) ||
 		bytes.Contains(body, []byte("Customer edited description")) ||
 		bytes.Contains(body, []byte(`"status":"assigned"`)) ||
-		bytes.Contains(body, []byte(`"priority":"urgent"`)) ||
+		bytes.Contains(body, []byte(`"priority":"low"`)) ||
 		bytes.Contains(body, []byte(`"assignee":"admin"`)) {
 		t.Fatalf("blocked customer workflow change persisted: %s", body)
 	}

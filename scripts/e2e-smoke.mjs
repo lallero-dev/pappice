@@ -318,21 +318,67 @@ async function completeCustomerSetup(cdp, setupLink) {
 
 async function createCustomerTicket(cdp) {
   await runInPage(cdp, async (input) => {
-    const { setValue, waitFor } = pageTools();
+    const { isScrolledToBottom, modalRoot, setValue, waitFor } = pageTools();
     await waitFor(() => document.querySelector("#newIssueButton") && !document.querySelector("#newIssueButton").hidden, "new ticket button");
     document.querySelector("#newIssueButton").click();
-    const detail = await waitFor(() => {
-      const pane = document.querySelector("#ticketDetailPane");
-      return pane?.querySelector("form [name='title']") ? pane : null;
-    }, "new ticket draft");
-    await waitFor(() => document.querySelector("#issueList .issue-row.draft"), "draft ticket row");
-    setValue(detail.querySelector("[name='title']"), input.title);
-    setValue(detail.querySelector("[name='description']"), input.description);
-    const submit = detail.querySelector("button.primary-button");
-    await waitFor(() => !submit.disabled, "enabled create ticket button");
-    detail.querySelector("form").requestSubmit();
+    const root = await waitFor(() => {
+      const candidate = modalRoot();
+      const dialog = candidate?.querySelector("dialog[open]");
+      const heading = candidate?.querySelector("h2")?.textContent || "";
+      const title = candidate?.querySelector(".ticket-create-flow [name='title']");
+      return dialog && heading.includes("New Ticket") && title ? candidate : null;
+    }, "new ticket modal");
+    if (document.querySelector("#issueList .issue-row.draft")) {
+      throw new Error("ticket creation should use a modal, not a draft row");
+    }
+    const project = root.querySelector("[name='project_id']");
+    if (!project.value) {
+      const firstProject = [...project.options].find((option) => option.value);
+      setValue(project, firstProject.value);
+    }
+    await waitFor(() => !root.querySelector("[name='priority']").disabled, "priority step enabled");
+    setValue(root.querySelector("[name='priority']"), "high");
+    await waitFor(() => !root.querySelector("[name='title']").disabled, "issue detail step enabled");
+    setValue(root.querySelector("[name='title']"), input.title);
+    setValue(root.querySelector("[name='description']"), input.description);
+    const create = root.querySelector("footer .primary");
+    await waitFor(() => !create.disabled, "enabled create ticket button");
+    create.click();
+    const confirm = await waitFor(() => {
+      const candidate = root.querySelector("[data-ticket-create-confirm]");
+      return candidate && !candidate.disabled ? candidate : null;
+    }, "ticket create confirmation");
+    confirm.click();
+    await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "new ticket modal closed", 12000);
     await waitFor(() => document.querySelector("#issueList")?.textContent.includes(input.title), "created ticket in list", 12000);
-    await waitFor(() => !document.querySelector("#issueList .issue-row.draft"), "draft ticket row removed", 12000);
+    if (document.querySelector("#issueList .issue-row.draft")) {
+      throw new Error("draft ticket row should not be present after creating a ticket");
+    }
+    const createdDetail = await waitFor(() => {
+      const pane = document.querySelector("#ticketDetailPane");
+      return pane?.textContent.includes(input.description) ? pane : null;
+    }, "created ticket detail");
+    const ownMessage = [...createdDetail.querySelectorAll(".message-row")]
+      .find((candidate) => candidate.textContent.includes(input.description));
+    if (!ownMessage?.classList.contains("from-current")) {
+      throw new Error("customer opening message should be aligned as the current sender");
+    }
+    const ownAvatarRect = ownMessage.querySelector(".message-avatar").getBoundingClientRect();
+    const ownConversation = createdDetail.querySelector(".conversation-stream");
+    const ownConversationRect = ownConversation.getBoundingClientRect();
+    const ownConversationStyle = getComputedStyle(ownConversation);
+    const ownContentRight = ownConversationRect.left + ownConversation.clientWidth - parseFloat(ownConversationStyle.paddingRight || "0");
+    if (ownConversationStyle.scrollBehavior !== "smooth") {
+      throw new Error("conversation stream should use smooth programmatic scrolling");
+    }
+    await waitFor(() => isScrolledToBottom(ownConversation), "created ticket opens at latest message");
+    if (ownAvatarRect.right < ownContentRight - 4) {
+      throw new Error("current sender message should be visually aligned to the right");
+    }
+    const replyInput = createdDetail.querySelector(".comment-input");
+    if (replyInput && getComputedStyle(replyInput).resize !== "none") {
+      throw new Error("reply composer textarea should not be resizable");
+    }
     return true;
   }, ticket);
 }
@@ -403,7 +449,7 @@ async function loginAsAdmin(cdp) {
 
 async function staffReplyAndResolve(cdp) {
   await runInPage(cdp, async (input) => {
-    const { setValue, waitFor } = pageTools();
+    const { isScrolledToBottom, setValue, submitModal, waitFor } = pageTools();
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
       return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
@@ -417,6 +463,19 @@ async function staffReplyAndResolve(cdp) {
       const pane = document.querySelector("#ticketDetailPane");
       return pane?.querySelector("form [name='status']") ? pane : null;
     }, "ticket detail pane");
+    const incomingMessage = [...detail.querySelectorAll(".message-row")]
+      .find((candidate) => candidate.textContent.includes(input.description));
+    if (!incomingMessage?.classList.contains("from-other")) {
+      throw new Error("customer message should be aligned as incoming for staff");
+    }
+    const incomingAvatarRect = incomingMessage.querySelector(".message-avatar").getBoundingClientRect();
+    const incomingConversation = detail.querySelector(".conversation-stream");
+    const incomingConversationRect = incomingConversation.getBoundingClientRect();
+    const incomingConversationStyle = getComputedStyle(incomingConversation);
+    await waitFor(() => isScrolledToBottom(incomingConversation), "staff ticket opens at latest message");
+    if (incomingAvatarRect.left > incomingConversationRect.left + parseFloat(incomingConversationStyle.paddingLeft || "0") + 4) {
+      throw new Error("incoming message should be visually aligned to the left");
+    }
     setValue(detail.querySelector("[name='status']"), "resolved");
     setValue(detail.querySelector("[name='body']"), input.reply);
     const composer = detail.querySelector(".comment-form");
@@ -454,12 +513,28 @@ async function staffReplyAndResolve(cdp) {
     const submit = detail.querySelector("[data-comment-send]");
     await waitFor(() => !submit.disabled, "enabled send reply button");
     submit.click();
+    await submitModal("Send this reply?");
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
       const stillListed = [...document.querySelectorAll("#issueList .issue-row")]
         .some((candidate) => candidate.textContent.includes(input.title));
       return detailText.includes(input.reply) || !stillListed;
     }, "saved ticket update", 12000);
+    const staffReply = [...detail.querySelectorAll(".message-row")]
+      .find((candidate) => candidate.textContent.includes(input.reply));
+    if (staffReply && !staffReply.classList.contains("from-current")) {
+      throw new Error("staff reply should be aligned as the current sender");
+    }
+    if (staffReply) {
+      const staffAvatarRect = staffReply.querySelector(".message-avatar").getBoundingClientRect();
+      const staffConversation = detail.querySelector(".conversation-stream");
+      const staffConversationRect = staffConversation.getBoundingClientRect();
+      const staffConversationStyle = getComputedStyle(staffConversation);
+      const staffContentRight = staffConversationRect.left + staffConversation.clientWidth - parseFloat(staffConversationStyle.paddingRight || "0");
+      if (staffAvatarRect.right < staffContentRight - 4) {
+        throw new Error("staff reply should be visually aligned to the right");
+      }
+    }
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
@@ -533,7 +608,22 @@ function pageTools() {
     control.dispatchEvent(new Event("change", { bubbles: true }));
   };
   const modalRoot = () => document.querySelector("#modalHost")?.shadowRoot || null;
-  return { modalRoot, setValue, waitFor };
+  const submitModal = async (title) => {
+    const root = await waitFor(() => {
+      const candidate = modalRoot();
+      const dialog = candidate?.querySelector("dialog[open]");
+      const heading = candidate?.querySelector("h2")?.textContent || "";
+      return dialog && (!title || heading.includes(title)) ? candidate : null;
+    }, title ? `${title} modal` : "modal");
+    root.querySelector("footer .primary").click();
+    await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "modal closed", 12000);
+    return true;
+  };
+  const isScrolledToBottom = (element) => {
+    if (!element) return false;
+    return Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 2;
+  };
+  return { isScrolledToBottom, modalRoot, setValue, submitModal, waitFor };
 }
 
 async function runInPage(cdp, fn, ...args) {
