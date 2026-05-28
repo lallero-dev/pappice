@@ -86,6 +86,7 @@ const state = {
     q: "",
     statuses: [...DEFAULT_TICKET_STATUSES],
     assignee: "",
+    statusCustomized: false,
     unread: false
   },
   emailPage: {
@@ -592,6 +593,7 @@ async function loadIssues({ renderDetail = true } = {}) {
   if (state.filters.assignee) params.set("assignee", state.filters.assignee);
   if (state.filters.unread) params.set("unread", "1");
   for (const status of state.filters.statuses) params.append("status", status);
+  if (usesDefaultStatusView()) params.set("include_unread_outside_status", "1");
   const productID = state.ticketProductId || null;
   if (productID) params.set("product_id", String(productID));
   const countParams = new URLSearchParams();
@@ -820,6 +822,7 @@ function toggleStatusFilter(status) {
     active.add(status);
   }
   state.filters.statuses = state.meta.statuses.filter((candidate) => active.has(candidate));
+  state.filters.statusCustomized = true;
 }
 
 function renderAssigneeFilter() {
@@ -877,6 +880,7 @@ function hasActiveTicketFilters() {
     state.ticketProductId ||
     state.filters.assignee ||
     state.filters.unread ||
+    state.filters.statusCustomized ||
     !sameStatuses(state.filters.statuses, defaultStatusFilters())
   );
 }
@@ -886,7 +890,7 @@ function activeTicketFilterCount() {
   if (state.ticketProductId) count += 1;
   if (state.filters.assignee) count += 1;
   if (state.filters.unread) count += 1;
-  if (!sameStatuses(state.filters.statuses, defaultStatusFilters())) count += 1;
+  if (state.filters.statusCustomized || !sameStatuses(state.filters.statuses, defaultStatusFilters())) count += 1;
   return count;
 }
 
@@ -912,10 +916,15 @@ function sameStatuses(left, right) {
   return right.every((status) => values.has(status));
 }
 
+function usesDefaultStatusView() {
+  return !state.filters.statusCustomized && sameStatuses(state.filters.statuses, defaultStatusFilters());
+}
+
 function clearTicketFilters() {
   state.filters.q = "";
   state.filters.assignee = "";
   state.filters.statuses = defaultStatusFilters();
+  state.filters.statusCustomized = false;
   state.filters.unread = false;
   state.ticketProductId = null;
   els.searchInput.value = "";

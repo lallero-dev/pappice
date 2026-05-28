@@ -1464,6 +1464,32 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	if bytes.Contains(body, []byte("Need help")) {
 		t.Fatalf("customer unread list should be empty after mark-read: %s", body)
 	}
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(created.ID), map[string]any{
+		"status": "resolved",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=new&status=assigned", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Need help")) {
+		t.Fatalf("explicit active status filter should hide read terminal ticket: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=new&status=assigned&include_unread_outside_status=1", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Need help")) || !bytes.Contains(body, []byte(`"status":"resolved"`)) {
+		t.Fatalf("default active view should include unread resolved ticket: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/read", nil, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=new&status=assigned&include_unread_outside_status=1", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Need help")) {
+		t.Fatalf("default active view should hide read terminal ticket: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=resolved", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Need help")) {
+		t.Fatalf("explicit resolved filter should show resolved ticket: %s", body)
+	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if bytes.Contains(body, []byte("Private staff note")) {

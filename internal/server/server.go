@@ -844,16 +844,12 @@ func (s *Server) handleProductIssues(w http.ResponseWriter, r *http.Request, aut
 	switch r.Method {
 	case http.MethodGet:
 		query := r.URL.Query()
-		issues := s.store.ListIssuesForUser(store.Filter{
+		tickets := s.listTicketsForQuery(auth.User, query, store.Filter{
 			ProductID: productID,
 			Query:     query.Get("q"),
 			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
-		}, auth.User)
-		tickets := s.issuesForUser(auth.User, issues)
-		if queryUnread(query) {
-			tickets = unreadIssues(tickets)
-		}
+		})
 		respondJSON(w, http.StatusOK, map[string]any{
 			"tickets":    tickets,
 			"statuses":   store.Statuses(),
@@ -918,16 +914,12 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		query := r.URL.Query()
 		productID, _ := strconv.ParseInt(query.Get("product_id"), 10, 64)
-		issues := s.store.ListIssuesForUser(store.Filter{
+		tickets := s.listTicketsForQuery(auth.User, query, store.Filter{
 			ProductID: productID,
 			Query:     query.Get("q"),
 			Statuses:  queryStatuses(query),
 			Assignee:  query.Get("assignee"),
-		}, auth.User)
-		tickets := s.issuesForUser(auth.User, issues)
-		if queryUnread(query) {
-			tickets = unreadIssues(tickets)
-		}
+		})
 		respondJSON(w, http.StatusOK, map[string]any{"tickets": tickets})
 	case http.MethodPost:
 		var input store.CreateIssue
@@ -1146,7 +1138,7 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 		s.emitIssueWebhook("ticket.commented", updated, auth.User)
 	}
 	s.enqueueTicketPatchEmails(input, updated, auth.User, result.Previous, result.AssignmentChanged, result.PublicComment)
-	if result.HasComment {
+	if result.HasPatch || result.HasComment {
 		if err := s.store.MarkIssueRead(updated.ID, auth.User.ID, time.Now().UTC()); err == nil {
 			if refreshed, err := s.store.GetIssue(updated.ID); err == nil {
 				updated = refreshed
@@ -1902,6 +1894,22 @@ func (s *Server) issueForUser(user store.User, issue store.Issue) store.Issue {
 	return issues[0]
 }
 
+func (s *Server) listTicketsForQuery(user store.User, query url.Values, filter store.Filter) []store.Issue {
+	statuses := append([]string(nil), filter.Statuses...)
+	if queryIncludeUnreadOutsideStatus(query) && len(statuses) > 0 && !queryUnread(query) {
+		filter.Statuses = nil
+	}
+	issues := s.store.ListIssuesForUser(filter, user)
+	tickets := s.issuesForUser(user, issues)
+	if queryUnread(query) {
+		return unreadIssues(tickets)
+	}
+	if queryIncludeUnreadOutsideStatus(query) && len(statuses) > 0 {
+		return issuesMatchingStatusOrUnread(tickets, statuses)
+	}
+	return tickets
+}
+
 func (s *Server) issuesForUser(user store.User, issues []store.Issue) []store.Issue {
 	result := make([]store.Issue, 0, len(issues))
 	for _, issue := range issues {
@@ -1934,6 +1942,24 @@ func (s *Server) annotateUnread(user store.User, issues []store.Issue) {
 	}
 }
 
+func issuesMatchingStatusOrUnread(issues []store.Issue, statuses []string) []store.Issue {
+	active := make(map[string]struct{}, len(statuses))
+	for _, status := range statuses {
+		active[strings.TrimSpace(status)] = struct{}{}
+	}
+	result := make([]store.Issue, 0, len(issues))
+	for _, issue := range issues {
+		if issue.HasUnread {
+			result = append(result, issue)
+			continue
+		}
+		if _, ok := active[issue.Status]; ok {
+			result = append(result, issue)
+		}
+	}
+	return result
+}
+
 func unreadIssues(issues []store.Issue) []store.Issue {
 	result := make([]store.Issue, 0, len(issues))
 	for _, issue := range issues {
@@ -1947,6 +1973,9 @@ func unreadIssues(issues []store.Issue) []store.Issue {
 func unreadActivityCount(user store.User, issue store.Issue, lastRead time.Time) int {
 	count := 0
 	if issue.CreatedAt.After(lastRead) && !issueOpenedByUser(user, issue) {
+		count++
+	}
+	if issue.UpdatedAt.After(lastRead) && requesterTerminalStatus(issue.Status) {
 		count++
 	}
 	for _, comment := range issue.Comments {
@@ -2083,6 +2112,11 @@ func queryStatuses(query url.Values) []string {
 
 func queryUnread(query url.Values) bool {
 	value := strings.ToLower(strings.TrimSpace(query.Get("unread")))
+	return value == "1" || value == "true" || value == "yes"
+}
+
+func queryIncludeUnreadOutsideStatus(query url.Values) bool {
+	value := strings.ToLower(strings.TrimSpace(query.Get("include_unread_outside_status")))
 	return value == "1" || value == "true" || value == "yes"
 }
 
