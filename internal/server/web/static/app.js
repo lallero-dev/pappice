@@ -67,7 +67,7 @@ const state = {
   selectedIssue: null,
   renderedTicketDetailId: null,
   sort: {
-    key: "created_at",
+    key: "updated_at",
     dir: "desc"
   },
   meta: {
