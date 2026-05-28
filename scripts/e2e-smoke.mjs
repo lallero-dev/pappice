@@ -581,6 +581,15 @@ async function staffReplyAndResolve(cdp) {
         .find((candidate) => candidate.textContent.includes(input.title));
     }, "ticket row for staff update", 12000);
     await waitFor(() => row.classList.contains("unread"), "new customer ticket unread for staff");
+    const unreadTitle = row.querySelector(".issue-row-title");
+    const unreadDot = row.querySelector(".issue-unread-dot");
+    if (!unreadDot || getComputedStyle(unreadDot).backgroundColor !== "rgb(217, 45, 32)") {
+      throw new Error("unread ticket rows should use a red unread dot");
+    }
+    if (Number.parseInt(getComputedStyle(unreadTitle).fontWeight, 10) < 800 ||
+      getComputedStyle(row).backgroundColor === "rgb(255, 255, 255)") {
+      throw new Error("unread ticket rows should be visually stronger than read rows");
+    }
     row.click();
     const detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");

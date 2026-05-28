@@ -793,8 +793,8 @@ button:focus-visible {
 
 .issue-row {
   background: #ffffff;
-  border: 0;
-  border-bottom: 1px solid var(--border-soft);
+  border: 1px solid transparent;
+  border-bottom-color: var(--border-soft);
   color: var(--text);
   display: grid;
   gap: 5px 8px;
@@ -810,16 +810,38 @@ button:focus-visible {
   background: #f8fbfd;
 }
 
-.issue-row.active {
-  background: #edf6ff;
+.issue-row.unread {
+  background: #f1f8ff;
+  box-shadow: inset 3px 0 0 var(--blue);
 }
 
-.issue-row.unread .issue-row-title {
+.issue-row.unread:hover {
+  background: #eaf4ff;
+}
+
+.issue-row.active {
+  background: #ffffff;
+  border-color: var(--blue);
+  box-shadow: inset 0 0 0 1px var(--blue), 0 2px 8px rgba(35, 103, 164, 0.16);
+  position: relative;
+  z-index: 1;
+}
+
+.issue-row.active.unread {
+  background: #f7fbff;
+  box-shadow: inset 0 0 0 1px var(--blue), inset 4px 0 0 var(--blue), 0 2px 8px rgba(35, 103, 164, 0.18);
+}
+
+.issue-row.unread .issue-row-product,
+.issue-row.unread .issue-row-time,
+.issue-row.unread .issue-row-title,
+.issue-row.unread .issue-row-person {
+  color: #183d5e;
   font-weight: 850;
 }
 
 .issue-unread-dot {
-  background: var(--blue);
+  background: #d92d20;
   border-radius: 999px;
   display: inline-block;
   flex: 0 0 auto;
@@ -840,7 +862,7 @@ button:focus-visible {
   color: var(--blue-dark);
   display: flex;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -854,7 +876,7 @@ button:focus-visible {
 
 .issue-row-title {
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 650;
   grid-column: 1 / -1;
   overflow: hidden;
   text-overflow: ellipsis;
