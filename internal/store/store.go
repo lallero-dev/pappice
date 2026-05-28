@@ -427,75 +427,6 @@ type Store struct {
 	path string
 }
 
-var validStatuses = map[string]struct{}{
-	"new":      {},
-	"assigned": {},
-	"resolved": {},
-	"rejected": {},
-}
-
-var validSeverities = map[string]struct{}{
-	"support":  {},
-	"question": {},
-	"incident": {},
-	"task":     {},
-}
-
-var validPriorities = map[string]struct{}{
-	"low":    {},
-	"normal": {},
-	"high":   {},
-	"urgent": {},
-}
-
-var validGlobalRoles = map[string]struct{}{
-	"admin":    {},
-	"staff":    {},
-	"customer": {},
-}
-
-var validProductRoles = map[string]struct{}{
-	"owner":    {},
-	"agent":    {},
-	"customer": {},
-	"viewer":   {},
-}
-
-var validTicketSources = map[string]struct{}{
-	"staff":  {},
-	"portal": {},
-}
-
-var validCommentVisibility = map[string]struct{}{
-	"public":   {},
-	"internal": {},
-}
-
-var validEvents = map[string]struct{}{
-	"ticket.created":   {},
-	"ticket.updated":   {},
-	"ticket.commented": {},
-	"ticket.assigned":  {},
-	"*":                {},
-}
-
-var validEmailEvents = map[string]struct{}{
-	"ticket.created":   {},
-	"ticket.updated":   {},
-	"ticket.commented": {},
-	"ticket.assigned":  {},
-	"account.setup":    {},
-	"account.reset":    {},
-	"email.test":       {},
-}
-
-var validEmailNotificationStatuses = map[string]struct{}{
-	"pending": {},
-	"sending": {},
-	"sent":    {},
-	"failed":  {},
-}
-
 func normalizePage(limit, offset, defaultLimit, maxLimit int) (int, int) {
 	if defaultLimit < 1 {
 		defaultLimit = 25
@@ -513,11 +444,6 @@ func normalizePage(limit, offset, defaultLimit, maxLimit int) (int, int) {
 		offset = 0
 	}
 	return limit, offset
-}
-
-var validAccountLinkPurposes = map[string]struct{}{
-	"setup": {},
-	"reset": {},
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,46}[a-z0-9]$`)
@@ -685,7 +611,7 @@ func placeholders(count int) string {
 
 func normalizeEvents(events []string) ([]string, error) {
 	if len(events) == 0 {
-		return []string{"ticket.created", "ticket.updated", "ticket.commented"}, nil
+		return cloneStrings(defaultWebhookEvents), nil
 	}
 	seen := make(map[string]struct{}, len(events))
 	result := make([]string, 0, len(events))
@@ -704,7 +630,7 @@ func normalizeEvents(events []string) ([]string, error) {
 		result = append(result, event)
 	}
 	if len(result) == 0 {
-		return []string{"ticket.created", "ticket.updated", "ticket.commented"}, nil
+		return cloneStrings(defaultWebhookEvents), nil
 	}
 	return result, nil
 }

@@ -184,6 +184,11 @@ func TestMetadataAndPublicViews(t *testing.T) {
 	if got, want := Events(), []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}; !slices.Equal(got, want) {
 		t.Fatalf("events = %#v, want %#v", got, want)
 	}
+	mutatedStatuses := Statuses()
+	mutatedStatuses[0] = "mutated"
+	if got := Statuses()[0]; got != "new" {
+		t.Fatalf("statuses leaked mutable backing array, first status = %q", got)
+	}
 
 	publicUser := ToPublicUser(User{ID: 7, Username: "bob", DisplayName: "Bob", Email: "bob@example.test", Role: "user", Disabled: true})
 	if publicUser.Role != "staff" || publicUser.Username != "bob" || !publicUser.Disabled {
