@@ -1230,68 +1230,37 @@ function openTicketCreateModal() {
       creatableProducts
     })
   ]);
-  const confirmArea = el("div", { className: "ticket-create-confirm-area" });
-  content.append(confirmArea);
   let submitButton = null;
-  let footer = null;
   els.modalHost.open({
     title: "New Ticket",
     content,
     submitText: "Create Ticket",
     size: "compact",
     onSubmit: async (data, form) => {
-      showTicketCreateConfirm(confirmArea, {
-        data,
-        form,
-        footer,
-        submitButton
-      });
-      return false;
+      const confirmed = await confirmTicketCreate(data, form);
+      if (!confirmed) return false;
+      await createTicketFromForm(data, form);
     }
   });
-  footer = els.modalHost.shadowRoot?.querySelector("footer");
   submitButton = els.modalHost.shadowRoot?.querySelector("footer .primary");
   bindTicketCreateState({ root: content, submitButton });
 }
 
-function showTicketCreateConfirm(container, { data, form, footer, submitButton }) {
+function confirmTicketCreate(data, form) {
   const payload = ticketCreatePayload(data);
   const files = selectedTicketFiles(form);
   const product = currentProduct(payload.product_id);
-  const cancel = el("button", { className: "ghost", type: "button" }, "Keep Editing");
-  const confirm = el("button", { className: "primary", type: "button", "data-ticket-create-confirm": "true" }, "Create Ticket");
-  if (footer) footer.hidden = true;
-  cancel.addEventListener("click", () => {
-    container.replaceChildren();
-    if (footer) footer.hidden = false;
+  return confirmSendAction({
+    title: "Create this ticket?",
+    body: "The ticket will be opened and visible to the people who can access this product.",
+    confirmLabel: "Create Ticket",
+    stacked: true,
+    details: [
+      ["Product", product ? productDisplayName(product) : "Selected product"],
+      ["Priority", labelize(payload.priority)],
+      ["Attachments", files.length === 0 ? "None" : String(files.length)]
+    ]
   });
-  confirm.addEventListener("click", async () => {
-    confirm.disabled = true;
-    if (submitButton) submitButton.disabled = true;
-    confirm.setAttribute("aria-busy", "true");
-    try {
-      await createTicketFromForm(data, form);
-      els.modalHost.close();
-    } catch (error) {
-      showError(error);
-      confirm.disabled = false;
-      if (submitButton) submitButton.disabled = false;
-      confirm.removeAttribute("aria-busy");
-    }
-  });
-  container.replaceChildren(el("div", { className: "account-confirm ticket-create-confirm" }, [
-    el("strong", {}, "Create this ticket?"),
-    el("p", {}, "The ticket will be opened and visible to the people who can access this product."),
-    el("dl", { className: "confirm-detail-list" }, [
-      el("dt", {}, "Product"),
-      el("dd", {}, product ? productDisplayName(product) : "Selected product"),
-      el("dt", {}, "Priority"),
-      el("dd", {}, labelize(payload.priority)),
-      el("dt", {}, "Attachments"),
-      el("dd", {}, files.length === 0 ? "None" : String(files.length))
-    ]),
-    el("div", { className: "account-confirm-actions" }, [cancel, confirm])
-  ]));
 }
 
 function ticketCreateFlow({ issue, productId, creatableProducts }) {
@@ -2088,25 +2057,29 @@ async function confirmTicketComment(issue, composer) {
   });
 }
 
-function confirmSendAction({ title, body, confirmLabel, details = [], danger = false }) {
-  if (!els.modalHost) return Promise.resolve(window.confirm(body));
+function confirmSendAction({ title, body, confirmLabel, details = [], danger = false, stacked = false }) {
+  const host = stacked ? document.createElement("pappice-modal") : els.modalHost;
+  if (!host) return Promise.resolve(window.confirm(body));
+  if (stacked) document.body.append(host);
   return new Promise((resolve) => {
     let settled = false;
     let dialog = null;
     const finish = (value) => {
       if (settled) return;
       settled = true;
-      dialog?.removeEventListener("close", handleClose);
       resolve(value);
     };
-    const handleClose = () => finish(false);
+    const handleClose = () => {
+      finish(false);
+      if (stacked) host.remove();
+    };
     const detailList = details.length > 0
       ? el("dl", { className: "confirm-detail-list" }, details.flatMap(([label, value]) => [
         el("dt", {}, label),
         el("dd", {}, value)
       ]))
       : el("div");
-    els.modalHost.open({
+    host.open({
       title,
       submitText: confirmLabel,
       submitClass: danger ? "danger" : "primary",
@@ -2116,7 +2089,7 @@ function confirmSendAction({ title, body, confirmLabel, details = [], danger = f
       ]),
       onSubmit: async () => finish(true)
     });
-    dialog = els.modalHost.shadowRoot?.querySelector("dialog");
+    dialog = host.shadowRoot?.querySelector("dialog");
     dialog?.addEventListener("close", handleClose, { once: true });
   });
 }
@@ -2318,11 +2291,7 @@ function bindTicketCreateState({ root, submitButton }) {
   const title = root.querySelector("[name='title']");
   const description = root.querySelector("[name='description']");
   const steps = Array.from(root.querySelectorAll("[data-create-step]"));
-  const confirmArea = root.querySelector(".ticket-create-confirm-area");
-  const footer = root.getRootNode()?.querySelector?.("footer");
   const update = () => {
-    confirmArea?.replaceChildren();
-    if (footer) footer.hidden = false;
     const hasProduct = Boolean(product?.value);
     const hasPriority = Boolean(priority?.value);
     const hasTitle = String(title?.value || "").trim() !== "";

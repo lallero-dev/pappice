@@ -376,7 +376,7 @@ async function completeCustomerSetup(cdp, setupLink) {
 
 async function createCustomerTicket(cdp) {
   return runInPage(cdp, async (input) => {
-    const { isScrolledToBottom, modalRoot, setValue, waitFor } = pageTools();
+    const { isScrolledToBottom, modalRoot, openModalRoot, setValue, waitFor } = pageTools();
     await waitFor(() => document.querySelector("#newIssueButton") && !document.querySelector("#newIssueButton").hidden, "new ticket button");
     document.querySelector("#newIssueButton").click();
     const root = await waitFor(() => {
@@ -402,10 +402,14 @@ async function createCustomerTicket(cdp) {
     const create = root.querySelector("footer .primary");
     await waitFor(() => !create.disabled, "enabled create ticket button");
     create.click();
+    const confirmRoot = await waitFor(() => openModalRoot("Create this ticket?"), "stacked ticket create confirmation");
+    if (confirmRoot === root) {
+      throw new Error("ticket creation confirmation should open in a stacked modal");
+    }
     const confirm = await waitFor(() => {
-      const candidate = root.querySelector("[data-ticket-create-confirm]");
+      const candidate = confirmRoot.querySelector("footer .primary");
       return candidate && !candidate.disabled ? candidate : null;
-    }, "ticket create confirmation");
+    }, "ticket create confirmation action");
     confirm.click();
     await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "new ticket modal closed", 12000);
     await waitFor(() => document.querySelector("#issueList")?.textContent.includes(input.title), "created ticket in list", 12000);
@@ -709,6 +713,14 @@ function pageTools() {
     control.dispatchEvent(new Event("change", { bubbles: true }));
   };
   const modalRoot = () => document.querySelector("#modalHost")?.shadowRoot || null;
+  const modalRoots = () => [...document.querySelectorAll("pappice-modal")]
+    .map((modal) => modal.shadowRoot)
+    .filter(Boolean);
+  const openModalRoot = (title = "") => modalRoots().find((root) => {
+    const dialog = root.querySelector("dialog[open]");
+    const heading = root.querySelector("h2")?.textContent || "";
+    return dialog && (!title || heading.includes(title));
+  }) || null;
   const submitModal = async (title) => {
     const root = await waitFor(() => {
       const candidate = modalRoot();
@@ -724,7 +736,7 @@ function pageTools() {
     if (!element) return false;
     return Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 2;
   };
-  return { isScrolledToBottom, modalRoot, setValue, submitModal, waitFor };
+  return { isScrolledToBottom, modalRoot, openModalRoot, setValue, submitModal, waitFor };
 }
 
 async function runInPage(cdp, fn, ...args) {

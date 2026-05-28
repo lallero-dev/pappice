@@ -421,14 +421,6 @@ button:disabled {
   gap: 9px;
 }
 
-.ticket-create-confirm-area:empty {
-  display: none;
-}
-
-.ticket-create-confirm .confirm-detail-list {
-  margin-top: 2px;
-}
-
 .detail-meta {
   color: #667085;
   display: flex;
