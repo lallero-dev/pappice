@@ -797,9 +797,10 @@ button:focus-visible {
   border-bottom: 1px solid var(--border-soft);
   color: var(--text);
   display: grid;
-  gap: 3px 8px;
+  gap: 5px 8px;
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 92px;
+  grid-template-rows: auto auto minmax(24px, 1fr);
+  min-height: 86px;
   padding: 10px 12px;
   text-align: left;
   width: 100%;
@@ -830,7 +831,6 @@ button:focus-visible {
 .issue-row-product,
 .issue-row-time,
 .issue-row-title,
-.issue-row-summary,
 .issue-row-footer {
   min-width: 0;
 }
@@ -861,15 +861,6 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.issue-row-summary {
-  color: var(--muted);
-  font-size: 13px;
-  grid-column: 1 / -1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .issue-row-footer {
   align-items: center;
   color: var(--muted);
@@ -878,6 +869,25 @@ button:focus-visible {
   font-size: 12px;
   gap: 6px;
   grid-column: 1 / -1;
+  justify-content: flex-end;
+  place-self: end end;
+  text-align: right;
+}
+
+.issue-row-person {
+  background: #f2f6fa;
+  border-radius: 999px;
+  color: #53657a;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: center;
+  max-width: 120px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge {

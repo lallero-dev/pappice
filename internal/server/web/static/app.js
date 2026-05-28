@@ -980,20 +980,14 @@ function renderIssueList() {
       productLabel,
       el("span", { className: "issue-row-time" }, relativeTime(issue.updated_at)),
       el("span", { className: "issue-row-title" }, issue.title || "Untitled ticket"),
-      el("span", { className: "issue-row-summary" }, ticketSummary(issue)),
       el("span", { className: "issue-row-footer" }, [
         badge(issue.status, `status-${issue.status}`),
         badge(issue.priority, `priority-${issue.priority}`),
-        el("span", {}, issue.assignee || issue.requester || "Unassigned")
+        el("span", { className: "issue-row-person" }, issue.assignee || issue.requester_name || issue.requester || "Unassigned")
       ])
     );
     els.issueList.append(row);
   }
-}
-
-function ticketSummary(issue) {
-  const latest = [...(issue.comments || [])].reverse().find((comment) => String(comment.body || "").trim() !== "");
-  return latest?.body || issue.description || "No description.";
 }
 
 function renderSortHeaders() {
