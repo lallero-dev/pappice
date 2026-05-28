@@ -1201,10 +1201,55 @@ function ticketDetailContent({ issue, editable, canComment }) {
   ];
   if (!canEditTicket(issue)) facts.splice(1, 0, factBlock("Assignee", issue.assignee || "Unassigned"));
   side.append(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
+  if (isAdmin()) {
+    side.append(sideSection("Danger zone", ticketDangerActions(issue)));
+  }
 
   const conversationPanel = el("section", { className: "ticket-conversation-panel" }, [header, main]);
   wrap.append(el("div", { className: "ticket-detail-grid" }, [conversationPanel, side]));
   return wrap;
+}
+
+function ticketDangerActions(issue) {
+  const remove = el("button", {
+    className: "danger ticket-delete-button",
+    "data-delete-ticket": "true",
+    type: "button"
+  }, "Delete Ticket");
+  remove.addEventListener("click", () => deleteCurrentTicket(issue, remove).catch(showError));
+  return el("div", { className: "ticket-danger-actions" }, [
+    el("p", {}, "Permanently remove this ticket and its conversation."),
+    remove
+  ]);
+}
+
+async function deleteCurrentTicket(issue, button) {
+  if (!issue || !isAdmin()) return;
+  const confirmed = await confirmSendAction({
+    title: "Delete this ticket?",
+    body: "This permanently removes the ticket, conversation, attachments, notifications, and delivery history.",
+    confirmLabel: "Delete Ticket",
+    danger: true,
+    details: [
+      ["Ticket", `${issue.key || `#${issue.id}`} / ${issue.title || "Untitled ticket"}`],
+      ["Product", issueProductLabel(issue)]
+    ]
+  });
+  if (!confirmed) return;
+
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    await request(`/api/tickets/${issue.id}`, { method: "DELETE" });
+    state.issues = state.issues.filter((candidate) => candidate.id !== issue.id);
+    setSelectedIssue(null, { updateRoute: false });
+    await loadIssues();
+    syncRoute({ replace: true });
+    showAppAlert(`Ticket ${issue.key || `#${issue.id}`} deleted.`);
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+  }
 }
 
 function ticketProductOptions(products) {

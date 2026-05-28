@@ -571,7 +571,7 @@ async function loginAsAdmin(cdp) {
 
 async function staffReplyAndResolve(cdp) {
   await runInPage(cdp, async (input) => {
-    const { isScrolledToBottom, pasteFiles, setValue, submitModal, tinyGifFile, waitFor } = pageTools();
+    const { isScrolledToBottom, openModalRoot, pasteFiles, setValue, submitModal, tinyGifFile, waitFor } = pageTools();
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
       return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
@@ -700,6 +700,17 @@ async function staffReplyAndResolve(cdp) {
       const preview = document.querySelector(".attachment-image-preview");
       return preview?.getAttribute("src")?.includes("?preview=1");
     }, "image attachment inline preview");
+    const deleteButton = detail.querySelector("[data-delete-ticket]");
+    if (!deleteButton || !deleteButton.classList.contains("danger")) {
+      throw new Error("admin ticket detail should expose a danger delete action");
+    }
+    deleteButton.click();
+    const deleteRoot = await waitFor(() => openModalRoot("Delete this ticket?"), "ticket delete confirmation");
+    if (!deleteRoot.querySelector("footer .danger") || !deleteRoot.textContent.includes(input.title)) {
+      throw new Error("ticket deletion confirmation should identify the ticket and use a danger action");
+    }
+    deleteRoot.querySelector("footer .ghost").click();
+    await waitFor(() => !openModalRoot("Delete this ticket?"), "ticket delete confirmation dismissed");
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";

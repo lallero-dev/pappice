@@ -359,11 +359,11 @@ func (s *Server) uploadContentTypeAllowed(contentType string) bool {
 }
 
 func (s *Server) openAttachmentFile(storageKey string) (*os.File, os.FileInfo, error) {
-	clean := pathpkg.Clean(strings.TrimSpace(storageKey))
-	if clean == "." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
-		return nil, nil, os.ErrNotExist
+	path, err := s.attachmentFilePath(storageKey)
+	if err != nil {
+		return nil, nil, err
 	}
-	file, err := os.Open(filepath.Join(s.options.UploadDir, filepath.FromSlash(clean)))
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -373,6 +373,28 @@ func (s *Server) openAttachmentFile(storageKey string) (*os.File, os.FileInfo, e
 		return nil, nil, err
 	}
 	return file, stat, nil
+}
+
+func (s *Server) attachmentFilePath(storageKey string) (string, error) {
+	clean := pathpkg.Clean(strings.TrimSpace(storageKey))
+	if clean == "." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
+		return "", os.ErrNotExist
+	}
+	return filepath.Join(s.options.UploadDir, filepath.FromSlash(clean)), nil
+}
+
+func (s *Server) removeOrphanedAttachmentFiles(storageKeys []string) {
+	seen := map[string]struct{}{}
+	for _, storageKey := range storageKeys {
+		if _, ok := seen[storageKey]; ok {
+			continue
+		}
+		seen[storageKey] = struct{}{}
+		path, err := s.attachmentFilePath(storageKey)
+		if err == nil {
+			_ = os.Remove(path)
+		}
+	}
 }
 
 func cleanupStoredUploads(uploads []storedUpload) {

@@ -315,6 +315,82 @@ func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	}
 }
 
+func TestDeleteIssueCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	productID := tracker.ListProducts(admin)[0].ID
+	shared := CreateAttachment{
+		Filename:    "shared.txt",
+		ContentType: "text/plain",
+		SizeBytes:   6,
+		SHA256:      "shared-hash",
+		StorageKey:  "sh/ar/shared-hash",
+	}
+	issue, err := tracker.CreateIssueWithAttachments(CreateIssue{
+		ProductID: productID,
+		Title:     "Delete me",
+	}, []CreateAttachment{shared}, admin.ID)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	other, err := tracker.CreateIssueWithAttachments(CreateIssue{
+		ProductID: productID,
+		Title:     "Keep me",
+	}, []CreateAttachment{shared}, admin.ID)
+	if err != nil {
+		t.Fatalf("create other issue: %v", err)
+	}
+	saved, err := tracker.SaveIssue(SaveIssueInput{
+		IssueID: issue.ID,
+		Comment: &AddComment{
+			Author:     "Admin",
+			Visibility: "public",
+		},
+		Attachments: []CreateAttachment{{
+			Filename:    "orphan.txt",
+			ContentType: "text/plain",
+			SizeBytes:   6,
+			SHA256:      "orphan-hash",
+			StorageKey:  "or/ph/orphan-hash",
+		}},
+		AttachmentUserID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("save comment attachment: %v", err)
+	}
+	commentAttachmentID := saved.Issue.Comments[0].Attachments[0].ID
+
+	orphaned, err := tracker.DeleteIssue(issue.ID)
+	if err != nil {
+		t.Fatalf("delete issue: %v", err)
+	}
+	if slices.Contains(orphaned, shared.StorageKey) || !slices.Contains(orphaned, "or/ph/orphan-hash") {
+		t.Fatalf("orphaned storage keys = %#v", orphaned)
+	}
+	if _, err := tracker.GetIssue(issue.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted issue err = %v, want not found", err)
+	}
+	if _, err := tracker.GetAttachment(commentAttachmentID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted attachment err = %v, want not found", err)
+	}
+	kept, err := tracker.GetIssue(other.ID)
+	if err != nil {
+		t.Fatalf("get kept issue: %v", err)
+	}
+	if len(kept.Attachments) != 1 || kept.Attachments[0].StorageKey != shared.StorageKey {
+		t.Fatalf("kept issue attachments = %#v", kept.Attachments)
+	}
+	if _, err := tracker.DeleteIssue(issue.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing issue err = %v, want not found", err)
+	}
+}
+
 func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.json"))
 	if err != nil {

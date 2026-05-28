@@ -502,6 +502,59 @@ func (s *Store) GetAttachment(id int64) (Attachment, error) {
 	return attachment, nil
 }
 
+func (s *Store) DeleteIssue(id int64) ([]string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`
+		SELECT DISTINCT storage_key
+		FROM attachments
+		WHERE issue_id = ? AND storage_key <> ''`, id)
+	if err != nil {
+		return nil, err
+	}
+	var storageKeys []string
+	for rows.Next() {
+		var storageKey string
+		if err := rows.Scan(&storageKey); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		storageKeys = append(storageKeys, storageKey)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	result, err := tx.Exec(`DELETE FROM issues WHERE id = ?`, id)
+	if err != nil {
+		return nil, normalizeSQLError(err)
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return nil, ErrNotFound
+	}
+
+	orphaned := make([]string, 0, len(storageKeys))
+	for _, storageKey := range storageKeys {
+		var references int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM attachments WHERE storage_key = ?`, storageKey).Scan(&references); err != nil {
+			return nil, err
+		}
+		if references == 0 {
+			orphaned = append(orphaned, storageKey)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return orphaned, nil
+}
+
 func (s *Store) getIssue(id int64) (Issue, error) {
 	row := s.db.QueryRow(issueSelectSQL+` WHERE i.id = ?`, id)
 	issue, err := scanIssue(row)

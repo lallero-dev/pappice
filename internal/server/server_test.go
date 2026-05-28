@@ -322,7 +322,7 @@ func TestAPIMethodContracts(t *testing.T) {
 		{"product webhooks", http.MethodPut, "/api/products/" + itoa(productID) + "/webhooks", "GET, POST"},
 		{"product deliveries", http.MethodPost, "/api/products/" + itoa(productID) + "/webhook-deliveries", http.MethodGet},
 		{"tickets", http.MethodPut, "/api/tickets", "GET, POST"},
-		{"single ticket", http.MethodPost, "/api/tickets/" + itoa(issueID), "GET, PATCH"},
+		{"single ticket", http.MethodPost, "/api/tickets/" + itoa(issueID), "GET, PATCH, DELETE"},
 		{"ticket comments", http.MethodGet, "/api/tickets/" + itoa(issueID) + "/comments", http.MethodPost},
 		{"ticket read", http.MethodGet, "/api/tickets/" + itoa(issueID) + "/read", http.MethodPost},
 		{"attachments", http.MethodPost, "/api/attachments/1", http.MethodGet},
@@ -457,6 +457,53 @@ func TestProductDeletionRequiresAdmin(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
+}
+
+func TestTicketDeletionRequiresAdmin(t *testing.T) {
+	tracker, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+
+	ownerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "owner",
+		"password": "correct horse",
+		"email":    "owner@example.test",
+		"role":     "staff",
+	})
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, ownerID, "owner")
+	ownerCookie, ownerCSRF := loginUser(t, client, server.URL, "owner", "correct horse")
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"product_id": productID,
+		"title":      "Delete from admin only",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	issueID := decodeInt64(t, body, "id")
+
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(issueID), nil, ownerCookie, ownerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusForbidden)
+	if _, err := tracker.GetIssue(issueID); err != nil {
+		t.Fatalf("owner delete removed ticket: %v", err)
+	}
+
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(issueID), nil, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if !decodeBool(t, body, "ok") {
+		t.Fatalf("delete ticket response = %s", body)
+	}
+	if _, err := tracker.GetIssue(issueID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted ticket err = %v, want not found", err)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events?q=ticket.deleted", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("ticket.deleted")) {
+		t.Fatalf("audit log missing ticket deletion: %s", body)
+	}
 }
 
 func TestAPIValidationContracts(t *testing.T) {

@@ -1157,6 +1157,21 @@ button:focus-visible {
   padding-block: 3px;
 }
 
+.ticket-danger-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.ticket-danger-actions p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.ticket-delete-button {
+  justify-self: stretch;
+}
+
 .comment-list,
 .conversation-stream {
   align-content: start;

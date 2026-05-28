@@ -1069,8 +1069,24 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 			return
 		}
 		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, updated))
+	case http.MethodDelete:
+		if !isAdmin(auth.User) {
+			respondError(w, http.StatusForbidden, "admin role is required")
+			return
+		}
+		orphanedStorageKeys, err := s.store.DeleteIssue(issue.ID)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		s.removeOrphanedAttachmentFiles(orphanedStorageKeys)
+		s.audit(r, auth.User, "ticket.deleted", "ticket", issue.ID, issue.Key, map[string]any{
+			"product_id": issue.ProductID,
+			"title":      issue.Title,
+		})
+		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
-		methodNotAllowed(w, http.MethodGet, http.MethodPatch)
+		methodNotAllowed(w, http.MethodGet, http.MethodPatch, http.MethodDelete)
 	}
 }
 
