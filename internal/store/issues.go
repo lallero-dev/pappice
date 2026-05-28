@@ -168,10 +168,11 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 
 	query := `
 		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
-		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
+		       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
 		JOIN products p ON p.id = i.product_id
+		LEFT JOIN users requester ON requester.username = lower(i.reporter)
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY i.updated_at DESC`
 	rows, err := s.db.Query(query, args...)
@@ -221,10 +222,11 @@ func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
 	}
 	row := s.db.QueryRow(`
 		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
-		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
+		       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
 		JOIN products p ON p.id = i.product_id
+		LEFT JOIN users requester ON requester.username = lower(i.reporter)
 		WHERE i.customer_token = ?`, token)
 	issue, err := scanIssue(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -545,7 +547,13 @@ func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 	issue.Attachments = nil
 	issue.Comments = nil
 
-	commentRows, err := queryer.Query(`SELECT id, author, author_user_id, body, visibility, created_at FROM comments WHERE issue_id = ? ORDER BY created_at`, issue.ID)
+	commentRows, err := queryer.Query(`
+		SELECT c.id, COALESCE(NULLIF(author_by_id.display_name, ''), NULLIF(author_by_name.display_name, ''), c.author), c.author_user_id, c.body, c.visibility, c.created_at
+		FROM comments c
+		LEFT JOIN users author_by_id ON author_by_id.id = c.author_user_id
+		LEFT JOIN users author_by_name ON c.author_user_id IS NULL AND author_by_name.username = lower(c.author)
+		WHERE c.issue_id = ?
+		ORDER BY c.created_at`, issue.ID)
 	if err != nil {
 		return err
 	}
@@ -612,10 +620,11 @@ func parseIssueKey(key string) (string, int64, bool) {
 
 const issueSelectSQL = `
 	SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
-	       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
+	       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
 	       i.created_at, i.updated_at, i.closed_at
 	FROM issues i
-	JOIN products p ON p.id = i.product_id`
+	JOIN products p ON p.id = i.product_id
+	LEFT JOIN users requester ON requester.username = lower(i.reporter)`
 
 func scanIssue(rows scanner) (Issue, error) {
 	var issue Issue

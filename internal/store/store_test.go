@@ -15,8 +15,9 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	admin, err := tracker.CreateFirstAdmin(CreateUser{
-		Username: "Admin",
-		Password: "correct horse",
+		Username:    "Admin",
+		DisplayName: "Alice Admin",
+		Password:    "correct horse",
 	})
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
@@ -30,6 +31,7 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 		ProductID: products[0].ID,
 		Title:     "Cannot import invoice",
 		Priority:  "urgent",
+		Reporter:  admin.Username,
 	})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -39,6 +41,9 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	}
 	if issue.ProductKey != products[0].Key || issue.ProductName != products[0].Name || issue.Product != products[0].Name {
 		t.Fatalf("issue product labels = key %q name %q product %q", issue.ProductKey, issue.ProductName, issue.Product)
+	}
+	if issue.RequesterName != "Alice Admin" {
+		t.Fatalf("requester name = %q, want account display name", issue.RequesterName)
 	}
 	byKey, err := tracker.GetIssueByKey(issue.Key)
 	if err != nil {
@@ -80,7 +85,7 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	}
 
 	withComment, err := tracker.AddComment(issue.ID, AddComment{
-		Author: "bob",
+		Author: "admin",
 		Body:   "Reproduced on Linux.",
 	})
 	if err != nil {
@@ -88,6 +93,20 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	}
 	if got := len(withComment.Comments); got != 1 {
 		t.Fatalf("comments = %d, want 1", got)
+	}
+	if withComment.Comments[0].Author != "Alice Admin" {
+		t.Fatalf("legacy comment author = %q, want display name", withComment.Comments[0].Author)
+	}
+	withComment, err = tracker.AddComment(issue.ID, AddComment{
+		Author:       "stored username",
+		AuthorUserID: admin.ID,
+		Body:         "Author ID maps to the display name.",
+	})
+	if err != nil {
+		t.Fatalf("add identified comment: %v", err)
+	}
+	if got := withComment.Comments[1].Author; got != "Alice Admin" {
+		t.Fatalf("identified comment author = %q, want display name", got)
 	}
 
 	reloaded, err := Open(path)
@@ -101,6 +120,12 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	issues = reloaded.ListIssues(Filter{ProductID: products[0].ID})
 	if len(issues) != 1 {
 		t.Fatalf("product issues = %d, want 1", len(issues))
+	}
+	if issues[0].RequesterName != "Alice Admin" {
+		t.Fatalf("reloaded requester name = %q, want display name", issues[0].RequesterName)
+	}
+	if len(issues[0].Comments) != 2 || issues[0].Comments[0].Author != "Alice Admin" || issues[0].Comments[1].Author != "Alice Admin" {
+		t.Fatalf("reloaded comment authors = %#v, want display names", issues[0].Comments)
 	}
 }
 

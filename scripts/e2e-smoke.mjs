@@ -460,6 +460,10 @@ async function createCustomerTicket(cdp) {
     if (!ownMessage?.classList.contains("from-current")) {
       throw new Error("customer opening message should be aligned as the current sender");
     }
+    const ownAuthor = ownMessage.querySelector(".message-head-main strong")?.textContent?.trim();
+    if (ownAuthor !== input.customerDisplayName) {
+      throw new Error("customer opening message should display the account full name");
+    }
     const ownAvatarRect = ownMessage.querySelector(".message-avatar").getBoundingClientRect();
     const ownConversation = createdDetail.querySelector(".conversation-stream");
     const ownConversationRect = ownConversation.getBoundingClientRect();
@@ -478,7 +482,10 @@ async function createCustomerTicket(cdp) {
     }
     await waitFor(() => /^#[A-Z][A-Z0-9]{1,15}-[1-9][0-9]*$/.test(window.location.hash), "ticket hash route after create");
     return decodeURIComponent(window.location.hash.slice(1));
-  }, ticket);
+  }, {
+    ...ticket,
+    customerDisplayName: customer.displayName
+  });
 }
 
 async function verifyTicketHashRoute(cdp, ticketKey) {
@@ -587,6 +594,10 @@ async function staffReplyAndResolve(cdp) {
     if (!incomingMessage?.classList.contains("from-other")) {
       throw new Error("customer message should be aligned as incoming for staff");
     }
+    const incomingAuthor = incomingMessage.querySelector(".message-head-main strong")?.textContent?.trim();
+    if (incomingAuthor !== input.customerDisplayName) {
+      throw new Error("incoming customer message should display the account full name");
+    }
     const unreadDivider = detail.querySelector(".conversation-unread-divider");
     if (!unreadDivider?.textContent.includes("Unread")) {
       throw new Error("ticket conversation should mark where unread messages start");
@@ -672,6 +683,10 @@ async function staffReplyAndResolve(cdp) {
       throw new Error("staff reply should be aligned as the current sender");
     }
     if (staffReply) {
+      const staffAuthor = staffReply.querySelector(".message-head-main strong")?.textContent?.trim();
+      if (staffAuthor !== input.adminDisplayName) {
+        throw new Error("staff reply should display the account full name");
+      }
       const staffAvatarRect = staffReply.querySelector(".message-avatar").getBoundingClientRect();
       const staffConversation = detail.querySelector(".conversation-stream");
       const staffConversationRect = staffConversation.getBoundingClientRect();
@@ -691,7 +706,11 @@ async function staffReplyAndResolve(cdp) {
       return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
     }, "ticket closed with escape");
     return true;
-  }, ticket);
+  }, {
+    ...ticket,
+    adminDisplayName: admin.displayName,
+    customerDisplayName: customer.displayName
+  });
 }
 
 async function verifyEmailOutbox(cdp) {
