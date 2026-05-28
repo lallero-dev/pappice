@@ -618,17 +618,42 @@ button:disabled {
   padding: 0 4px 0 9px;
 }
 
+.attachment-preview-chip.has-preview {
+  height: 34px;
+  max-width: 220px;
+  padding-left: 3px;
+}
+
 .attachment-chip-name {
+  align-items: center;
   color: inherit;
+  display: inline-flex;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
   text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .attachment-chip-name:hover {
   text-decoration: underline;
+}
+
+.attachment-chip-thumb {
+  background: #ffffff;
+  border: 1px solid #c6d6e5;
+  border-radius: 999px;
+  display: block;
+  flex: 0 0 auto;
+  height: 28px;
+  object-fit: cover;
+  width: 28px;
+}
+
+.attachment-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attachment-remove {

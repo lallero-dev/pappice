@@ -40,6 +40,27 @@ func TestSetupRequiresHTTPS(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersAllowBlobImagePreviews(t *testing.T) {
+	_, server, client := newTestServer(t)
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/health", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	csp := resp.Header.Get("Content-Security-Policy")
+	for _, want := range []string{
+		"default-src 'self'",
+		"img-src 'self' blob:",
+		"object-src 'none'",
+		"frame-ancestors 'none'",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("CSP %q missing %q", csp, want)
+		}
+	}
+	if resp.Header.Get("Strict-Transport-Security") == "" {
+		t.Fatalf("TLS response missing HSTS header")
+	}
+}
+
 func TestProductRBACAndCSRF(t *testing.T) {
 	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

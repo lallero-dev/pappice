@@ -1426,17 +1426,28 @@ function renderAttachmentPreview(input, preview) {
     const filename = file.name || "Attachment";
     const url = URL.createObjectURL(file);
     urls.push(url);
+    const imagePreview = isStagedImageFile(file);
     const remove = el("button", { className: "attachment-remove", type: "button", "aria-label": `Remove ${file.name}` }, "x");
     remove.addEventListener("click", () => {
       const next = Array.from(input.files || []).filter((_, fileIndex) => fileIndex !== index);
       setAttachmentFiles(input, next);
     });
-    preview.append(el("span", { className: "attachment-preview-chip", title: `Download ${filename}` }, [
-      el("a", { className: "attachment-chip-name", href: url, download: filename }, filename),
+    const linkContent = [
+      el("span", { className: "attachment-chip-label" }, filename)
+    ];
+    if (imagePreview) {
+      linkContent.unshift(el("img", { className: "attachment-chip-thumb", src: url, alt: "" }));
+    }
+    preview.append(el("span", { className: imagePreview ? "attachment-preview-chip has-preview" : "attachment-preview-chip", title: `Download ${filename}` }, [
+      el("a", { className: "attachment-chip-name", href: url, download: filename }, linkContent),
       remove
     ]));
   });
   preview.attachmentPreviewURLs = urls;
+}
+
+function isStagedImageFile(file) {
+  return String(file?.type || "").toLowerCase().startsWith("image/");
 }
 
 function cleanupAttachmentPreview(preview) {

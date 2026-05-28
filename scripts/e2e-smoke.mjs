@@ -376,7 +376,7 @@ async function completeCustomerSetup(cdp, setupLink) {
 
 async function createCustomerTicket(cdp) {
   return runInPage(cdp, async (input) => {
-    const { isScrolledToBottom, modalRoot, openModalRoot, pasteFiles, setValue, waitFor } = pageTools();
+    const { isScrolledToBottom, modalRoot, openModalRoot, pasteFiles, setValue, tinyGifFile, waitFor } = pageTools();
     await waitFor(() => document.querySelector("#newIssueButton") && !document.querySelector("#newIssueButton").hidden, "new ticket button");
     document.querySelector("#newIssueButton").click();
     const root = await waitFor(() => {
@@ -402,6 +402,7 @@ async function createCustomerTicket(cdp) {
     setValue(root.querySelector("[name='description']"), input.description);
     const createTransfer = new DataTransfer();
     createTransfer.items.add(new File(["dropped during ticket creation"], "e2e-create-drop.txt", { type: "text/plain" }));
+    createTransfer.items.add(tinyGifFile("e2e-create-image.gif"));
     createModal.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: createTransfer }));
     await waitFor(() => createModal.classList.contains("ticket-create-drop-active"), "ticket creation drop highlight");
     await waitFor(() => {
@@ -417,6 +418,11 @@ async function createCustomerTicket(cdp) {
       .find((link) => link.textContent.includes("e2e-create-drop.txt"));
     if (!createDropLink?.matches("a[download='e2e-create-drop.txt']") || !createDropLink.href.startsWith("blob:")) {
       throw new Error("ticket creation attachment chip should be a downloadable blob link");
+    }
+    const createImageChip = [...root.querySelectorAll(".attachment-preview-chip")]
+      .find((chip) => chip.textContent.includes("e2e-create-image.gif"));
+    if (!createImageChip?.querySelector(".attachment-chip-thumb[src^='blob:']")) {
+      throw new Error("ticket creation image attachment should show a thumbnail");
     }
     pasteFiles(root.querySelector("[name='description']"), [
       new File(["pasted during ticket creation"], "e2e-create-paste.txt", { type: "text/plain" })
@@ -436,7 +442,7 @@ async function createCustomerTicket(cdp) {
       const candidate = confirmRoot.querySelector("footer .primary");
       return candidate && !candidate.disabled ? candidate : null;
     }, "ticket create confirmation action");
-    if (!confirmRoot.textContent.includes("Attachments") || !confirmRoot.textContent.includes("2")) {
+    if (!confirmRoot.textContent.includes("Attachments") || !confirmRoot.textContent.includes("3")) {
       throw new Error("ticket create confirmation should include attachment count");
     }
     confirm.click();
@@ -558,7 +564,7 @@ async function loginAsAdmin(cdp) {
 
 async function staffReplyAndResolve(cdp) {
   await runInPage(cdp, async (input) => {
-    const { isScrolledToBottom, pasteFiles, setValue, submitModal, waitFor } = pageTools();
+    const { isScrolledToBottom, pasteFiles, setValue, submitModal, tinyGifFile, waitFor } = pageTools();
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
       return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
@@ -567,9 +573,7 @@ async function staffReplyAndResolve(cdp) {
       return [...document.querySelectorAll("#issueList .issue-row")]
         .find((candidate) => candidate.textContent.includes(input.title));
     }, "ticket row for staff update", 12000);
-    if (!row.classList.contains("unread")) {
-      throw new Error("new customer ticket should be unread for staff");
-    }
+    await waitFor(() => row.classList.contains("unread"), "new customer ticket unread for staff");
     row.click();
     const detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
@@ -618,13 +622,7 @@ async function staffReplyAndResolve(cdp) {
     const transfer = new DataTransfer();
     transfer.items.add(new File(["first attachment"], "e2e-first.txt", { type: "text/plain" }));
     transfer.items.add(new File(["second attachment"], "e2e-second.txt", { type: "text/plain" }));
-    transfer.items.add(new File([new Uint8Array([
-      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00,
-      0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0xff, 0xff, 0xff, 0x2c, 0x00, 0x00, 0x00, 0x00,
-      0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44,
-      0x01, 0x00, 0x3b
-    ])], "e2e-image.gif", { type: "image/gif" }));
+    transfer.items.add(tinyGifFile("e2e-image.gif"));
     const cancelTransfer = new DataTransfer();
     cancelTransfer.items.add(new File(["cancelled attachment"], "e2e-cancelled.txt", { type: "text/plain" }));
     conversationDropTarget.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: cancelTransfer }));
@@ -651,6 +649,11 @@ async function staffReplyAndResolve(cdp) {
         chipNames.some((name) => name.includes("e2e-image.gif")) &&
         !conversationPane.classList.contains("conversation-drop-active");
     }, "reply attachment chips after conversation drop");
+    const replyImageChip = [...composer.querySelectorAll(".attachment-preview-chip")]
+      .find((chip) => chip.textContent.includes("e2e-image.gif"));
+    if (!replyImageChip?.querySelector(".attachment-chip-thumb[src^='blob:']")) {
+      throw new Error("reply image attachment should show a thumbnail");
+    }
     const visibility = detail.querySelector("[name='visibility']");
     if (visibility) setValue(visibility, "public");
     const submit = detail.querySelector("[data-comment-send]");
@@ -762,6 +765,13 @@ function pageTools() {
     Object.defineProperty(event, "clipboardData", { value: transfer });
     target.dispatchEvent(event);
   };
+  const tinyGifFile = (name) => new File([new Uint8Array([
+    0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00,
+    0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xff, 0xff, 0xff, 0x2c, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44,
+    0x01, 0x00, 0x3b
+  ])], name, { type: "image/gif" });
   const modalRoot = () => document.querySelector("#modalHost")?.shadowRoot || null;
   const modalRoots = () => [...document.querySelectorAll("pappice-modal")]
     .map((modal) => modal.shadowRoot)
@@ -786,7 +796,7 @@ function pageTools() {
     if (!element) return false;
     return Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 2;
   };
-  return { isScrolledToBottom, modalRoot, openModalRoot, pasteFiles, setValue, submitModal, waitFor };
+  return { isScrolledToBottom, modalRoot, openModalRoot, pasteFiles, setValue, submitModal, tinyGifFile, waitFor };
 }
 
 async function runInPage(cdp, fn, ...args) {
