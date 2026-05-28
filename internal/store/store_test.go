@@ -27,64 +27,64 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 		t.Fatalf("products = %d, want 1", len(products))
 	}
 
-	issue, err := tracker.CreateIssue(CreateIssue{
+	ticket, err := tracker.CreateTicket(CreateTicket{
 		ProductID: products[0].ID,
 		Title:     "Cannot import invoice",
 		Priority:  "urgent",
 		Reporter:  admin.Username,
 	})
 	if err != nil {
-		t.Fatalf("create issue: %v", err)
+		t.Fatalf("create ticket: %v", err)
 	}
-	if issue.ID != 1 {
-		t.Fatalf("issue ID = %d, want 1", issue.ID)
+	if ticket.ID != 1 {
+		t.Fatalf("ticket ID = %d, want 1", ticket.ID)
 	}
-	if issue.ProductKey != products[0].Key || issue.ProductName != products[0].Name || issue.Product != products[0].Name {
-		t.Fatalf("issue product labels = key %q name %q product %q", issue.ProductKey, issue.ProductName, issue.Product)
+	if ticket.ProductKey != products[0].Key || ticket.ProductName != products[0].Name || ticket.Product != products[0].Name {
+		t.Fatalf("ticket product labels = key %q name %q product %q", ticket.ProductKey, ticket.ProductName, ticket.Product)
 	}
-	if issue.RequesterName != "Alice Admin" {
-		t.Fatalf("requester name = %q, want account display name", issue.RequesterName)
+	if ticket.RequesterName != "Alice Admin" {
+		t.Fatalf("requester name = %q, want account display name", ticket.RequesterName)
 	}
-	byKey, err := tracker.GetIssueByKey(issue.Key)
+	byKey, err := tracker.GetTicketByKey(ticket.Key)
 	if err != nil {
-		t.Fatalf("get issue by key: %v", err)
+		t.Fatalf("get ticket by key: %v", err)
 	}
-	if byKey.ID != issue.ID {
-		t.Fatalf("issue by key ID = %d, want %d", byKey.ID, issue.ID)
+	if byKey.ID != ticket.ID {
+		t.Fatalf("ticket by key ID = %d, want %d", byKey.ID, ticket.ID)
 	}
-	byLowerKey, err := tracker.GetIssueByKey("pme-1")
+	byLowerKey, err := tracker.GetTicketByKey("pme-1")
 	if err != nil {
-		t.Fatalf("get issue by lowercase key: %v", err)
+		t.Fatalf("get ticket by lowercase key: %v", err)
 	}
-	if byLowerKey.ID != issue.ID {
-		t.Fatalf("issue by lowercase key ID = %d, want %d", byLowerKey.ID, issue.ID)
+	if byLowerKey.ID != ticket.ID {
+		t.Fatalf("ticket by lowercase key ID = %d, want %d", byLowerKey.ID, ticket.ID)
 	}
 	readAt := time.Now().UTC()
-	if err := tracker.MarkIssueRead(issue.ID, admin.ID, readAt); err != nil {
-		t.Fatalf("mark issue read: %v", err)
+	if err := tracker.MarkTicketRead(ticket.ID, admin.ID, readAt); err != nil {
+		t.Fatalf("mark ticket read: %v", err)
 	}
-	readTimes, err := tracker.IssueReadTimes(admin.ID, []int64{issue.ID})
+	readTimes, err := tracker.TicketReadTimes(admin.ID, []int64{ticket.ID})
 	if err != nil {
-		t.Fatalf("issue read times: %v", err)
+		t.Fatalf("ticket read times: %v", err)
 	}
-	if got := readTimes[issue.ID]; got.IsZero() || got.Sub(readAt).Abs() > time.Second {
+	if got := readTimes[ticket.ID]; got.IsZero() || got.Sub(readAt).Abs() > time.Second {
 		t.Fatalf("read time = %v, want near %v", got, readAt)
 	}
 
 	status := "assigned"
 	assignee := "alice"
-	updated, err := tracker.UpdateIssue(issue.ID, UpdateIssue{
+	updated, err := tracker.UpdateTicket(ticket.ID, UpdateTicket{
 		Status:   &status,
 		Assignee: &assignee,
 	})
 	if err != nil {
-		t.Fatalf("update issue: %v", err)
+		t.Fatalf("update ticket: %v", err)
 	}
 	if updated.Status != "assigned" || updated.Assignee != "alice" {
-		t.Fatalf("updated issue = %#v", updated)
+		t.Fatalf("updated ticket = %#v", updated)
 	}
 
-	withComment, err := tracker.AddComment(issue.ID, AddComment{
+	withComment, err := tracker.AddComment(ticket.ID, AddComment{
 		Author: "admin",
 		Body:   "Reproduced on Linux.",
 	})
@@ -97,7 +97,7 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if withComment.Comments[0].Author != "Alice Admin" {
 		t.Fatalf("legacy comment author = %q, want display name", withComment.Comments[0].Author)
 	}
-	withComment, err = tracker.AddComment(issue.ID, AddComment{
+	withComment, err = tracker.AddComment(ticket.ID, AddComment{
 		Author:       "stored username",
 		AuthorUserID: admin.ID,
 		Body:         "Author ID maps to the display name.",
@@ -113,19 +113,19 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	issues := reloaded.ListIssues(Filter{Query: "linux"})
-	if len(issues) != 0 {
-		t.Fatalf("comments should not match issue search, got %d", len(issues))
+	tickets := reloaded.ListTickets(Filter{Query: "linux"})
+	if len(tickets) != 0 {
+		t.Fatalf("comments should not match ticket search, got %d", len(tickets))
 	}
-	issues = reloaded.ListIssues(Filter{ProductID: products[0].ID})
-	if len(issues) != 1 {
-		t.Fatalf("product issues = %d, want 1", len(issues))
+	tickets = reloaded.ListTickets(Filter{ProductID: products[0].ID})
+	if len(tickets) != 1 {
+		t.Fatalf("product tickets = %d, want 1", len(tickets))
 	}
-	if issues[0].RequesterName != "Alice Admin" {
-		t.Fatalf("reloaded requester name = %q, want display name", issues[0].RequesterName)
+	if tickets[0].RequesterName != "Alice Admin" {
+		t.Fatalf("reloaded requester name = %q, want display name", tickets[0].RequesterName)
 	}
-	if len(issues[0].Comments) != 2 || issues[0].Comments[0].Author != "Alice Admin" || issues[0].Comments[1].Author != "Alice Admin" {
-		t.Fatalf("reloaded comment authors = %#v, want display names", issues[0].Comments)
+	if len(tickets[0].Comments) != 2 || tickets[0].Comments[0].Author != "Alice Admin" || tickets[0].Comments[1].Author != "Alice Admin" {
+		t.Fatalf("reloaded comment authors = %#v, want display names", tickets[0].Comments)
 	}
 }
 
@@ -141,17 +141,17 @@ func TestStoreValidation(t *testing.T) {
 	}
 	productID := tracker.ListProducts(admin)[0].ID
 
-	_, err = tracker.CreateIssue(CreateIssue{ProductID: productID, Priority: "normal"})
+	_, err = tracker.CreateTicket(CreateTicket{ProductID: productID, Priority: "normal"})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty title error = %v, want ErrValidation", err)
 	}
 
-	issue, err := tracker.CreateIssue(CreateIssue{ProductID: productID, Title: "Bad status"})
+	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Bad status"})
 	if err != nil {
-		t.Fatalf("create issue: %v", err)
+		t.Fatalf("create ticket: %v", err)
 	}
 	status := "triaged"
-	_, err = tracker.UpdateIssue(issue.ID, UpdateIssue{Status: &status})
+	_, err = tracker.UpdateTicket(ticket.ID, UpdateTicket{Status: &status})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("bad status error = %v, want ErrValidation", err)
 	}
@@ -162,12 +162,12 @@ func TestStoreValidation(t *testing.T) {
 	}
 
 	status = "rejected"
-	rejected, err := tracker.UpdateIssue(issue.ID, UpdateIssue{Status: &status})
+	rejected, err := tracker.UpdateTicket(ticket.ID, UpdateTicket{Status: &status})
 	if err != nil {
-		t.Fatalf("reject issue: %v", err)
+		t.Fatalf("reject ticket: %v", err)
 	}
 	if rejected.Status != "rejected" || rejected.ClosedAt == nil {
-		t.Fatalf("rejected issue = %#v, want rejected with closed_at", rejected)
+		t.Fatalf("rejected ticket = %#v, want rejected with closed_at", rejected)
 	}
 }
 
@@ -198,7 +198,7 @@ func TestMetadataAndPublicViews(t *testing.T) {
 	}
 }
 
-func TestSaveIssueIsTransactional(t *testing.T) {
+func TestSaveTicketIsTransactional(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -208,16 +208,16 @@ func TestSaveIssueIsTransactional(t *testing.T) {
 		t.Fatalf("create first admin: %v", err)
 	}
 	productID := tracker.ListProducts(admin)[0].ID
-	issue, err := tracker.CreateIssue(CreateIssue{ProductID: productID, Title: "Original", Priority: "normal"})
+	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Original", Priority: "normal"})
 	if err != nil {
-		t.Fatalf("create issue: %v", err)
+		t.Fatalf("create ticket: %v", err)
 	}
 
 	title := "Changed"
 	status := "assigned"
-	_, err = tracker.SaveIssue(SaveIssueInput{
-		IssueID: issue.ID,
-		Patch:   UpdateIssue{Title: &title, Status: &status},
+	_, err = tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
+		Patch:    UpdateTicket{Title: &title, Status: &status},
 		Comment: &AddComment{
 			Author:     "Admin",
 			Body:       "This should not be stored",
@@ -225,11 +225,11 @@ func TestSaveIssueIsTransactional(t *testing.T) {
 		},
 	})
 	if !errors.Is(err, ErrValidation) {
-		t.Fatalf("save issue error = %v, want ErrValidation", err)
+		t.Fatalf("save ticket error = %v, want ErrValidation", err)
 	}
-	unchanged, err := tracker.GetIssue(issue.ID)
+	unchanged, err := tracker.GetTicket(ticket.ID)
 	if err != nil {
-		t.Fatalf("get issue after failed save: %v", err)
+		t.Fatalf("get ticket after failed save: %v", err)
 	}
 	if unchanged.Title != "Original" || unchanged.Status != "new" || len(unchanged.Comments) != 0 {
 		t.Fatalf("failed save was not rolled back: %#v", unchanged)
@@ -237,23 +237,23 @@ func TestSaveIssueIsTransactional(t *testing.T) {
 
 	comment := AddComment{Author: "Admin", Body: "Now assigned", Visibility: "public"}
 	assignee := "alice"
-	saved, err := tracker.SaveIssue(SaveIssueInput{
-		IssueID: issue.ID,
-		Patch:   UpdateIssue{Status: &status, Assignee: &assignee},
-		Comment: &comment,
+	saved, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
+		Patch:    UpdateTicket{Status: &status, Assignee: &assignee},
+		Comment:  &comment,
 	})
 	if err != nil {
-		t.Fatalf("save issue: %v", err)
+		t.Fatalf("save ticket: %v", err)
 	}
 	if !saved.HasPatch || !saved.HasComment || !saved.PublicComment || !saved.AssignmentChanged {
 		t.Fatalf("save metadata = %#v", saved)
 	}
-	if saved.Previous.Status != "new" || saved.Issue.Status != "assigned" || len(saved.Issue.Comments) != 1 {
-		t.Fatalf("saved issue = %#v", saved)
+	if saved.Previous.Status != "new" || saved.Ticket.Status != "assigned" || len(saved.Ticket.Comments) != 1 {
+		t.Fatalf("saved ticket = %#v", saved)
 	}
 }
 
-func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
+func TestTicketAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -264,7 +264,7 @@ func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	}
 	productID := tracker.ListProducts(admin)[0].ID
 
-	issue, err := tracker.CreateIssueWithAttachments(CreateIssue{
+	ticket, err := tracker.CreateTicketWithAttachments(CreateTicket{
 		ProductID: productID,
 		Title:     "Attached ticket",
 	}, []CreateAttachment{{
@@ -275,14 +275,14 @@ func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 		StorageKey:  "ti/ck/ticket-hash",
 	}}, admin.ID)
 	if err != nil {
-		t.Fatalf("create issue with attachment: %v", err)
+		t.Fatalf("create ticket with attachment: %v", err)
 	}
-	if len(issue.Attachments) != 1 || issue.Attachments[0].Filename != "request.txt" || issue.Attachments[0].CreatedByUserID != admin.ID {
-		t.Fatalf("ticket attachments = %#v", issue.Attachments)
+	if len(ticket.Attachments) != 1 || ticket.Attachments[0].Filename != "request.txt" || ticket.Attachments[0].CreatedByUserID != admin.ID {
+		t.Fatalf("ticket attachments = %#v", ticket.Attachments)
 	}
 
-	saved, err := tracker.SaveIssue(SaveIssueInput{
-		IssueID: issue.ID,
+	saved, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
 		Comment: &AddComment{
 			Author:     "Admin",
 			Visibility: "internal",
@@ -299,10 +299,10 @@ func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save file-only comment: %v", err)
 	}
-	if !saved.HasComment || saved.CommentID == 0 || len(saved.Issue.Comments) != 1 {
+	if !saved.HasComment || saved.CommentID == 0 || len(saved.Ticket.Comments) != 1 {
 		t.Fatalf("save result = %#v", saved)
 	}
-	comment := saved.Issue.Comments[0]
+	comment := saved.Ticket.Comments[0]
 	if comment.Body != "" || comment.Visibility != "internal" || len(comment.Attachments) != 1 || comment.Attachments[0].Filename != "diagnosis.txt" {
 		t.Fatalf("comment attachments = %#v", comment)
 	}
@@ -310,12 +310,12 @@ func TestIssueAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get attachment: %v", err)
 	}
-	if attachment.IssueID != issue.ID || attachment.CommentID == nil || *attachment.CommentID != saved.CommentID {
+	if attachment.TicketID != ticket.ID || attachment.CommentID == nil || *attachment.CommentID != saved.CommentID {
 		t.Fatalf("attachment = %#v", attachment)
 	}
 }
 
-func TestDeleteIssueCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
+func TestDeleteTicketCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -332,22 +332,22 @@ func TestDeleteIssueCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 		SHA256:      "shared-hash",
 		StorageKey:  "sh/ar/shared-hash",
 	}
-	issue, err := tracker.CreateIssueWithAttachments(CreateIssue{
+	ticket, err := tracker.CreateTicketWithAttachments(CreateTicket{
 		ProductID: productID,
 		Title:     "Delete me",
 	}, []CreateAttachment{shared}, admin.ID)
 	if err != nil {
-		t.Fatalf("create issue: %v", err)
+		t.Fatalf("create ticket: %v", err)
 	}
-	other, err := tracker.CreateIssueWithAttachments(CreateIssue{
+	other, err := tracker.CreateTicketWithAttachments(CreateTicket{
 		ProductID: productID,
 		Title:     "Keep me",
 	}, []CreateAttachment{shared}, admin.ID)
 	if err != nil {
-		t.Fatalf("create other issue: %v", err)
+		t.Fatalf("create other ticket: %v", err)
 	}
-	saved, err := tracker.SaveIssue(SaveIssueInput{
-		IssueID: issue.ID,
+	saved, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
 		Comment: &AddComment{
 			Author:     "Admin",
 			Visibility: "public",
@@ -364,30 +364,30 @@ func TestDeleteIssueCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save comment attachment: %v", err)
 	}
-	commentAttachmentID := saved.Issue.Comments[0].Attachments[0].ID
+	commentAttachmentID := saved.Ticket.Comments[0].Attachments[0].ID
 
-	orphaned, err := tracker.DeleteIssue(issue.ID)
+	orphaned, err := tracker.DeleteTicket(ticket.ID)
 	if err != nil {
-		t.Fatalf("delete issue: %v", err)
+		t.Fatalf("delete ticket: %v", err)
 	}
 	if slices.Contains(orphaned, shared.StorageKey) || !slices.Contains(orphaned, "or/ph/orphan-hash") {
 		t.Fatalf("orphaned storage keys = %#v", orphaned)
 	}
-	if _, err := tracker.GetIssue(issue.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("deleted issue err = %v, want not found", err)
+	if _, err := tracker.GetTicket(ticket.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted ticket err = %v, want not found", err)
 	}
 	if _, err := tracker.GetAttachment(commentAttachmentID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted attachment err = %v, want not found", err)
 	}
-	kept, err := tracker.GetIssue(other.ID)
+	kept, err := tracker.GetTicket(other.ID)
 	if err != nil {
-		t.Fatalf("get kept issue: %v", err)
+		t.Fatalf("get kept ticket: %v", err)
 	}
 	if len(kept.Attachments) != 1 || kept.Attachments[0].StorageKey != shared.StorageKey {
-		t.Fatalf("kept issue attachments = %#v", kept.Attachments)
+		t.Fatalf("kept ticket attachments = %#v", kept.Attachments)
 	}
-	if _, err := tracker.DeleteIssue(issue.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("delete missing issue err = %v, want not found", err)
+	if _, err := tracker.DeleteTicket(ticket.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing ticket err = %v, want not found", err)
 	}
 }
 
@@ -756,11 +756,11 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("deliveries = %#v", deliveries)
 	}
 
-	issue, err := tracker.CreateIssue(CreateIssue{ProductID: product.ID, Title: "Numbered support ticket"})
+	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: product.ID, Title: "Numbered support ticket"})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
-	if gotID, ok := tracker.IssueIDByProductNumber(product.ID, issue.Number); !ok || gotID != issue.ID {
+	if gotID, ok := tracker.TicketIDByProductNumber(product.ID, ticket.Number); !ok || gotID != ticket.ID {
 		t.Fatalf("ticket by product number = %d %v", gotID, ok)
 	}
 
@@ -804,7 +804,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	}
 }
 
-func TestProductMembershipFiltersIssues(t *testing.T) {
+func TestProductMembershipFiltersTickets(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -825,16 +825,16 @@ func TestProductMembershipFiltersIssues(t *testing.T) {
 	if _, err := tracker.UpsertProductMember(visibleProduct.ID, UpsertProductMember{UserID: user.ID, Role: "viewer"}); err != nil {
 		t.Fatalf("add member: %v", err)
 	}
-	if _, err := tracker.CreateIssue(CreateIssue{ProductID: visibleProduct.ID, Title: "Visible"}); err != nil {
-		t.Fatalf("create visible issue: %v", err)
+	if _, err := tracker.CreateTicket(CreateTicket{ProductID: visibleProduct.ID, Title: "Visible"}); err != nil {
+		t.Fatalf("create visible ticket: %v", err)
 	}
-	if _, err := tracker.CreateIssue(CreateIssue{ProductID: hiddenProduct.ID, Title: "Hidden"}); err != nil {
-		t.Fatalf("create hidden issue: %v", err)
+	if _, err := tracker.CreateTicket(CreateTicket{ProductID: hiddenProduct.ID, Title: "Hidden"}); err != nil {
+		t.Fatalf("create hidden ticket: %v", err)
 	}
 
-	issues := tracker.ListIssuesForUser(Filter{}, user)
-	if len(issues) != 1 || issues[0].Title != "Visible" {
-		t.Fatalf("visible issues = %#v", issues)
+	tickets := tracker.ListTicketsForUser(Filter{}, user)
+	if len(tickets) != 1 || tickets[0].Title != "Visible" {
+		t.Fatalf("visible tickets = %#v", tickets)
 	}
 	products := tracker.ListProducts(user)
 	if len(products) != 1 || products[0].ID != visibleProduct.ID {
@@ -866,36 +866,36 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	if _, err := tracker.UpsertProductMember(productID, UpsertProductMember{UserID: assignee.ID, Role: "agent"}); err != nil {
 		t.Fatalf("add assignee member: %v", err)
 	}
-	issue, err := tracker.CreateIssue(CreateIssue{
+	ticket, err := tracker.CreateTicket(CreateTicket{
 		ProductID: productID,
 		Title:     "Notify operators",
 		Reporter:  customer.Username,
 		Assignee:  assignee.Username,
 	})
 	if err != nil {
-		t.Fatalf("create issue: %v", err)
+		t.Fatalf("create ticket: %v", err)
 	}
 
-	createdRecipients := tracker.IssueEmailRecipients("ticket.created", issue, customer)
+	createdRecipients := tracker.TicketEmailRecipients("ticket.created", ticket, customer)
 	if !hasRecipient(createdRecipients, admin.Email) || hasRecipient(createdRecipients, customer.Email) {
 		t.Fatalf("created recipients = %#v, want admin only excluding actor customer", createdRecipients)
 	}
-	commentRecipients := tracker.IssueEmailRecipients("ticket.commented", issue, customer)
+	commentRecipients := tracker.TicketEmailRecipients("ticket.commented", ticket, customer)
 	if !hasRecipient(commentRecipients, assignee.Email) || hasRecipient(commentRecipients, customer.Email) {
 		t.Fatalf("comment recipients = %#v, want assignee excluding actor customer", commentRecipients)
 	}
-	updateRecipients := tracker.IssueEmailRecipients("ticket.updated", issue, admin)
+	updateRecipients := tracker.TicketEmailRecipients("ticket.updated", ticket, admin)
 	if !hasRecipient(updateRecipients, assignee.Email) || hasRecipient(updateRecipients, customer.Email) {
 		t.Fatalf("update recipients = %#v, want assignee excluding customer reporter", updateRecipients)
 	}
-	assignedRecipients := tracker.IssueEmailRecipients("ticket.assigned", issue, admin)
+	assignedRecipients := tracker.TicketEmailRecipients("ticket.assigned", ticket, admin)
 	if !hasRecipient(assignedRecipients, assignee.Email) {
 		t.Fatalf("assigned recipients = %#v, want assignee", assignedRecipients)
 	}
 
 	queued, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
-		ProductID:      issue.ProductID,
-		IssueID:        issue.ID,
+		ProductID:      ticket.ProductID,
+		TicketID:       ticket.ID,
 		UserID:         assignee.ID,
 		RecipientEmail: assignee.Email,
 		RecipientName:  assignee.DisplayName,
@@ -929,8 +929,8 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 
 	sendAfter := time.Now().UTC().Add(time.Hour)
 	first, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
-		ProductID:      issue.ProductID,
-		IssueID:        issue.ID,
+		ProductID:      ticket.ProductID,
+		TicketID:       ticket.ID,
 		UserID:         assignee.ID,
 		RecipientEmail: assignee.Email,
 		Event:          "ticket.updated",
@@ -943,8 +943,8 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 		t.Fatalf("enqueue first coalesced email: %v", err)
 	}
 	second, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
-		ProductID:      issue.ProductID,
-		IssueID:        issue.ID,
+		ProductID:      ticket.ProductID,
+		TicketID:       ticket.ID,
 		UserID:         assignee.ID,
 		RecipientEmail: assignee.Email,
 		Event:          "ticket.commented",
@@ -981,7 +981,7 @@ func TestPortalTicketTokenAndPublicComments(t *testing.T) {
 		t.Fatalf("create admin: %v", err)
 	}
 	productID := tracker.ListProducts(admin)[0].ID
-	ticket, err := tracker.CreateIssue(CreateIssue{
+	ticket, err := tracker.CreateTicket(CreateTicket{
 		ProductID:      productID,
 		Title:          "Cannot sign in",
 		Description:    "Login fails",
@@ -1001,14 +1001,14 @@ func TestPortalTicketTokenAndPublicComments(t *testing.T) {
 	if _, err := tracker.AddComment(ticket.ID, AddComment{Author: "Admin", Body: "Public reply", Visibility: "public"}); err != nil {
 		t.Fatalf("add public reply: %v", err)
 	}
-	publicTicket, err := tracker.GetIssueByCustomerToken(ticket.CustomerToken)
+	publicTicket, err := tracker.GetTicketByCustomerToken(ticket.CustomerToken)
 	if err != nil {
 		t.Fatalf("get ticket by token: %v", err)
 	}
 	if len(publicTicket.Comments) != 1 || publicTicket.Comments[0].Body != "Public reply" {
 		t.Fatalf("public comments = %#v", publicTicket.Comments)
 	}
-	if _, err := tracker.GetIssueByCustomerToken("missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := tracker.GetTicketByCustomerToken("missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing token error = %v, want ErrNotFound", err)
 	}
 }

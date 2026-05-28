@@ -377,8 +377,8 @@ async function completeCustomerSetup(cdp, setupLink) {
 async function createCustomerTicket(cdp) {
   return runInPage(cdp, async (input) => {
     const { isScrolledToBottom, modalRoot, openModalRoot, pasteFiles, setValue, tinyGifFile, waitFor } = pageTools();
-    await waitFor(() => document.querySelector("#newIssueButton") && !document.querySelector("#newIssueButton").hidden, "new ticket button");
-    document.querySelector("#newIssueButton").click();
+    await waitFor(() => document.querySelector("#newTicketButton") && !document.querySelector("#newTicketButton").hidden, "new ticket button");
+    document.querySelector("#newTicketButton").click();
     const root = await waitFor(() => {
       const candidate = modalRoot();
       const dialog = candidate?.querySelector("dialog[open]");
@@ -387,7 +387,7 @@ async function createCustomerTicket(cdp) {
       return dialog && heading.includes("New Ticket") && title ? candidate : null;
     }, "new ticket modal");
     const createModal = root.querySelector(".ticket-create-modal");
-    if (document.querySelector("#issueList .issue-row.draft")) {
+    if (document.querySelector("#ticketList .ticket-row.draft")) {
       throw new Error("ticket creation should use a modal, not a draft row");
     }
     const product = root.querySelector("[name='product_id']");
@@ -397,7 +397,7 @@ async function createCustomerTicket(cdp) {
     }
     await waitFor(() => !root.querySelector("[name='priority']").disabled, "priority step enabled");
     setValue(root.querySelector("[name='priority']"), "high");
-    await waitFor(() => !root.querySelector("[name='title']").disabled, "issue detail step enabled");
+    await waitFor(() => !root.querySelector("[name='title']").disabled, "ticket detail step enabled");
     setValue(root.querySelector("[name='title']"), input.title);
     setValue(root.querySelector("[name='description']"), input.description);
     const createTransfer = new DataTransfer();
@@ -447,8 +447,8 @@ async function createCustomerTicket(cdp) {
     }
     confirm.click();
     await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "new ticket modal closed", 12000);
-    await waitFor(() => document.querySelector("#issueList")?.textContent.includes(input.title), "created ticket in list", 12000);
-    if (document.querySelector("#issueList .issue-row.draft")) {
+    await waitFor(() => document.querySelector("#ticketList")?.textContent.includes(input.title), "created ticket in list", 12000);
+    if (document.querySelector("#ticketList .ticket-row.draft")) {
       throw new Error("draft ticket row should not be present after creating a ticket");
     }
     const createdDetail = await waitFor(() => {
@@ -498,7 +498,7 @@ async function verifyTicketHashRoute(cdp, ticketKey) {
       return window.location.pathname === "/tickets" &&
         decodeURIComponent(window.location.hash.slice(1)) === expectedKey &&
         pane?.textContent.includes(title) &&
-        document.querySelector("#issueList .issue-row.active");
+        document.querySelector("#ticketList .ticket-row.active");
     }, "ticket hash route reload", 12000);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => window.location.hash === "" && document.querySelector("#ticketDetailPane")?.textContent.includes("No ticket selected"), "ticket hash clears on close");
@@ -574,15 +574,18 @@ async function staffReplyAndResolve(cdp) {
     const { isScrolledToBottom, openModalRoot, pasteFiles, setValue, submitModal, tinyGifFile, waitFor } = pageTools();
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
-      return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
+      return !document.querySelector("#ticketList .ticket-row.active") && detailText.includes("No ticket selected");
     }, "no ticket selected by default");
-    const row = await waitFor(() => {
-      return [...document.querySelectorAll("#issueList .issue-row")]
+    let row = await waitFor(() => {
+      return [...document.querySelectorAll("#ticketList .ticket-row")]
         .find((candidate) => candidate.textContent.includes(input.title));
     }, "ticket row for staff update", 12000);
-    await waitFor(() => row.classList.contains("unread"), "new customer ticket unread for staff");
-    const unreadTitle = row.querySelector(".issue-row-title");
-    const unreadDot = row.querySelector(".issue-unread-dot");
+    row = await waitFor(() => {
+      return [...document.querySelectorAll("#ticketList .ticket-row")]
+        .find((candidate) => candidate.textContent.includes(input.title) && candidate.classList.contains("unread"));
+    }, "new customer ticket unread for staff");
+    const unreadTitle = row.querySelector(".ticket-row-title");
+    const unreadDot = row.querySelector(".ticket-unread-dot");
     if (!unreadDot || getComputedStyle(unreadDot).backgroundColor !== "rgb(217, 45, 32)") {
       throw new Error("unread ticket rows should use a red unread dot");
     }
@@ -596,7 +599,7 @@ async function staffReplyAndResolve(cdp) {
       return pane?.querySelector("form [name='status']") ? pane : null;
     }, "ticket detail pane");
     await waitFor(() => {
-      return !document.querySelector("#issueList .issue-row.active")?.classList.contains("unread");
+      return !document.querySelector("#ticketList .ticket-row.active")?.classList.contains("unread");
     }, "ticket marked read after opening");
     const incomingMessage = [...detail.querySelectorAll(".message-row")]
       .find((candidate) => candidate.textContent.includes(input.description));
@@ -682,7 +685,7 @@ async function staffReplyAndResolve(cdp) {
     await submitModal("Send this reply?");
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
-      const stillListed = [...document.querySelectorAll("#issueList .issue-row")]
+      const stillListed = [...document.querySelectorAll("#ticketList .ticket-row")]
         .some((candidate) => candidate.textContent.includes(input.title));
       return detailText.includes(input.reply) || !stillListed;
     }, "saved ticket update", 12000);
@@ -723,7 +726,7 @@ async function staffReplyAndResolve(cdp) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
-      return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
+      return !document.querySelector("#ticketList .ticket-row.active") && detailText.includes("No ticket selected");
     }, "ticket closed with escape");
     return true;
   }, {

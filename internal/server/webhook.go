@@ -33,26 +33,26 @@ func (s *Server) newWebhookClient() *http.Client {
 	}
 }
 
-func (s *Server) emitIssueWebhook(event string, issue store.Issue, actor store.User) {
+func (s *Server) emitTicketWebhook(event string, ticket store.Ticket, actor store.User) {
 	payload := map[string]any{
 		"event":      event,
 		"created_at": time.Now().UTC(),
 		"actor":      store.ToPublicUser(actor),
-		"ticket":     issue,
+		"ticket":     ticket,
 	}
 	body, _ := json.Marshal(payload)
-	for _, hook := range s.store.ListWebhooksForEvent(event, issue.ProductID) {
-		go s.deliverWebhook(hook, event, issue.ID, body)
+	for _, hook := range s.store.ListWebhooksForEvent(event, ticket.ProductID) {
+		go s.deliverWebhook(hook, event, ticket.ID, body)
 	}
 }
 
-func (s *Server) deliverWebhook(hook store.Webhook, event string, issueID int64, body []byte) store.WebhookDelivery {
+func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64, body []byte) store.WebhookDelivery {
 	started := time.Now()
 	delivery := store.WebhookDelivery{
 		WebhookID: hook.ID,
 		ProductID: hook.ProductID,
 		Event:     event,
-		IssueID:   issueID,
+		TicketID:  ticketID,
 	}
 	if err := s.validateWebhookTarget(hook.URL); err != nil {
 		delivery.Error = err.Error()

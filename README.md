@@ -17,17 +17,20 @@ Current target: `v0.2.0-alpha` (see [VERSION](./VERSION)).
 
 Pappice is intended for small-team self-hosting and public audit. It is not yet
 externally security audited, and the API/schema should be considered unstable
-until a non-alpha release.
+until a non-alpha release. Alpha builds may require recreating the SQLite
+database.
 
 ## Features
 
 - Products group tickets by service, customer, or team.
 - Customers and staff use the same UI with role-based actions.
 - Ticket workflow: New, Assigned, Resolved, Rejected.
-- Public replies, internal notes, assignees, priorities, filtering, and sorting.
+- Public replies, internal notes, unread state, assignees, priorities,
+  filtering, and sorting.
+- Drag/drop and pasted attachments, with inline image previews.
 - Admin-created accounts with one-time setup/reset links.
 - SMTP-backed no-reply notifications with a durable SQLite outbox.
-- API tokens, webhooks, and admin audit events.
+- API tokens, webhooks, admin audit events, and a maintenance overview.
 
 ## Requirements
 
@@ -101,8 +104,9 @@ name or requiring a custom build.
 ## Attachments
 
 Ticket descriptions and replies can include files. Files are stored on disk in
-`PAPPICE_UPLOAD_DIR`; SQLite stores only metadata and access rules. Back up the
-database and upload directory together.
+`PAPPICE_UPLOAD_DIR`; SQLite stores only metadata and access rules. The UI
+supports file picking, drag/drop, and paste. Back up the database and upload
+directory together.
 
 ## Backup And Restore
 

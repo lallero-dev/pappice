@@ -99,8 +99,8 @@ type ticketPatchInput struct {
 	Comment     *store.AddComment `json:"comment"`
 }
 
-func (input ticketPatchInput) updateIssue() store.UpdateIssue {
-	return store.UpdateIssue{
+func (input ticketPatchInput) updateTicket() store.UpdateTicket {
+	return store.UpdateTicket{
 		Title:       input.Title,
 		Description: input.Description,
 		Status:      input.Status,
@@ -491,7 +491,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
-	csrf, ok := s.issueSession(w, user.ID)
+	csrf, ok := s.createSession(w, user.ID)
 	if !ok {
 		return
 	}
@@ -531,7 +531,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
-	csrf, ok := s.issueSession(w, user.ID)
+	csrf, ok := s.createSession(w, user.ID)
 	if !ok {
 		return
 	}
@@ -617,7 +617,7 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 			respondStoreError(w, err)
 			return
 		}
-		csrf, ok := s.issueSession(w, user.ID)
+		csrf, ok := s.createSession(w, user.ID)
 		if !ok {
 			return
 		}
@@ -719,7 +719,7 @@ func (s *Server) handleProductByID(w http.ResponseWriter, r *http.Request) {
 	case "members":
 		s.handleProductMembers(w, r, auth, productID, parts[2:])
 	case "tickets":
-		s.handleProductIssues(w, r, auth, productID)
+		s.handleProductTickets(w, r, auth, productID)
 	case "webhooks":
 		s.handleProductWebhooks(w, r, auth, productID)
 	case "webhook-deliveries":
@@ -836,7 +836,7 @@ func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, au
 	http.NotFound(w, r)
 }
 
-func (s *Server) handleProductIssues(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
+func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
 	if !s.canReadProduct(auth.User, productID) {
 		respondError(w, http.StatusNotFound, "not found")
 		return
@@ -856,11 +856,11 @@ func (s *Server) handleProductIssues(w http.ResponseWriter, r *http.Request, aut
 			"priorities": store.Priorities(),
 		})
 	case http.MethodPost:
-		if !s.canCreateIssue(auth.User, productID) {
+		if !s.canCreateTicket(auth.User, productID) {
 			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
-		var input store.CreateIssue
+		var input store.CreateTicket
 		var uploads []storedUpload
 		if isMultipartRequest(r) {
 			if !s.parseMultipartForm(w, r) {
@@ -868,7 +868,7 @@ func (s *Server) handleProductIssues(w http.ResponseWriter, r *http.Request, aut
 			}
 			defer cleanupMultipartForm(r)
 			var err error
-			input, err = multipartCreateIssueInput(r, productID)
+			input, err = multipartCreateTicketInput(r, productID)
 			if err != nil {
 				respondStoreError(w, err)
 				return
@@ -884,22 +884,22 @@ func (s *Server) handleProductIssues(w http.ResponseWriter, r *http.Request, aut
 			}
 			input.ProductID = productID
 		}
-		customerTicket, ok := s.prepareIssueInput(w, auth.User, productID, &input)
+		customerTicket, ok := s.prepareTicketInput(w, auth.User, productID, &input)
 		if !ok {
 			cleanupStoredUploads(uploads)
 			return
 		}
-		issue, err := s.store.CreateIssueWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
+		ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
 		if err != nil {
 			cleanupStoredUploads(uploads)
 			respondStoreError(w, err)
 			return
 		}
-		s.emitIssueEvent("ticket.created", issue, auth.User)
+		s.emitTicketEvent("ticket.created", ticket, auth.User)
 		if customerTicket {
-			s.enqueueRequesterEmail("ticket.created", issue, "Pappice Support")
+			s.enqueueRequesterEmail("ticket.created", ticket, "Pappice Support")
 		}
-		respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, issue))
+		respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, ticket))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
@@ -922,7 +922,7 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 		})
 		respondJSON(w, http.StatusOK, map[string]any{"tickets": tickets})
 	case http.MethodPost:
-		var input store.CreateIssue
+		var input store.CreateTicket
 		var uploads []storedUpload
 		if isMultipartRequest(r) {
 			if !s.parseMultipartForm(w, r) {
@@ -930,7 +930,7 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 			}
 			defer cleanupMultipartForm(r)
 			var err error
-			input, err = multipartCreateIssueInput(r, 0)
+			input, err = multipartCreateTicketInput(r, 0)
 			if err != nil {
 				respondStoreError(w, err)
 				return
@@ -940,11 +940,11 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if !s.canCreateIssue(auth.User, input.ProductID) {
+		if !s.canCreateTicket(auth.User, input.ProductID) {
 			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
-		customerTicket, ok := s.prepareIssueInput(w, auth.User, input.ProductID, &input)
+		customerTicket, ok := s.prepareTicketInput(w, auth.User, input.ProductID, &input)
 		if !ok {
 			return
 		}
@@ -955,17 +955,17 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		issue, err := s.store.CreateIssueWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
+		ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
 		if err != nil {
 			cleanupStoredUploads(uploads)
 			respondStoreError(w, err)
 			return
 		}
-		s.emitIssueEvent("ticket.created", issue, auth.User)
+		s.emitTicketEvent("ticket.created", ticket, auth.User)
 		if customerTicket {
-			s.enqueueRequesterEmail("ticket.created", issue, "Pappice Support")
+			s.enqueueRequesterEmail("ticket.created", ticket, "Pappice Support")
 		}
-		respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, issue))
+		respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, ticket))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
@@ -990,26 +990,26 @@ func (s *Server) handleTicketPath(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid ticket id")
 		return
 	}
-	issue, err := s.store.GetIssue(id)
+	ticket, err := s.store.GetTicket(id)
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	if !s.canReadIssue(auth.User, issue) {
+	if !s.canReadTicket(auth.User, ticket) {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
 
 	if len(parts) == 1 {
-		s.handleSingleIssue(w, r, auth, issue)
+		s.handleSingleTicket(w, r, auth, ticket)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "comments" {
-		s.handleComments(w, r, auth, issue)
+		s.handleComments(w, r, auth, ticket)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "read" {
-		s.handleTicketRead(w, r, auth, issue)
+		s.handleTicketRead(w, r, auth, ticket)
 		return
 	}
 	http.NotFound(w, r)
@@ -1020,22 +1020,22 @@ func (s *Server) handleTicketByKey(w http.ResponseWriter, r *http.Request, auth 
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	issue, err := s.store.GetIssueByKey(key)
+	ticket, err := s.store.GetTicketByKey(key)
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	if !s.canReadIssue(auth.User, issue) {
+	if !s.canReadTicket(auth.User, ticket) {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
-	respondJSON(w, http.StatusOK, s.issueForUser(auth.User, issue))
+	respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, ticket))
 }
 
-func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth authContext, issue store.Issue) {
+func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket) {
 	switch r.Method {
 	case http.MethodGet:
-		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, issue))
+		respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, ticket))
 	case http.MethodPatch:
 		var input ticketPatchInput
 		var uploads []storedUpload
@@ -1055,26 +1055,26 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 				return
 			}
 		}
-		updated, ok := s.applyTicketPatch(w, auth, issue, input, attachmentInputs(uploads), auth.User.ID)
+		updated, ok := s.applyTicketPatch(w, auth, ticket, input, attachmentInputs(uploads), auth.User.ID)
 		if !ok {
 			cleanupStoredUploads(uploads)
 			return
 		}
-		respondJSON(w, http.StatusOK, s.issueForUser(auth.User, updated))
+		respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, updated))
 	case http.MethodDelete:
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-		orphanedStorageKeys, err := s.store.DeleteIssue(issue.ID)
+		orphanedStorageKeys, err := s.store.DeleteTicket(ticket.ID)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
 		s.removeOrphanedAttachmentFiles(orphanedStorageKeys)
-		s.audit(r, auth.User, "ticket.deleted", "ticket", issue.ID, issue.Key, map[string]any{
-			"product_id": issue.ProductID,
-			"title":      issue.Title,
+		s.audit(r, auth.User, "ticket.deleted", "ticket", ticket.ID, ticket.Key, map[string]any{
+			"product_id": ticket.ProductID,
+			"title":      ticket.Title,
 		})
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
@@ -1082,7 +1082,7 @@ func (s *Server) handleSingleIssue(w http.ResponseWriter, r *http.Request, auth 
 	}
 }
 
-func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue store.Issue, input ticketPatchInput, attachments []store.CreateAttachment, attachmentUserID int64) (store.Issue, bool) {
+func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticket store.Ticket, input ticketPatchInput, attachments []store.CreateAttachment, attachmentUserID int64) (store.Ticket, bool) {
 	hasPatch := input.hasTicketPatch()
 	hasAttachments := len(attachments) > 0
 	if hasAttachments && input.Comment == nil {
@@ -1091,56 +1091,56 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 	hasComment := input.Comment != nil && (strings.TrimSpace(input.Comment.Body) != "" || hasAttachments)
 	if !hasPatch && !hasComment {
 		respondError(w, http.StatusBadRequest, "ticket changes or comment are required")
-		return store.Issue{}, false
+		return store.Ticket{}, false
 	}
-	if hasPatch && !s.canEditIssue(auth.User, issue.ProductID) {
+	if hasPatch && !s.canEditTicket(auth.User, ticket.ProductID) {
 		respondError(w, http.StatusForbidden, "agent access is required")
-		return store.Issue{}, false
+		return store.Ticket{}, false
 	}
-	if hasComment && !s.canCommentIssue(auth.User, issue.ProductID) {
+	if hasComment && !s.canCommentTicket(auth.User, ticket.ProductID) {
 		respondError(w, http.StatusForbidden, "product comment access is required")
-		return store.Issue{}, false
+		return store.Ticket{}, false
 	}
 
 	var comment *store.AddComment
 	if hasComment {
 		next := *input.Comment
 		next.Visibility = defaultString(next.Visibility, "public")
-		if next.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProductID) {
+		if next.Visibility == "internal" && !s.canEditTicket(auth.User, ticket.ProductID) {
 			respondError(w, http.StatusForbidden, "agent access is required for internal notes")
-			return store.Issue{}, false
+			return store.Ticket{}, false
 		}
 		next.Author = defaultString(auth.User.DisplayName, auth.User.Username)
 		next.AuthorUserID = auth.User.ID
 		comment = &next
 	}
 
-	result, err := s.store.SaveIssue(store.SaveIssueInput{
-		IssueID:          issue.ID,
-		Patch:            input.updateIssue(),
+	result, err := s.store.SaveTicket(store.SaveTicketInput{
+		TicketID:         ticket.ID,
+		Patch:            input.updateTicket(),
 		Comment:          comment,
 		Attachments:      attachments,
 		AttachmentUserID: attachmentUserID,
 	})
 	if err != nil {
 		respondStoreError(w, err)
-		return store.Issue{}, false
+		return store.Ticket{}, false
 	}
-	updated := result.Issue
+	updated := result.Ticket
 
 	if result.HasPatch {
-		s.emitIssueWebhook("ticket.updated", updated, auth.User)
+		s.emitTicketWebhook("ticket.updated", updated, auth.User)
 		if result.AssignmentChanged {
-			s.emitIssueWebhook("ticket.assigned", updated, auth.User)
+			s.emitTicketWebhook("ticket.assigned", updated, auth.User)
 		}
 	}
 	if result.PublicComment {
-		s.emitIssueWebhook("ticket.commented", updated, auth.User)
+		s.emitTicketWebhook("ticket.commented", updated, auth.User)
 	}
 	s.enqueueTicketPatchEmails(input, updated, auth.User, result.Previous, result.AssignmentChanged, result.PublicComment)
 	if result.HasPatch || result.HasComment {
-		if err := s.store.MarkIssueRead(updated.ID, auth.User.ID, time.Now().UTC()); err == nil {
-			if refreshed, err := s.store.GetIssue(updated.ID); err == nil {
+		if err := s.store.MarkTicketRead(updated.ID, auth.User.ID, time.Now().UTC()); err == nil {
+			if refreshed, err := s.store.GetTicket(updated.ID); err == nil {
 				updated = refreshed
 			}
 		}
@@ -1148,7 +1148,7 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, issue
 	return updated, true
 }
 
-func (s *Server) enqueueTicketPatchEmails(input ticketPatchInput, updated store.Issue, actor store.User, previous store.Issue, assignmentChanged, publicComment bool) {
+func (s *Server) enqueueTicketPatchEmails(input ticketPatchInput, updated store.Ticket, actor store.User, previous store.Ticket, assignmentChanged, publicComment bool) {
 	if !input.hasTicketPatch() && !publicComment {
 		return
 	}
@@ -1159,13 +1159,13 @@ func (s *Server) enqueueTicketPatchEmails(input ticketPatchInput, updated store.
 	if input.hasTicketPatch() && !publicComment && assignmentChanged && input.onlyAssigneePatch() {
 		event = "ticket.assigned"
 	}
-	s.enqueueIssueEmails(event, updated, actor)
+	s.enqueueTicketEmails(event, updated, actor)
 	if requesterEvent, ok := requesterTicketPatchEmailEvent(input, previous, updated, publicComment); ok && !s.isSupportTicketRequester(actor, previous) {
 		s.enqueueRequesterEmail(requesterEvent, updated, defaultString(actor.DisplayName, actor.Username))
 	}
 }
 
-func requesterTicketPatchEmailEvent(input ticketPatchInput, previous, updated store.Issue, publicComment bool) (string, bool) {
+func requesterTicketPatchEmailEvent(input ticketPatchInput, previous, updated store.Ticket, publicComment bool) (string, bool) {
 	if publicComment {
 		return "ticket.commented", true
 	}
@@ -1175,12 +1175,12 @@ func requesterTicketPatchEmailEvent(input ticketPatchInput, previous, updated st
 	return "", false
 }
 
-func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth authContext, issue store.Issue) {
+func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if !s.canCommentIssue(auth.User, issue.ProductID) {
+	if !s.canCommentTicket(auth.User, ticket.ProductID) {
 		respondError(w, http.StatusForbidden, "product comment access is required")
 		return
 	}
@@ -1203,34 +1203,34 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		}
 	}
 	input.Visibility = defaultString(input.Visibility, "public")
-	if input.Visibility == "internal" && !s.canEditIssue(auth.User, issue.ProductID) {
+	if input.Visibility == "internal" && !s.canEditTicket(auth.User, ticket.ProductID) {
 		respondError(w, http.StatusForbidden, "agent access is required for internal notes")
 		cleanupStoredUploads(uploads)
 		return
 	}
-	updated, ok := s.applyTicketPatch(w, auth, issue, ticketPatchInput{Comment: &input}, attachmentInputs(uploads), auth.User.ID)
+	updated, ok := s.applyTicketPatch(w, auth, ticket, ticketPatchInput{Comment: &input}, attachmentInputs(uploads), auth.User.ID)
 	if !ok {
 		cleanupStoredUploads(uploads)
 		return
 	}
-	respondJSON(w, http.StatusCreated, s.issueForUser(auth.User, updated))
+	respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, updated))
 }
 
-func (s *Server) handleTicketRead(w http.ResponseWriter, r *http.Request, auth authContext, issue store.Issue) {
+func (s *Server) handleTicketRead(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if err := s.store.MarkIssueRead(issue.ID, auth.User.ID, time.Now().UTC()); err != nil {
+	if err := s.store.MarkTicketRead(ticket.ID, auth.User.ID, time.Now().UTC()); err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	updated, err := s.store.GetIssue(issue.ID)
+	updated, err := s.store.GetTicket(ticket.ID)
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, s.issueForUser(auth.User, updated))
+	respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, updated))
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -1706,7 +1706,7 @@ func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request,
 	respondJSON(w, http.StatusOK, map[string]any{"deliveries": filtered})
 }
 
-func (s *Server) issueSession(w http.ResponseWriter, userID int64) (string, bool) {
+func (s *Server) createSession(w http.ResponseWriter, userID int64) (string, bool) {
 	token, csrf, expires, err := s.store.CreateSessionFor(userID, s.options.SessionTTL)
 	if err != nil {
 		respondStoreError(w, err)
@@ -1812,16 +1812,16 @@ func (s *Server) canReadProduct(user store.User, productID int64) bool {
 	return ok
 }
 
-func (s *Server) canReadIssue(user store.User, issue store.Issue) bool {
+func (s *Server) canReadTicket(user store.User, ticket store.Ticket) bool {
 	if isAdmin(user) {
 		return true
 	}
-	role, ok := s.store.ProductRole(user.ID, issue.ProductID)
+	role, ok := s.store.ProductRole(user.ID, ticket.ProductID)
 	if !ok {
 		return false
 	}
 	if isCustomer(user) || role == "customer" {
-		return s.isSupportTicketRequester(user, issue)
+		return s.isSupportTicketRequester(user, ticket)
 	}
 	return true
 }
@@ -1837,30 +1837,30 @@ func (s *Server) canManageProduct(user store.User, productID int64) bool {
 	return ok && role == "owner"
 }
 
-func (s *Server) canCreateIssue(user store.User, productID int64) bool {
+func (s *Server) canCreateTicket(user store.User, productID int64) bool {
 	return s.hasProductRole(user, productID, "owner", "agent", "customer")
 }
 
-func (s *Server) canCommentIssue(user store.User, productID int64) bool {
+func (s *Server) canCommentTicket(user store.User, productID int64) bool {
 	return s.hasProductRole(user, productID, "owner", "agent", "customer")
 }
 
-func (s *Server) canEditIssue(user store.User, productID int64) bool {
+func (s *Server) canEditTicket(user store.User, productID int64) bool {
 	if isCustomer(user) {
 		return false
 	}
 	return s.hasProductRole(user, productID, "owner", "agent")
 }
 
-func (s *Server) isSupportTicketRequester(user store.User, issue store.Issue) bool {
+func (s *Server) isSupportTicketRequester(user store.User, ticket store.Ticket) bool {
 	email := strings.TrimSpace(user.Email)
-	if email != "" && strings.EqualFold(email, strings.TrimSpace(issue.RequesterEmail)) {
+	if email != "" && strings.EqualFold(email, strings.TrimSpace(ticket.RequesterEmail)) {
 		return true
 	}
-	return issue.Source == "portal" && strings.EqualFold(strings.TrimSpace(issue.Reporter), strings.TrimSpace(user.Username))
+	return ticket.Source == "portal" && strings.EqualFold(strings.TrimSpace(ticket.Reporter), strings.TrimSpace(user.Username))
 }
 
-func (s *Server) prepareIssueInput(w http.ResponseWriter, user store.User, productID int64, input *store.CreateIssue) (bool, bool) {
+func (s *Server) prepareTicketInput(w http.ResponseWriter, user store.User, productID int64, input *store.CreateTicket) (bool, bool) {
 	input.ProductID = productID
 	input.Reporter = user.Username
 	if !s.isCustomerTicketCreator(user, productID) {
@@ -1886,99 +1886,99 @@ func (s *Server) isCustomerTicketCreator(user store.User, productID int64) bool 
 	return ok && role == "customer"
 }
 
-func (s *Server) issueForUser(user store.User, issue store.Issue) store.Issue {
-	issues := s.issuesForUser(user, []store.Issue{issue})
-	if len(issues) == 0 {
-		return issue
+func (s *Server) ticketForUser(user store.User, ticket store.Ticket) store.Ticket {
+	tickets := s.ticketsForUser(user, []store.Ticket{ticket})
+	if len(tickets) == 0 {
+		return ticket
 	}
-	return issues[0]
+	return tickets[0]
 }
 
-func (s *Server) listTicketsForQuery(user store.User, query url.Values, filter store.Filter) []store.Issue {
+func (s *Server) listTicketsForQuery(user store.User, query url.Values, filter store.Filter) []store.Ticket {
 	statuses := append([]string(nil), filter.Statuses...)
 	if queryIncludeUnreadOutsideStatus(query) && len(statuses) > 0 && !queryUnread(query) {
 		filter.Statuses = nil
 	}
-	issues := s.store.ListIssuesForUser(filter, user)
-	tickets := s.issuesForUser(user, issues)
+	tickets := s.store.ListTicketsForUser(filter, user)
+	tickets = s.ticketsForUser(user, tickets)
 	if queryUnread(query) {
-		return unreadIssues(tickets)
+		return unreadTickets(tickets)
 	}
 	if queryIncludeUnreadOutsideStatus(query) && len(statuses) > 0 {
-		return issuesMatchingStatusOrUnread(tickets, statuses)
+		return ticketsMatchingStatusOrUnread(tickets, statuses)
 	}
 	return tickets
 }
 
-func (s *Server) issuesForUser(user store.User, issues []store.Issue) []store.Issue {
-	result := make([]store.Issue, 0, len(issues))
-	for _, issue := range issues {
-		if !s.canEditIssue(user, issue.ProductID) {
-			issue.Comments = publicComments(issue.Comments)
+func (s *Server) ticketsForUser(user store.User, tickets []store.Ticket) []store.Ticket {
+	result := make([]store.Ticket, 0, len(tickets))
+	for _, ticket := range tickets {
+		if !s.canEditTicket(user, ticket.ProductID) {
+			ticket.Comments = publicComments(ticket.Comments)
 		}
-		result = append(result, issue)
+		result = append(result, ticket)
 	}
 	s.annotateUnread(user, result)
 	return result
 }
 
-func (s *Server) annotateUnread(user store.User, issues []store.Issue) {
-	ids := make([]int64, 0, len(issues))
-	for _, issue := range issues {
-		ids = append(ids, issue.ID)
+func (s *Server) annotateUnread(user store.User, tickets []store.Ticket) {
+	ids := make([]int64, 0, len(tickets))
+	for _, ticket := range tickets {
+		ids = append(ids, ticket.ID)
 	}
-	readTimes, err := s.store.IssueReadTimes(user.ID, ids)
+	readTimes, err := s.store.TicketReadTimes(user.ID, ids)
 	if err != nil {
 		return
 	}
-	for index := range issues {
-		lastRead := readTimes[issues[index].ID]
+	for index := range tickets {
+		lastRead := readTimes[tickets[index].ID]
 		if !lastRead.IsZero() {
 			readAt := lastRead
-			issues[index].LastReadAt = &readAt
+			tickets[index].LastReadAt = &readAt
 		}
-		issues[index].UnreadCount = unreadActivityCount(user, issues[index], lastRead)
-		issues[index].HasUnread = issues[index].UnreadCount > 0
+		tickets[index].UnreadCount = unreadActivityCount(user, tickets[index], lastRead)
+		tickets[index].HasUnread = tickets[index].UnreadCount > 0
 	}
 }
 
-func issuesMatchingStatusOrUnread(issues []store.Issue, statuses []string) []store.Issue {
+func ticketsMatchingStatusOrUnread(tickets []store.Ticket, statuses []string) []store.Ticket {
 	active := make(map[string]struct{}, len(statuses))
 	for _, status := range statuses {
 		active[strings.TrimSpace(status)] = struct{}{}
 	}
-	result := make([]store.Issue, 0, len(issues))
-	for _, issue := range issues {
-		if issue.HasUnread {
-			result = append(result, issue)
+	result := make([]store.Ticket, 0, len(tickets))
+	for _, ticket := range tickets {
+		if ticket.HasUnread {
+			result = append(result, ticket)
 			continue
 		}
-		if _, ok := active[issue.Status]; ok {
-			result = append(result, issue)
+		if _, ok := active[ticket.Status]; ok {
+			result = append(result, ticket)
 		}
 	}
 	return result
 }
 
-func unreadIssues(issues []store.Issue) []store.Issue {
-	result := make([]store.Issue, 0, len(issues))
-	for _, issue := range issues {
-		if issue.HasUnread {
-			result = append(result, issue)
+func unreadTickets(tickets []store.Ticket) []store.Ticket {
+	result := make([]store.Ticket, 0, len(tickets))
+	for _, ticket := range tickets {
+		if ticket.HasUnread {
+			result = append(result, ticket)
 		}
 	}
 	return result
 }
 
-func unreadActivityCount(user store.User, issue store.Issue, lastRead time.Time) int {
+func unreadActivityCount(user store.User, ticket store.Ticket, lastRead time.Time) int {
 	count := 0
-	if issue.CreatedAt.After(lastRead) && !issueOpenedByUser(user, issue) {
+	if ticket.CreatedAt.After(lastRead) && !ticketOpenedByUser(user, ticket) {
 		count++
 	}
-	if issue.UpdatedAt.After(lastRead) && requesterTerminalStatus(issue.Status) {
+	if ticket.UpdatedAt.After(lastRead) && requesterTerminalStatus(ticket.Status) {
 		count++
 	}
-	for _, comment := range issue.Comments {
+	for _, comment := range ticket.Comments {
 		if comment.CreatedAt.After(lastRead) && !commentByUser(user, comment) {
 			count++
 		}
@@ -1986,9 +1986,9 @@ func unreadActivityCount(user store.User, issue store.Issue, lastRead time.Time)
 	return count
 }
 
-func issueOpenedByUser(user store.User, issue store.Issue) bool {
+func ticketOpenedByUser(user store.User, ticket store.Ticket) bool {
 	values := userAuthorValues(user)
-	for _, value := range []string{issue.Reporter, issue.RequesterName, issue.RequesterEmail, emailLocalPart(issue.RequesterEmail)} {
+	for _, value := range []string{ticket.Reporter, ticket.RequesterName, ticket.RequesterEmail, emailLocalPart(ticket.RequesterEmail)} {
 		if values[normalizeAuthor(value)] {
 			return true
 		}
@@ -2092,9 +2092,9 @@ func userPatchAuditDetails(before, after store.User, patch store.UpdateUser) map
 	return details
 }
 
-func (s *Server) emitIssueEvent(event string, issue store.Issue, actor store.User) {
-	s.emitIssueWebhook(event, issue, actor)
-	s.enqueueIssueEmails(event, issue, actor)
+func (s *Server) emitTicketEvent(event string, ticket store.Ticket, actor store.User) {
+	s.emitTicketWebhook(event, ticket, actor)
+	s.enqueueTicketEmails(event, ticket, actor)
 }
 
 func queryStatuses(query url.Values) []string {

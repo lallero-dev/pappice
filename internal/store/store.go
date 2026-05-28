@@ -21,7 +21,7 @@ var (
 	ErrPasswordResetRequired = errors.New("password setup or reset is required")
 )
 
-type Issue struct {
+type Ticket struct {
 	ID             int64        `json:"id"`
 	ProductID      int64        `json:"product_id"`
 	ProductKey     string       `json:"product_key"`
@@ -60,7 +60,7 @@ type Comment struct {
 	CreatedAt    time.Time    `json:"created_at"`
 }
 
-type CreateIssue struct {
+type CreateTicket struct {
 	ProductID      int64  `json:"product_id"`
 	Title          string `json:"title"`
 	Description    string `json:"description"`
@@ -74,7 +74,7 @@ type CreateIssue struct {
 	RequesterEmail string `json:"requester_email"`
 }
 
-type UpdateIssue struct {
+type UpdateTicket struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Status      *string `json:"status"`
@@ -90,17 +90,17 @@ type AddComment struct {
 	Visibility   string `json:"visibility"`
 }
 
-type SaveIssueInput struct {
-	IssueID          int64
-	Patch            UpdateIssue
+type SaveTicketInput struct {
+	TicketID         int64
+	Patch            UpdateTicket
 	Comment          *AddComment
 	Attachments      []CreateAttachment
 	AttachmentUserID int64
 }
 
-type SaveIssueResult struct {
-	Previous          Issue
-	Issue             Issue
+type SaveTicketResult struct {
+	Previous          Ticket
+	Ticket            Ticket
 	HasPatch          bool
 	HasComment        bool
 	PublicComment     bool
@@ -143,7 +143,7 @@ type PublicUser struct {
 
 type Attachment struct {
 	ID              int64     `json:"id"`
-	IssueID         int64     `json:"issue_id"`
+	TicketID        int64     `json:"ticket_id"`
 	CommentID       *int64    `json:"comment_id,omitempty"`
 	Filename        string    `json:"filename"`
 	ContentType     string    `json:"content_type"`
@@ -349,7 +349,7 @@ type WebhookDelivery struct {
 	WebhookID  int64     `json:"webhook_id"`
 	ProductID  *int64    `json:"product_id,omitempty"`
 	Event      string    `json:"event"`
-	IssueID    int64     `json:"ticket_id,omitempty"`
+	TicketID   int64     `json:"ticket_id,omitempty"`
 	StatusCode int       `json:"status_code,omitempty"`
 	Error      string    `json:"error,omitempty"`
 	DurationMS int64     `json:"duration_ms"`
@@ -367,7 +367,7 @@ type EmailRecipient struct {
 type EmailNotification struct {
 	ID             int64      `json:"id"`
 	ProductID      int64      `json:"product_id,omitempty"`
-	IssueID        int64      `json:"ticket_id,omitempty"`
+	TicketID       int64      `json:"ticket_id,omitempty"`
 	UserID         int64      `json:"user_id"`
 	RecipientEmail string     `json:"recipient_email"`
 	RecipientName  string     `json:"recipient_name"`
@@ -410,7 +410,7 @@ type EmailNotificationStats struct {
 
 type CreateEmailNotification struct {
 	ProductID      int64
-	IssueID        int64
+	TicketID       int64
 	UserID         int64
 	RecipientEmail string
 	RecipientName  string
@@ -461,7 +461,7 @@ var validProductRoles = map[string]struct{}{
 	"viewer":   {},
 }
 
-var validIssueSources = map[string]struct{}{
+var validTicketSources = map[string]struct{}{
 	"staff":  {},
 	"portal": {},
 }
@@ -579,296 +579,9 @@ func (s *Store) init() error {
 }
 
 func (s *Store) migrate() error {
-	if ok, err := s.columnExists("users", "email"); err != nil {
-		return err
-	} else if !ok {
-		if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN email TEXT`); err != nil {
-			return err
-		}
-	}
-	if ok, err := s.columnExists("users", "password_reset_required"); err != nil {
-		return err
-	} else if !ok {
-		if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN password_reset_required INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return err
-		}
-	}
-	if ok, err := s.usersRolesAreCurrent(); err != nil {
-		return err
-	} else if !ok {
-		if err := s.rebuildUsersRoleConstraint(); err != nil {
-			return err
-		}
-	}
-	if _, err := s.db.Exec(`UPDATE users SET role = 'staff' WHERE role = 'user'`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`UPDATE users SET role = 'customer' WHERE role = 'client'`); err != nil {
-		return err
-	}
-	if ok, err := s.productRolesAreTicketing(); err != nil {
-		return err
-	} else if !ok {
-		if err := s.rebuildProductMembersRoleConstraint(); err != nil {
-			return err
-		}
-	}
-	if _, err := s.db.Exec(`UPDATE product_members SET role = 'agent' WHERE role = 'developer'`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`UPDATE product_members SET role = 'customer' WHERE role = 'reporter'`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`UPDATE issues SET status = 'assigned' WHERE status IN ('acknowledged', 'confirmed', 'open', 'pending')`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`UPDATE issues SET status = 'resolved' WHERE status = 'closed'`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`
-		UPDATE webhooks
-		SET events_json = replace(
-			replace(
-				replace(
-					replace(events_json, 'issue.created', 'ticket.created'),
-					'issue.updated', 'ticket.updated'
-				),
-				'issue.commented', 'ticket.commented'
-			),
-			'issue.assigned', 'ticket.assigned'
-		)
-	`); err != nil {
-		return err
-	}
-	for _, migration := range []struct {
-		table  string
-		column string
-		sql    string
-	}{
-		{"issues", "source", `ALTER TABLE issues ADD COLUMN source TEXT NOT NULL DEFAULT 'staff'`},
-		{"issues", "requester_name", `ALTER TABLE issues ADD COLUMN requester_name TEXT NOT NULL DEFAULT ''`},
-		{"issues", "requester_email", `ALTER TABLE issues ADD COLUMN requester_email TEXT NOT NULL DEFAULT ''`},
-		{"issues", "customer_token", `ALTER TABLE issues ADD COLUMN customer_token TEXT`},
-		{"comments", "visibility", `ALTER TABLE comments ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`},
-		{"comments", "author_user_id", `ALTER TABLE comments ADD COLUMN author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`},
-	} {
-		ok, err := s.columnExists(migration.table, migration.column)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			if _, err := s.db.Exec(migration.sql); err != nil {
-				return err
-			}
-		}
-	}
-	if notNull, err := s.columnNotNull("email_notifications", "user_id"); err != nil {
-		return err
-	} else if notNull {
-		if err := s.rebuildEmailNotifications(); err != nil {
-			return err
-		}
-	}
-	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL AND email <> ''`)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_customer_token ON issues(customer_token) WHERE customer_token IS NOT NULL AND customer_token <> '';
-		CREATE INDEX IF NOT EXISTS idx_issues_requester_email ON issues(requester_email);
-		CREATE INDEX IF NOT EXISTS idx_comments_visibility ON comments(issue_id, visibility);
-	`)
-	return err
-}
-
-func (s *Store) columnExists(table, column string) (bool, error) {
-	switch table {
-	case "users", "issues", "comments", "product_members":
-	default:
-		return false, fmt.Errorf("unsupported table %q", table)
-	}
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if strings.EqualFold(name, column) {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func (s *Store) columnNotNull(table, column string) (bool, error) {
-	switch table {
-	case "email_notifications":
-	default:
-		return false, fmt.Errorf("unsupported table %q", table)
-	}
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if strings.EqualFold(name, column) {
-			return notNull != 0, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func (s *Store) usersRolesAreCurrent() (bool, error) {
-	var sqlText string
-	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).Scan(&sqlText); err != nil {
-		return false, err
-	}
-	if !strings.Contains(sqlText, "CHECK") {
-		return true, nil
-	}
-	return (strings.Contains(sqlText, "'staff'") || strings.Contains(sqlText, `"staff"`)) &&
-		(strings.Contains(sqlText, "'customer'") || strings.Contains(sqlText, `"customer"`)), nil
-}
-
-func (s *Store) productRolesAreTicketing() (bool, error) {
-	var sqlText string
-	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'product_members'`).Scan(&sqlText); err != nil {
-		return false, err
-	}
-	return !strings.Contains(sqlText, "CHECK") || strings.Contains(sqlText, "'agent'") || strings.Contains(sqlText, `"agent"`), nil
-}
-
-func (s *Store) rebuildUsersRoleConstraint() error {
-	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
-		return err
-	}
-	defer s.db.Exec(`PRAGMA foreign_keys = ON`)
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`
-		CREATE TABLE users_new (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			username TEXT NOT NULL UNIQUE,
-			display_name TEXT NOT NULL,
-			email TEXT,
-			role TEXT NOT NULL,
-			password_hash TEXT NOT NULL,
-			disabled INTEGER NOT NULL DEFAULT 0,
-			password_reset_required INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		)`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`
-		INSERT INTO users_new (id, username, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at)
-		SELECT id, username, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at
-		FROM users`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DROP TABLE users`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`ALTER TABLE users_new RENAME TO users`); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Store) rebuildProductMembersRoleConstraint() error {
-	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
-		return err
-	}
-	defer s.db.Exec(`PRAGMA foreign_keys = ON`)
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`
-		CREATE TABLE product_members_new (
-			product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			role TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			PRIMARY KEY (product_id, user_id)
-		)`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`
-		INSERT INTO product_members_new (product_id, user_id, role, created_at)
-		SELECT product_id, user_id,
-		       CASE role WHEN 'developer' THEN 'agent' WHEN 'reporter' THEN 'customer' ELSE role END,
-		       created_at
-		FROM product_members`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DROP TABLE product_members`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`ALTER TABLE product_members_new RENAME TO product_members`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_product_members_user ON product_members(user_id)`); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Store) rebuildEmailNotifications() error {
-	_, err := s.db.Exec(`
-		ALTER TABLE email_notifications RENAME TO email_notifications_old;
-		CREATE TABLE email_notifications (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-			issue_id INTEGER REFERENCES issues(id) ON DELETE CASCADE,
-			user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-			recipient_email TEXT NOT NULL,
-			recipient_name TEXT NOT NULL,
-			event TEXT NOT NULL,
-			subject TEXT NOT NULL,
-			body_text TEXT NOT NULL,
-			body_html TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')) DEFAULT 'pending',
-			attempts INTEGER NOT NULL DEFAULT 0,
-			next_attempt_at TEXT NOT NULL,
-			locked_until TEXT,
-			last_error TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			sent_at TEXT
-		);
-		INSERT INTO email_notifications (
-			id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
-			status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
-		)
-		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
-		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
-		FROM email_notifications_old;
-		DROP TABLE email_notifications_old;
-	`)
-	return err
+	// Fresh alpha databases are created directly from schemaSQL. Keep this hook
+	// for forward-only migrations once a released schema exists.
+	return nil
 }
 
 type scanner interface {
@@ -1137,7 +850,7 @@ CREATE TABLE IF NOT EXISTS product_members (
 	PRIMARY KEY (product_id, user_id)
 );
 
-CREATE TABLE IF NOT EXISTS issues (
+CREATE TABLE IF NOT EXISTS tickets (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
 	number INTEGER NOT NULL,
@@ -1160,7 +873,7 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE TABLE IF NOT EXISTS comments (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
 	author TEXT NOT NULL,
 	author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 	body TEXT NOT NULL,
@@ -1169,15 +882,15 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 
 CREATE TABLE IF NOT EXISTS ticket_reads (
-	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
 	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	last_read_at TEXT NOT NULL,
-	PRIMARY KEY (issue_id, user_id)
+	PRIMARY KEY (ticket_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
 	comment_id INTEGER REFERENCES comments(id) ON DELETE CASCADE,
 	filename TEXT NOT NULL,
 	content_type TEXT NOT NULL,
@@ -1208,7 +921,7 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 	webhook_id INTEGER NOT NULL,
 	product_id INTEGER,
 	event TEXT NOT NULL,
-	issue_id INTEGER,
+	ticket_id INTEGER,
 	status_code INTEGER,
 	error TEXT NOT NULL DEFAULT '',
 	duration_ms INTEGER NOT NULL DEFAULT 0,
@@ -1218,8 +931,8 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 CREATE TABLE IF NOT EXISTS email_notifications (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-	issue_id INTEGER REFERENCES issues(id) ON DELETE CASCADE,
-	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+	user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 	recipient_email TEXT NOT NULL,
 	recipient_name TEXT NOT NULL,
 	event TEXT NOT NULL,
@@ -1235,11 +948,15 @@ CREATE TABLE IF NOT EXISTS email_notifications (
 	sent_at TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_issues_product_updated ON issues(product_id, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL AND email <> '';
+CREATE INDEX IF NOT EXISTS idx_tickets_product_updated ON tickets(product_id, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_customer_token ON tickets(customer_token) WHERE customer_token IS NOT NULL AND customer_token <> '';
+CREATE INDEX IF NOT EXISTS idx_tickets_requester_email ON tickets(requester_email);
 CREATE INDEX IF NOT EXISTS idx_product_members_user ON product_members(user_id);
-CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
-CREATE INDEX IF NOT EXISTS idx_ticket_reads_user ON ticket_reads(user_id, issue_id);
-CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_id);
+CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_comments_visibility ON comments(ticket_id, visibility);
+CREATE INDEX IF NOT EXISTS idx_ticket_reads_user ON ticket_reads(user_id, ticket_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_ticket ON attachments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_comment ON attachments(comment_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_storage ON attachments(storage_key);
 CREATE INDEX IF NOT EXISTS idx_webhooks_product ON webhooks(product_id);
@@ -1247,6 +964,6 @@ CREATE INDEX IF NOT EXISTS idx_account_links_user_purpose ON account_links(user_
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_pending ON email_notifications(status, next_attempt_at);
-CREATE INDEX IF NOT EXISTS idx_email_notifications_issue ON email_notifications(issue_id);
+CREATE INDEX IF NOT EXISTS idx_email_notifications_ticket ON email_notifications(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_user ON email_notifications(user_id);
 `

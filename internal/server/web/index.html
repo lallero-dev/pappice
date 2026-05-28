@@ -17,7 +17,7 @@
         </div>
       </div>
       <nav class="topnav" id="topNav" hidden>
-        <button class="nav-button active" id="issuesTab" type="button">
+        <button class="nav-button active" id="ticketsTab" type="button">
           <span>Tickets</span>
           <span class="nav-count-badge" id="ticketsUnreadBadge" hidden>0</span>
         </button>
@@ -101,12 +101,12 @@
     </section>
 
     <main class="shell" id="appView" hidden>
-      <section class="workspace" id="issueView">
+      <section class="workspace" id="ticketView">
         <div class="ticket-layout">
           <section class="ticket-list-pane" aria-label="Tickets">
             <div class="ticket-list-toolbar">
               <div class="ticket-list-topbar">
-                <button class="primary-button toolbar-create-button" id="newIssueButton" type="button" hidden>
+                <button class="primary-button toolbar-create-button" id="newTicketButton" type="button" hidden>
                   <span class="button-icon" aria-hidden="true">+</span>
                   <span>New Ticket</span>
                 </button>
@@ -149,9 +149,9 @@
                       <svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M5 7h14M8 12h8M11 17h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                       </svg>
-                      <span id="issueSortLabel">By Updated</span>
+                      <span id="ticketSortLabel">By Updated</span>
                     </button>
-                    <select class="native-sort-select" id="issueSortSelect" aria-hidden="true" tabindex="-1">
+                    <select class="native-sort-select" id="ticketSortSelect" aria-hidden="true" tabindex="-1">
                       <option value="updated_at:desc">Updated</option>
                       <option value="updated_at:asc">Updated ascending</option>
                       <option value="created_at:desc">Created</option>
@@ -186,7 +186,7 @@
                 </div>
               </div>
             </div>
-            <div class="issue-list" id="issueList"></div>
+            <div class="ticket-list" id="ticketList"></div>
           </section>
 
           <section class="ticket-detail-pane" id="ticketDetailPane" aria-label="Ticket detail">

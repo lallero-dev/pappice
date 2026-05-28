@@ -33,8 +33,8 @@ const router = createRouter({
 });
 
 const state = {
-  issues: [],
-  issueCounts: { all: 0 },
+  tickets: [],
+  ticketCounts: { all: 0 },
   products: [],
   users: [],
   members: [],
@@ -57,14 +57,14 @@ const state = {
   user: null,
   accountLink: null,
   csrf: "",
-  view: "issues",
+  view: "tickets",
   adminSection: DEFAULT_ADMIN_SECTION,
   productSection: DEFAULT_PRODUCT_SECTION,
   productMode: "index",
   productDetailId: null,
   ticketProductId: null,
   selectedId: null,
-  selectedIssue: null,
+  selectedTicket: null,
   renderedTicketDetailId: null,
   sort: {
     key: "updated_at",
@@ -112,7 +112,7 @@ const els = {
   brandName: document.querySelector("#brandName"),
   brandSubtitle: document.querySelector("#brandSubtitle"),
   topNav: document.querySelector("#topNav"),
-  issuesTab: document.querySelector("#issuesTab"),
+  ticketsTab: document.querySelector("#ticketsTab"),
   ticketsUnreadBadge: document.querySelector("#ticketsUnreadBadge"),
   productTab: document.querySelector("#productTab"),
   adminTab: document.querySelector("#adminTab"),
@@ -127,7 +127,7 @@ const els = {
   profileEditButton: document.querySelector("#profileEditButton"),
   changePasswordButton: document.querySelector("#changePasswordButton"),
   logoutButton: document.querySelector("#logoutButton"),
-  newIssueButton: document.querySelector("#newIssueButton"),
+  newTicketButton: document.querySelector("#newTicketButton"),
   authView: document.querySelector("#authView"),
   authError: document.querySelector("#authError"),
   setupForm: document.querySelector("#setupForm"),
@@ -138,7 +138,7 @@ const els = {
   accountLinkUser: document.querySelector("#accountLinkUser"),
   accountLinkSubmit: document.querySelector("#accountLinkSubmit"),
   appView: document.querySelector("#appView"),
-  issueView: document.querySelector("#issueView"),
+  ticketView: document.querySelector("#ticketView"),
   adminView: document.querySelector("#adminView"),
   adminSectionButtons: Array.from(document.querySelectorAll("[data-admin-section]")),
   adminSectionPanels: Array.from(document.querySelectorAll("[data-admin-panel]")),
@@ -151,7 +151,7 @@ const els = {
   productContextTitle: document.querySelector("#productContextTitle"),
   productContextMeta: document.querySelector("#productContextMeta"),
   deleteProductButton: document.querySelector("#deleteProductButton"),
-  issueList: document.querySelector("#issueList"),
+  ticketList: document.querySelector("#ticketList"),
   ticketDetailPane: document.querySelector("#ticketDetailPane"),
   searchInput: document.querySelector("#searchInput"),
   ticketFilterButton: document.querySelector("#ticketFilterButton"),
@@ -163,8 +163,8 @@ const els = {
   unreadFilter: document.querySelector("#unreadFilter"),
   ticketSortButton: document.querySelector("#ticketSortButton"),
   ticketSortPopover: document.querySelector("#ticketSortPopover"),
-  issueSortLabel: document.querySelector("#issueSortLabel"),
-  issueSortSelect: document.querySelector("#issueSortSelect"),
+  ticketSortLabel: document.querySelector("#ticketSortLabel"),
+  ticketSortSelect: document.querySelector("#ticketSortSelect"),
   statusFilterList: document.querySelector("#statusFilterList"),
   addProductButton: document.querySelector("#addProductButton"),
   addUserButton: document.querySelector("#addUserButton"),
@@ -327,7 +327,7 @@ async function applyRoute(route = router.current()) {
   if (!state.user) return;
   if (route.view === "admin") {
     if (!isAdmin()) {
-      switchView("issues", { updateRoute: false });
+      switchView("tickets", { updateRoute: false });
       syncRoute({ replace: true });
       return;
     }
@@ -357,11 +357,11 @@ async function applyRoute(route = router.current()) {
         return;
       }
     }
-    switchView("issues", { updateRoute: false });
+    switchView("tickets", { updateRoute: false });
     syncRoute({ replace: true });
     return;
   }
-  switchView("issues", { updateRoute: false });
+  switchView("tickets", { updateRoute: false });
   const selected = await applyTicketRouteSelection(route.ticketKey);
   syncRoute({ replace: route.normalize || (Boolean(route.ticketKey) && !selected) });
 }
@@ -372,34 +372,34 @@ function syncRoute({ replace = false } = {}) {
 }
 
 function routeForState() {
-  const issue = selectedIssue();
+  const ticket = selectedTicket();
   return {
     view: state.view,
     adminSection: state.adminSection,
     productMode: state.productMode,
     productId: state.productDetailId,
     productSection: state.productSection,
-    ticketKey: state.view === "issues" ? issue?.key || "" : ""
+    ticketKey: state.view === "tickets" ? ticket?.key || "" : ""
   };
 }
 
 async function applyTicketRouteSelection(key) {
   if (!key) {
-    setSelectedIssue(null, { updateRoute: false });
-    renderIssuesView();
+    setSelectedTicket(null, { updateRoute: false });
+    renderTicketsView();
     return true;
   }
-  let issue = state.issues.find((item) => item.key === key);
+  let ticket = state.tickets.find((item) => item.key === key);
   try {
-    if (!issue) issue = await request(`/api/tickets/key/${encodeURIComponent(key)}`);
-    setSelectedIssue(issue, { updateRoute: false });
+    if (!ticket) ticket = await request(`/api/tickets/key/${encodeURIComponent(key)}`);
+    setSelectedTicket(ticket, { updateRoute: false });
     return true;
   } catch (error) {
-    setSelectedIssue(null, { updateRoute: false });
+    setSelectedTicket(null, { updateRoute: false });
     showError(error);
     return false;
   } finally {
-    renderIssuesView();
+    renderTicketsView();
   }
 }
 
@@ -475,7 +475,7 @@ function showAuth(mode) {
   state.user = null;
   state.csrf = "";
   state.selectedId = null;
-  state.selectedIssue = null;
+  state.selectedTicket = null;
   document.body.classList.remove("app-mode");
   clearAppAlert();
   clearAuthError();
@@ -485,7 +485,7 @@ function showAuth(mode) {
   els.adminTab.hidden = true;
   els.profileMenu.hidden = true;
   closeProfileMenu();
-  els.newIssueButton.hidden = true;
+  els.newTicketButton.hidden = true;
   els.setupForm.hidden = mode !== "setup";
   els.loginForm.hidden = mode !== "login";
   els.accountLinkForm.hidden = mode !== "account";
@@ -506,7 +506,7 @@ function showApp() {
   els.topNav.hidden = false;
   els.profileMenu.hidden = false;
   renderProfileMenu();
-  switchView("issues", { updateRoute: false });
+  switchView("tickets", { updateRoute: false });
 }
 
 function renderProfileMenu() {
@@ -577,15 +577,15 @@ async function loadProducts() {
   renderProductFilter();
   renderProductIndex();
   updateProductActions();
-  await loadIssues();
+  await loadTickets();
 }
 
-async function loadIssues({ renderDetail = true } = {}) {
+async function loadTickets({ renderDetail = true } = {}) {
   if (state.products.length === 0) {
-    state.issues = [];
-    state.issueCounts = countIssues([]);
+    state.tickets = [];
+    state.ticketCounts = countTickets([]);
     renderTicketsUnreadBadge(0);
-    renderIssuesView();
+    renderTicketsView();
     return;
   }
   const params = new URLSearchParams();
@@ -605,22 +605,22 @@ async function loadIssues({ renderDetail = true } = {}) {
     request(`/api/tickets?${unreadParams.toString()}`)
   ]);
   if (productID !== (state.ticketProductId || null)) return;
-  state.issues = payload.tickets || [];
-  state.issueCounts = countIssues(countsPayload.tickets || []);
+  state.tickets = payload.tickets || [];
+  state.ticketCounts = countTickets(countsPayload.tickets || []);
   renderTicketsUnreadBadge((unreadPayload.tickets || []).length);
   const previousSelectedId = state.selectedId;
-  const listedSelection = state.issues.find((issue) => issue.id === state.selectedId);
+  const listedSelection = state.tickets.find((ticket) => ticket.id === state.selectedId);
   if (listedSelection) {
-    state.selectedIssue = listedSelection;
-  } else if (state.selectedId && !state.selectedIssue) {
-    setSelectedIssue(null, { updateRoute: false });
+    state.selectedTicket = listedSelection;
+  } else if (state.selectedId && !state.selectedTicket) {
+    setSelectedTicket(null, { updateRoute: false });
   }
   if (renderDetail || state.selectedId !== previousSelectedId) {
-    renderIssuesView();
+    renderTicketsView();
   } else {
     renderCounts();
     renderSortHeaders();
-    renderIssueList();
+    renderTicketList();
   }
 }
 
@@ -776,20 +776,20 @@ function updateProductActions() {
   els.adminTab.hidden = !isAdmin();
   els.productTab.hidden = !canAccessProductsView();
   els.addProductButton.hidden = !isAdmin();
-  els.newIssueButton.hidden = !canCreateIssue();
-  if (state.view === "admin" && !isAdmin()) switchView("issues");
-  if (state.view === "product" && !canAccessProductsView()) switchView("issues");
+  els.newTicketButton.hidden = !canCreateTicket();
+  if (state.view === "admin" && !isAdmin()) switchView("tickets");
+  if (state.view === "product" && !canAccessProductsView()) switchView("tickets");
 }
 
-function renderIssuesView() {
+function renderTicketsView() {
   renderCounts();
   renderSortHeaders();
-  renderIssueList();
+  renderTicketList();
   renderTicketDetail();
 }
 
 function renderCounts() {
-  const counts = state.issueCounts;
+  const counts = state.ticketCounts;
   els.statusFilterList.replaceChildren();
   for (const status of state.meta.statuses) {
     const active = state.filters.statuses.includes(status);
@@ -801,7 +801,7 @@ function renderCounts() {
     button.setAttribute("aria-pressed", String(active));
     button.addEventListener("click", () => {
       toggleStatusFilter(status);
-      loadIssues().catch(showError);
+      loadTickets().catch(showError);
     });
     els.statusFilterList.append(button);
   }
@@ -838,11 +838,11 @@ function renderAssigneeFilter() {
   renderTicketFilterButton();
 }
 
-function countIssues(issues) {
-  const counts = { all: issues.length };
+function countTickets(tickets) {
+  const counts = { all: tickets.length };
   for (const status of state.meta.statuses) counts[status] = 0;
-  for (const issue of issues) {
-    counts[issue.status] = (counts[issue.status] || 0) + 1;
+  for (const ticket of tickets) {
+    counts[ticket.status] = (counts[ticket.status] || 0) + 1;
   }
   return counts;
 }
@@ -933,13 +933,13 @@ function clearTicketFilters() {
   els.unreadFilter.checked = false;
   updateProductActions();
   renderCounts();
-  loadIssues().catch(showError);
+  loadTickets().catch(showError);
 }
 
-function renderIssueList() {
-  els.issueList.replaceChildren();
+function renderTicketList() {
+  els.ticketList.replaceChildren();
   if (state.products.length === 0) {
-    els.issueList.append(emptyState({
+    els.ticketList.append(emptyState({
       title: isAdmin() ? "Create a product to start" : "No products available",
       body: isAdmin()
         ? "Products group tickets by the customer, service, or team you support."
@@ -949,62 +949,62 @@ function renderIssueList() {
     }));
     return;
   }
-  const issues = sortedIssues();
-  if (issues.length === 0) {
+  const tickets = sortedTickets();
+  if (tickets.length === 0) {
     if (hasActiveTicketFilters()) {
-      els.issueList.append(emptyState({
+      els.ticketList.append(emptyState({
         title: "No tickets match these filters",
-        body: "Clear the filters to return to the default queue.",
+        body: "Clear the filters to return to the default view.",
         actionLabel: "Clear Filters",
         onAction: clearTicketFilters
       }));
       return;
     }
-    els.issueList.append(emptyState({
+    els.ticketList.append(emptyState({
       title: "No tickets yet",
-      body: canCreateIssue()
+      body: canCreateTicket()
         ? "Create the first ticket for this view."
         : "Tickets will appear here when customers or staff open them.",
-      actionLabel: canCreateIssue() ? "New Ticket" : "",
-      onAction: canCreateIssue() ? openTicketCreateModal : null
+      actionLabel: canCreateTicket() ? "New Ticket" : "",
+      onAction: canCreateTicket() ? openTicketCreateModal : null
     }));
     return;
   }
-  for (const issue of issues) {
+  for (const ticket of tickets) {
     const row = document.createElement("button");
     row.type = "button";
-    row.className = "issue-row";
-    row.classList.toggle("active", issue.id === state.selectedId);
-    row.classList.toggle("unread", Boolean(issue.has_unread));
+    row.className = "ticket-row";
+    row.classList.toggle("active", ticket.id === state.selectedId);
+    row.classList.toggle("unread", Boolean(ticket.has_unread));
     row.addEventListener("click", () => {
-      setSelectedIssue(state.selectedId === issue.id ? null : issue);
-      renderIssuesView();
+      setSelectedTicket(state.selectedId === ticket.id ? null : ticket);
+      renderTicketsView();
     });
-    const product = issueProductParts(issue);
-    const productLabel = el("span", { className: "issue-row-product" }, product.name);
-    if (issue.has_unread) {
-      productLabel.prepend(el("span", { className: "issue-unread-dot", title: "Unread" }));
+    const product = ticketProductParts(ticket);
+    const productLabel = el("span", { className: "ticket-row-product" }, product.name);
+    if (ticket.has_unread) {
+      productLabel.prepend(el("span", { className: "ticket-unread-dot", title: "Unread" }));
     }
     row.append(
       productLabel,
-      el("span", { className: "issue-row-time" }, relativeTime(issue.updated_at)),
-      el("span", { className: "issue-row-title" }, issue.title || "Untitled ticket"),
-      el("span", { className: "issue-row-footer" }, [
-        badge(issue.status, `status-${issue.status}`),
-        badge(issue.priority, `priority-${issue.priority}`),
-        el("span", { className: "issue-row-person" }, issue.assignee || issue.requester_name || issue.requester || "Unassigned")
+      el("span", { className: "ticket-row-time" }, relativeTime(ticket.updated_at)),
+      el("span", { className: "ticket-row-title" }, ticket.title || "Untitled ticket"),
+      el("span", { className: "ticket-row-footer" }, [
+        badge(ticket.status, `status-${ticket.status}`),
+        badge(ticket.priority, `priority-${ticket.priority}`),
+        el("span", { className: "ticket-row-person" }, ticket.assignee || ticket.requester_name || ticket.requester || "Unassigned")
       ])
     );
-    els.issueList.append(row);
+    els.ticketList.append(row);
   }
 }
 
 function renderSortHeaders() {
-  if (els.issueSortSelect) {
-    els.issueSortSelect.value = `${state.sort.key}:${state.sort.dir}`;
+  if (els.ticketSortSelect) {
+    els.ticketSortSelect.value = `${state.sort.key}:${state.sort.dir}`;
   }
-  if (els.issueSortLabel) {
-    els.issueSortLabel.textContent = `By ${TICKET_SORT_LABELS[state.sort.key] || labelize(state.sort.key)}`;
+  if (els.ticketSortLabel) {
+    els.ticketSortLabel.textContent = `By ${TICKET_SORT_LABELS[state.sort.key] || labelize(state.sort.key)}`;
   }
   for (const button of document.querySelectorAll("[data-sort-key]")) {
     const active = button.dataset.sortKey === state.sort.key;
@@ -1020,19 +1020,19 @@ function renderSortHeaders() {
   }
 }
 
-function setIssueSortValue(value) {
+function setTicketSortValue(value) {
   const [key, dir] = String(value || "").split(":");
   if (!key) return;
   state.sort.key = key;
   state.sort.dir = dir === "asc" ? "asc" : "desc";
-  renderIssuesView();
+  renderTicketsView();
 }
 
-function sortedIssues() {
-  return [...state.issues].sort(compareIssues);
+function sortedTickets() {
+  return [...state.tickets].sort(compareTickets);
 }
 
-function compareIssues(a, b) {
+function compareTickets(a, b) {
   const direction = state.sort.dir === "desc" ? -1 : 1;
   let result = 0;
   switch (state.sort.key) {
@@ -1041,7 +1041,7 @@ function compareIssues(a, b) {
       result = compareTime(a[state.sort.key], b[state.sort.key]);
       break;
     case "product":
-      result = compareText(issueProductLabel(a), issueProductLabel(b));
+      result = compareText(ticketProductLabel(a), ticketProductLabel(b));
       break;
     case "status":
       result = compareOrdered(a.status, b.status, state.meta.statuses);
@@ -1074,61 +1074,61 @@ function compareOrdered(left, right, order) {
   return (leftIndex === -1 ? order.length : leftIndex) - (rightIndex === -1 ? order.length : rightIndex);
 }
 
-function issueProductParts(issue) {
-  const product = currentProduct(issue.product_id);
-  const key = issue.product_key || product?.key || "";
-  const name = issue.product_name || productDisplayName(product) || issue.product || key || "Product";
+function ticketProductParts(ticket) {
+  const product = currentProduct(ticket.product_id);
+  const key = ticket.product_key || product?.key || "";
+  const name = ticket.product_name || productDisplayName(product) || ticket.product || key || "Product";
   return {
     key,
     name
   };
 }
 
-function issueProductLabel(issue) {
-  return issueProductParts(issue).name;
+function ticketProductLabel(ticket) {
+  return ticketProductParts(ticket).name;
 }
 
 function renderTicketDetail() {
   if (!els.ticketDetailPane) return;
-  const issue = selectedIssue();
+  const ticket = selectedTicket();
   els.ticketDetailPane.replaceChildren();
-  if (!issue) {
+  if (!ticket) {
     state.renderedTicketDetailId = null;
     els.ticketDetailPane.append(emptyState({
       title: "No ticket selected",
-      body: state.issues.length === 0
+      body: state.tickets.length === 0
         ? "Tickets matching the current view will appear here."
         : "Select a ticket from the list to read the conversation."
     }));
     return;
   }
 
-  const isNewlyOpenedTicket = state.renderedTicketDetailId !== issue.id;
-  const editable = canEditTicket(issue);
-  const canComment = canCommentTicket(issue);
+  const isNewlyOpenedTicket = state.renderedTicketDetailId !== ticket.id;
+  const editable = canEditTicket(ticket);
+  const canComment = canCommentTicket(ticket);
   const form = el("form", { className: "ticket-detail-form" });
   form.append(ticketDetailContent({
-    issue,
+    ticket,
     editable,
     canComment
   }));
 
   form.addEventListener("submit", (event) => event.preventDefault());
-  if (editable) bindTicketAutosave(form, issue);
-  if (canComment) bindCommentComposer(form, issue);
+  if (editable) bindTicketAutosave(form, ticket);
+  if (canComment) bindCommentComposer(form, ticket);
 
   els.ticketDetailPane.append(form);
-  state.renderedTicketDetailId = issue.id;
+  state.renderedTicketDetailId = ticket.id;
   scrollTicketConversationToBottom(form, { smooth: !isNewlyOpenedTicket });
-  markTicketRead(issue).catch(showError);
+  markTicketRead(ticket).catch(showError);
 }
 
-async function markTicketRead(issue) {
-  if (!issue?.id || !issue.has_unread) return;
-  const updated = await request(`/api/tickets/${issue.id}/read`, { method: "POST" });
-  setSelectedIssue(updated, { updateRoute: false });
-  replaceIssue(updated);
-  await loadIssues({ renderDetail: false });
+async function markTicketRead(ticket) {
+  if (!ticket?.id || !ticket.has_unread) return;
+  const updated = await request(`/api/tickets/${ticket.id}/read`, { method: "POST" });
+  setSelectedTicket(updated, { updateRoute: false });
+  replaceTicket(updated);
+  await loadTickets({ renderDetail: false });
 }
 
 function scrollTicketConversationToBottom(root, { smooth = false } = {}) {
@@ -1169,15 +1169,15 @@ async function createTicketFromForm(data, form, fallbackProductId) {
   if (createdStatus && !state.filters.statuses.includes(createdStatus)) {
     state.filters.statuses = [createdStatus];
   }
-  setSelectedIssue(created);
+  setSelectedTicket(created);
   await loadProducts();
 }
 
-function ticketDetailContent({ issue, editable, canComment }) {
+function ticketDetailContent({ ticket, editable, canComment }) {
   const wrap = el("div", { className: "ticket-detail" });
   const header = el("div", { className: "detail-header" });
   if (editable) {
-    header.append(ticketTextField("", "title", issue?.title || "", {
+    header.append(ticketTextField("", "title", ticket?.title || "", {
       autocomplete: "off",
       className: "ticket-title-input",
       maxlength: 160,
@@ -1185,33 +1185,33 @@ function ticketDetailContent({ issue, editable, canComment }) {
       required: true
     }));
   } else {
-    header.append(el("h3", {}, issue.title));
+    header.append(el("h3", {}, ticket.title));
   }
 
   const main = el("section", { className: "ticket-main" });
-  const conversation = comments(issue);
-  const composer = canComment ? commentComposer(issue) : el("div");
+  const conversation = comments(ticket);
+  const composer = canComment ? commentComposer(ticket) : el("div");
   main.append(conversation, composer);
   const attachmentInput = composer.querySelector(".attachment-input");
   if (attachmentInput) bindAttachmentDropZone(main, attachmentInput, "conversation-drop-active");
 
   const side = el("aside", { className: "ticket-side" });
   if (editable && !isCustomer()) {
-    side.append(sideSection("Workflow", workflowEditor(issue || { assignee: "", priority: "normal", status: "new" })));
+    side.append(sideSection("Workflow", workflowEditor(ticket || { assignee: "", priority: "normal", status: "new" })));
   }
-  const requester = requesterBlock(issue);
+  const requester = requesterBlock(ticket);
   if (requester) {
     side.append(sideSection("Requester", requester));
   }
   const facts = [
-    factBlock("Product", issueProductLabel(issue)),
-    factBlock("Created", relativeTime(issue.created_at)),
-    factBlock("Updated", relativeTime(issue.updated_at))
+    factBlock("Product", ticketProductLabel(ticket)),
+    factBlock("Created", relativeTime(ticket.created_at)),
+    factBlock("Updated", relativeTime(ticket.updated_at))
   ];
-  if (!canEditTicket(issue)) facts.splice(1, 0, factBlock("Assignee", issue.assignee || "Unassigned"));
+  if (!canEditTicket(ticket)) facts.splice(1, 0, factBlock("Assignee", ticket.assignee || "Unassigned"));
   side.append(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
   if (isAdmin()) {
-    side.append(sideSection("Danger zone", ticketDangerActions(issue)));
+    side.append(sideSection("Danger zone", ticketDangerActions(ticket)));
   }
 
   const conversationPanel = el("section", { className: "ticket-conversation-panel" }, [header, main]);
@@ -1219,29 +1219,29 @@ function ticketDetailContent({ issue, editable, canComment }) {
   return wrap;
 }
 
-function ticketDangerActions(issue) {
+function ticketDangerActions(ticket) {
   const remove = el("button", {
     className: "danger ticket-delete-button",
     "data-delete-ticket": "true",
     type: "button"
   }, "Delete Ticket");
-  remove.addEventListener("click", () => deleteCurrentTicket(issue, remove).catch(showError));
+  remove.addEventListener("click", () => deleteCurrentTicket(ticket, remove).catch(showError));
   return el("div", { className: "ticket-danger-actions" }, [
     el("p", {}, "Permanently remove this ticket and its conversation."),
     remove
   ]);
 }
 
-async function deleteCurrentTicket(issue, button) {
-  if (!issue || !isAdmin()) return;
+async function deleteCurrentTicket(ticket, button) {
+  if (!ticket || !isAdmin()) return;
   const confirmed = await confirmSendAction({
     title: "Delete this ticket?",
     body: "This permanently removes the ticket, conversation, attachments, notifications, and delivery history.",
     confirmLabel: "Delete Ticket",
     danger: true,
     details: [
-      ["Ticket", `${issue.key || `#${issue.id}`} / ${issue.title || "Untitled ticket"}`],
-      ["Product", issueProductLabel(issue)]
+      ["Ticket", `${ticket.key || `#${ticket.id}`} / ${ticket.title || "Untitled ticket"}`],
+      ["Product", ticketProductLabel(ticket)]
     ]
   });
   if (!confirmed) return;
@@ -1249,12 +1249,12 @@ async function deleteCurrentTicket(issue, button) {
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
   try {
-    await request(`/api/tickets/${issue.id}`, { method: "DELETE" });
-    state.issues = state.issues.filter((candidate) => candidate.id !== issue.id);
-    setSelectedIssue(null, { updateRoute: false });
-    await loadIssues();
+    await request(`/api/tickets/${ticket.id}`, { method: "DELETE" });
+    state.tickets = state.tickets.filter((candidate) => candidate.id !== ticket.id);
+    setSelectedTicket(null, { updateRoute: false });
+    await loadTickets();
     syncRoute({ replace: true });
-    showAppAlert(`Ticket ${issue.key || `#${issue.id}`} deleted.`);
+    showAppAlert(`Ticket ${ticket.key || `#${ticket.id}`} deleted.`);
   } finally {
     button.disabled = false;
     button.removeAttribute("aria-busy");
@@ -1266,14 +1266,14 @@ function ticketProductOptions(products) {
 }
 
 function openTicketCreateModal() {
-  const creatableProducts = state.products.filter((product) => canCreateIssue(product.id));
+  const creatableProducts = state.products.filter((product) => canCreateTicket(product.id));
   if (creatableProducts.length === 0) {
     showError(new Error("Create a product before adding tickets"));
     return;
   }
   const content = el("div", { className: "ticket-create-modal" }, [
     ticketCreateFlow({
-      issue: { title: "", description: "", priority: "" },
+      ticket: { title: "", description: "", priority: "" },
       productId: null,
       creatableProducts
     })
@@ -1316,7 +1316,7 @@ function confirmTicketCreate(data, form) {
   });
 }
 
-function ticketCreateFlow({ issue, productId, creatableProducts }) {
+function ticketCreateFlow({ ticket, productId, creatableProducts }) {
   const productOptions = [
     { value: "", label: "Choose product" },
     ...ticketProductOptions(creatableProducts)
@@ -1334,20 +1334,20 @@ function ticketCreateFlow({ issue, productId, creatableProducts }) {
       })
     ]),
     ticketCreateStep("2", "Priority", [
-      ticketSelectField("", "priority", issue?.priority || "", priorityOptions, {
+      ticketSelectField("", "priority", ticket?.priority || "", priorityOptions, {
         ariaLabel: "Priority",
         required: true
       })
     ]),
-    ticketCreateStep("3", "Issue", [
-      ticketTextField("", "title", issue?.title || "", {
+    ticketCreateStep("3", "Ticket", [
+      ticketTextField("", "title", ticket?.title || "", {
         autocomplete: "off",
         className: "ticket-title-input",
         maxlength: 160,
         placeholder: "Title",
         required: true
       }),
-      ticketTextareaField("", "description", issue?.description || "", {
+      ticketTextareaField("", "description", ticket?.description || "", {
         className: "ticket-description-input",
         placeholder: "Describe the request, impact, and useful context.",
         required: true,
@@ -1627,24 +1627,24 @@ function sideSection(title, content) {
   ]);
 }
 
-function detailMeta(issue) {
+function detailMeta(ticket) {
   const meta = el("div", { className: "detail-meta" });
   meta.append(
-    badge(issue.status, `status-${issue.status}`),
-    el("span", {}, issue.key || `#${issue.id}`),
-    el("span", {}, `Requester ${issue.requester || "unknown"}`),
-    el("span", {}, `Created ${relativeTime(issue.created_at)}`)
+    badge(ticket.status, `status-${ticket.status}`),
+    el("span", {}, ticket.key || `#${ticket.id}`),
+    el("span", {}, `Requester ${ticket.requester || "unknown"}`),
+    el("span", {}, `Created ${relativeTime(ticket.created_at)}`)
   );
   return meta;
 }
 
-function requesterBlock(issue) {
-  if (!issue.requester_email && issue.source !== "portal") return null;
+function requesterBlock(ticket) {
+  if (!ticket.requester_email && ticket.source !== "portal") return null;
   const block = el("div", { className: "requester-block" });
   block.append(
-    el("strong", {}, issue.requester_name || "Unknown"),
-    issue.requester_email ? el("span", {}, issue.requester_email) : el("span", {}, issue.requester || "Requester"),
-    badge(issue.source || "staff", "priority-normal")
+    el("strong", {}, ticket.requester_name || "Unknown"),
+    ticket.requester_email ? el("span", {}, ticket.requester_email) : el("span", {}, ticket.requester || "Requester"),
+    badge(ticket.source || "staff", "priority-normal")
   );
   return block;
 }
@@ -2116,24 +2116,24 @@ function renderPager(container, page, onChange) {
   );
 }
 
-function workflowEditor(issue) {
+function workflowEditor(ticket) {
   const controls = [
-    ticketSelectField("Status", "status", issue.status, selectOptions(state.meta.statuses), { required: true })
+    ticketSelectField("Status", "status", ticket.status, selectOptions(state.meta.statuses), { required: true })
   ];
   controls.push(
-    ticketSelectField("Priority", "priority", issue.priority || "normal", selectOptions(state.meta.priorities), { required: true }),
-    ticketSelectField("Assignee", "assignee", issue.assignee || "", assigneeOptions(issue.assignee))
+    ticketSelectField("Priority", "priority", ticket.priority || "normal", selectOptions(state.meta.priorities), { required: true }),
+    ticketSelectField("Assignee", "assignee", ticket.assignee || "", assigneeOptions(ticket.assignee))
   );
   const controlList = el("div", { className: "detail-controls" }, controls);
   return el("div", { className: "workflow-editor" }, [controlList]);
 }
 
-async function confirmTicketComment(issue, composer) {
+async function confirmTicketComment(ticket, composer) {
   const data = {
     body: composer.querySelector("[name='body']")?.value || "",
     visibility: composer.querySelector("[name='visibility']")?.value || "public"
   };
-  const comment = ticketCommentPayload(issue, data);
+  const comment = ticketCommentPayload(ticket, data);
   const files = selectedCommentFiles(composer);
   if (!comment && files.length === 0) return false;
   const internal = String(data.visibility || "public") === "internal";
@@ -2144,7 +2144,7 @@ async function confirmTicketComment(issue, composer) {
       : "The reply will be added to the ticket conversation.",
     confirmLabel: internal ? "Save Note" : "Send Reply",
     details: [
-      ["Ticket", issue.title || "Selected ticket"],
+      ["Ticket", ticket.title || "Selected ticket"],
       ["Visibility", internal ? "Internal note" : "Public reply"],
       ["Attachments", files.length === 0 ? "None" : String(files.length)]
     ]
@@ -2213,27 +2213,27 @@ function ticketCreateRequestBody(payload, form) {
   return body;
 }
 
-function ticketUpdatePatch(issue, data) {
+function ticketUpdatePatch(ticket, data) {
   const patch = {};
   if (hasFormValue(data, "title")) {
     const title = String(data.title || "").trim();
-    if (title && title !== (issue.title || "")) patch.title = title;
+    if (title && title !== (ticket.title || "")) patch.title = title;
   }
   if (hasFormValue(data, "description")) {
     const description = String(data.description || "").trim();
-    if (description !== (issue.description || "")) patch.description = description;
+    if (description !== (ticket.description || "")) patch.description = description;
   }
   if (hasFormValue(data, "status")) {
     const status = String(data.status || "").trim();
-    if (status && status !== issue.status) patch.status = status;
+    if (status && status !== ticket.status) patch.status = status;
   }
   if (hasFormValue(data, "priority")) {
     const priority = String(data.priority || "").trim();
-    if (priority && priority !== issue.priority) patch.priority = priority;
+    if (priority && priority !== ticket.priority) patch.priority = priority;
   }
   if (hasFormValue(data, "assignee")) {
     const assignee = String(data.assignee || "").trim();
-    if (assignee !== (issue.assignee || "")) patch.assignee = assignee;
+    if (assignee !== (ticket.assignee || "")) patch.assignee = assignee;
   }
   return patch;
 }
@@ -2242,29 +2242,29 @@ function hasFormValue(data, name) {
   return Object.prototype.hasOwnProperty.call(data, name);
 }
 
-function ticketCommentPayload(issue, data) {
+function ticketCommentPayload(ticket, data) {
   const body = String(data.body || "").trim();
   if (!body) return null;
   return {
     body,
-    visibility: canEditTicket(issue) ? String(data.visibility || "public") : "public"
+    visibility: canEditTicket(ticket) ? String(data.visibility || "public") : "public"
   };
 }
 
-function bindTicketAutosave(form, issue) {
-  let currentIssue = issue;
+function bindTicketAutosave(form, ticket) {
+  let currentTicket = ticket;
   let saveQueue = Promise.resolve();
   const controls = Array.from(form.querySelectorAll("[name='title'], [name='status'], [name='priority'], [name='assignee']"));
   const save = () => {
     saveQueue = saveQueue.then(async () => {
       const data = Object.fromEntries(new FormData(form).entries());
-      const patch = ticketUpdatePatch(currentIssue, data);
+      const patch = ticketUpdatePatch(currentTicket, data);
       if (Object.keys(patch).length === 0) return;
       const statusChanged = hasFormValue(patch, "status");
       const assigneeChanged = hasFormValue(patch, "assignee");
       try {
-        const updated = await saveTicketPatch(currentIssue, patch);
-        currentIssue = updated;
+        const updated = await saveTicketPatch(currentTicket, patch);
+        currentTicket = updated;
         if (statusChanged && updated.status && !state.filters.statuses.includes(updated.status)) {
           state.filters.statuses = [...state.filters.statuses, updated.status];
         }
@@ -2273,10 +2273,10 @@ function bindTicketAutosave(form, issue) {
           renderAssigneeFilter();
         }
         if (statusChanged || assigneeChanged) {
-          await loadIssues({ renderDetail: false });
+          await loadTickets({ renderDetail: false });
         } else {
-          replaceIssue(updated);
-          renderIssueList();
+          replaceTicket(updated);
+          renderTicketList();
         }
       } catch (error) {
         showError(error);
@@ -2295,18 +2295,18 @@ function bindTicketAutosave(form, issue) {
   }
 }
 
-async function saveTicketPatch(issue, patch) {
-  const updated = await request(`/api/tickets/${issue.id}`, { method: "PATCH", body: JSON.stringify(patch) });
-  if (state.selectedId === updated.id) setSelectedIssue(updated, { updateRoute: false });
+async function saveTicketPatch(ticket, patch) {
+  const updated = await request(`/api/tickets/${ticket.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  if (state.selectedId === updated.id) setSelectedTicket(updated, { updateRoute: false });
   return updated;
 }
 
-function replaceIssue(updated) {
-  state.issues = state.issues.map((issue) => issue.id === updated.id ? updated : issue);
-  if (state.selectedId === updated.id) state.selectedIssue = updated;
+function replaceTicket(updated) {
+  state.tickets = state.tickets.map((ticket) => ticket.id === updated.id ? updated : ticket);
+  if (state.selectedId === updated.id) state.selectedTicket = updated;
 }
 
-function bindCommentComposer(form, issue) {
+function bindCommentComposer(form, ticket) {
   const composer = form.querySelector(".comment-form");
   if (!composer) return;
   const sendButton = composer.querySelector("[data-comment-send]");
@@ -2319,7 +2319,7 @@ function bindCommentComposer(form, issue) {
   form.addEventListener("submit", async (event) => {
     if (event.submitter !== sendButton) return;
     event.preventDefault();
-    const confirmed = await confirmTicketComment(issue, composer);
+    const confirmed = await confirmTicketComment(ticket, composer);
     if (!confirmed) {
       update();
       return;
@@ -2327,7 +2327,7 @@ function bindCommentComposer(form, issue) {
     sendButton.disabled = true;
     sendButton.setAttribute("aria-busy", "true");
     try {
-      await sendTicketComment(issue, composer);
+      await sendTicketComment(ticket, composer);
     } catch (error) {
       showError(error);
       update();
@@ -2338,12 +2338,12 @@ function bindCommentComposer(form, issue) {
   update();
 }
 
-async function sendTicketComment(issue, composer) {
+async function sendTicketComment(ticket, composer) {
   const data = {
     body: composer.querySelector("[name='body']")?.value || "",
     visibility: composer.querySelector("[name='visibility']")?.value || "public"
   };
-  const comment = ticketCommentPayload(issue, data);
+  const comment = ticketCommentPayload(ticket, data);
   const files = selectedCommentFiles(composer);
   if (!comment && files.length === 0) return;
   if (files.length > 0) {
@@ -2351,14 +2351,14 @@ async function sendTicketComment(issue, composer) {
     body.append("body", comment?.body || "");
     body.append("visibility", comment?.visibility || String(data.visibility || "public"));
     for (const file of files) body.append("attachments", file);
-    await request(`/api/tickets/${issue.id}/comments`, { method: "POST", body });
+    await request(`/api/tickets/${ticket.id}/comments`, { method: "POST", body });
   } else {
-    await request(`/api/tickets/${issue.id}/comments`, { method: "POST", body: JSON.stringify(comment) });
+    await request(`/api/tickets/${ticket.id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   }
-  const updated = await request(`/api/tickets/${issue.id}`);
-  setSelectedIssue(updated, { updateRoute: false });
-  replaceIssue(updated);
-  await loadIssues();
+  const updated = await request(`/api/tickets/${ticket.id}`);
+  setSelectedTicket(updated, { updateRoute: false });
+  replaceTicket(updated);
+  await loadTickets();
 }
 
 function selectedTicketFiles(form) {
@@ -2434,10 +2434,10 @@ function assigneeOptions(current = "") {
   return options;
 }
 
-function comments(issue) {
+function comments(ticket) {
   const list = el("div", { className: "comment-list conversation-stream" });
-  const messages = conversationMessages(issue);
-  const unreadIndex = firstUnreadMessageIndex(issue, messages);
+  const messages = conversationMessages(ticket);
+  const unreadIndex = firstUnreadMessageIndex(ticket, messages);
   messages.forEach((message, index) => {
     if (index === unreadIndex) {
       list.append(unreadDivider());
@@ -2467,20 +2467,20 @@ function comments(issue) {
   return list;
 }
 
-function conversationMessages(issue) {
-  const opener = issue.requester_name || issue.requester || "Requester";
+function conversationMessages(ticket) {
+  const opener = ticket.requester_name || ticket.requester || "Requester";
   const messages = [{
     author: opener,
     avatar: initials(opener),
-    body: String(issue.description || "").trim() || "No description.",
-    label: `opened ${relativeTime(issue.created_at)}`,
+    body: String(ticket.description || "").trim() || "No description.",
+    label: `opened ${relativeTime(ticket.created_at)}`,
     visibility: "public",
-    attachments: issue.attachments || [],
-    createdAt: issue.created_at,
-    side: isCurrentUserMessage(issue, { author: opener, opening: true }) ? "current" : "other",
+    attachments: ticket.attachments || [],
+    createdAt: ticket.created_at,
+    side: isCurrentUserMessage(ticket, { author: opener, opening: true }) ? "current" : "other",
     className: "opening-message"
   }];
-  for (const comment of issue.comments || []) {
+  for (const comment of ticket.comments || []) {
     const internal = comment.visibility === "internal";
     const author = comment.author || "Support";
     messages.push({
@@ -2491,16 +2491,16 @@ function conversationMessages(issue) {
       visibility: internal ? "internal" : "public",
       attachments: comment.attachments || [],
       createdAt: comment.created_at,
-      side: isCurrentUserMessage(issue, comment) ? "current" : "other",
+      side: isCurrentUserMessage(ticket, comment) ? "current" : "other",
       className: internal ? "internal" : ""
     });
   }
   return messages;
 }
 
-function firstUnreadMessageIndex(issue, messages) {
-  if (!issue.has_unread) return -1;
-  const lastRead = timestampValue(issue.last_read_at);
+function firstUnreadMessageIndex(ticket, messages) {
+  if (!ticket.has_unread) return -1;
+  const lastRead = timestampValue(ticket.last_read_at);
   return messages.findIndex((message) => {
     return message.side !== "current" && timestampValue(message.createdAt) > lastRead;
   });
@@ -2526,16 +2526,16 @@ function initials(value) {
   return parts.slice(0, 2).map((part) => part.slice(0, 1).toUpperCase()).join("");
 }
 
-function isCurrentUserMessage(issue, entry) {
+function isCurrentUserMessage(ticket, entry) {
   const currentValues = currentUserAuthorValues();
   const author = normalizeAuthor(entry.author);
   if (author && currentValues.includes(author)) return true;
   if (!entry.opening) return false;
   const requesterValues = [
-    issue.requester,
-    issue.requester_name,
-    issue.requester_email,
-    String(issue.requester_email || "").split("@")[0]
+    ticket.requester,
+    ticket.requester_name,
+    ticket.requester_email,
+    String(ticket.requester_email || "").split("@")[0]
   ].map(normalizeAuthor).filter(Boolean);
   return requesterValues.some((value) => currentValues.includes(value));
 }
@@ -2554,7 +2554,7 @@ function normalizeAuthor(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function commentComposer(issue) {
+function commentComposer(ticket) {
   const wrap = el("div", { className: "comment-form" });
   const body = document.createElement("textarea");
   body.name = "body";
@@ -2576,7 +2576,7 @@ function commentComposer(issue) {
   visibility.value = "public";
   const attachments = ticketAttachmentField("Attachments", "attachments");
   const actions = [send];
-  if (canEditTicket(issue)) {
+  if (canEditTicket(ticket)) {
     actions.unshift(commentVisibilityControl(visibility));
   }
   const entry = el("div", { className: "comment-entry" }, [
@@ -3296,7 +3296,7 @@ function bindEvents() {
       state.user = payload.user || null;
       state.accountLink = null;
       els.accountLinkForm.reset();
-      router.navigate({ view: "issues" }, { replace: true });
+      router.navigate({ view: "tickets" }, { replace: true });
       await enterApp();
     });
   });
@@ -3342,7 +3342,7 @@ function bindEvents() {
   document.addEventListener("keydown", handleGlobalKeydown);
   router.listen((route) => applyRoute(route).catch(showError));
 
-  els.issuesTab.addEventListener("click", () => switchView("issues"));
+  els.ticketsTab.addEventListener("click", () => switchView("tickets"));
   els.productTab.addEventListener("click", () => openProductsIndex());
   els.adminTab.addEventListener("click", () => switchView("admin"));
   for (const button of els.adminSectionButtons) {
@@ -3351,32 +3351,32 @@ function bindEvents() {
   for (const button of els.productSectionButtons) {
     button.addEventListener("click", () => switchProductSection(button.getAttribute("data-product-section")).catch(showError));
   }
-  els.newIssueButton.addEventListener("click", () => openTicketCreateModal());
+  els.newTicketButton.addEventListener("click", () => openTicketCreateModal());
   els.modalHost.addEventListener("pappice-modal-error", (event) => showError(event.detail));
 
   els.searchInput.addEventListener("input", debounce(() => {
     state.filters.q = els.searchInput.value.trim();
     renderTicketFilterButton();
-    loadIssues().catch(showError);
+    loadTickets().catch(showError);
   }, 180));
   els.productFilter.addEventListener("change", async () => {
     state.ticketProductId = Number(els.productFilter.value) || null;
-    setSelectedIssue(null);
+    setSelectedTicket(null);
     renderProductFilter();
     updateProductActions();
-    await loadIssues();
+    await loadTickets();
   });
   els.assigneeFilter.addEventListener("change", () => {
     state.filters.assignee = els.assigneeFilter.value.trim();
     renderTicketFilterButton();
-    loadIssues().catch(showError);
+    loadTickets().catch(showError);
   });
   els.unreadFilter.addEventListener("change", () => {
     state.filters.unread = els.unreadFilter.checked;
     renderTicketFilterButton();
-    loadIssues().catch(showError);
+    loadTickets().catch(showError);
   });
-  els.issueSortSelect.addEventListener("change", () => setIssueSortValue(els.issueSortSelect.value));
+  els.ticketSortSelect.addEventListener("change", () => setTicketSortValue(els.ticketSortSelect.value));
   els.clearTicketFiltersButton.addEventListener("click", () => {
     closeTicketPopovers();
     clearTicketFilters();
@@ -3386,13 +3386,13 @@ function bindEvents() {
       const dir = button.dataset.sortKey === state.sort.key
         ? state.sort.dir
         : button.dataset.sortDefaultDir || state.sort.dir;
-      setIssueSortValue(`${button.dataset.sortKey}:${dir}`);
+      setTicketSortValue(`${button.dataset.sortKey}:${dir}`);
       closeTicketPopovers();
     });
   }
   for (const button of document.querySelectorAll("[data-sort-dir]")) {
     button.addEventListener("click", () => {
-      setIssueSortValue(`${state.sort.key}:${button.dataset.sortDir}`);
+      setTicketSortValue(`${state.sort.key}:${button.dataset.sortDir}`);
       closeTicketPopovers();
     });
   }
@@ -3427,24 +3427,24 @@ function handleGlobalKeydown(event) {
     return;
   }
   if (els.modalHost?.isOpen?.()) return;
-  if (state.view !== "issues" || !state.selectedId || els.appView.hidden) return;
+  if (state.view !== "tickets" || !state.selectedId || els.appView.hidden) return;
   event.preventDefault();
   closeSelectedTicket();
 }
 
 function closeSelectedTicket() {
-  setSelectedIssue(null);
-  renderIssuesView();
+  setSelectedTicket(null);
+  renderTicketsView();
 }
 
 function switchView(view, options = {}) {
   if (view === "admin" && !isAdmin()) return;
   if (view === "product" && !canAccessProductsView()) return;
   state.view = view;
-  els.issueView.hidden = view !== "issues";
+  els.ticketView.hidden = view !== "tickets";
   els.adminView.hidden = view !== "admin";
   els.productView.hidden = view !== "product";
-  els.issuesTab.classList.toggle("active", view === "issues");
+  els.ticketsTab.classList.toggle("active", view === "tickets");
   els.adminTab.classList.toggle("active", view === "admin");
   els.productTab.classList.toggle("active", view === "product");
   if (options.updateRoute !== false) syncRoute({ replace: Boolean(options.replaceRoute) });
@@ -3477,7 +3477,7 @@ async function deleteCurrentProduct() {
   try {
     await request(`/api/products/${product.id}`, { method: "DELETE" });
     if (state.ticketProductId === product.id) state.ticketProductId = null;
-    setSelectedIssue(null, { updateRoute: false });
+    setSelectedTicket(null, { updateRoute: false });
     state.productMode = "index";
     state.productDetailId = null;
     state.productSection = DEFAULT_PRODUCT_SECTION;
@@ -3523,14 +3523,14 @@ function currentProductDetail() {
   return currentProduct(state.productDetailId);
 }
 
-function selectedIssue() {
-  return state.issues.find((issue) => issue.id === state.selectedId) ||
-    (state.selectedIssue?.id === state.selectedId ? state.selectedIssue : null);
+function selectedTicket() {
+  return state.tickets.find((ticket) => ticket.id === state.selectedId) ||
+    (state.selectedTicket?.id === state.selectedId ? state.selectedTicket : null);
 }
 
-function setSelectedIssue(issue, { updateRoute = true } = {}) {
-  state.selectedId = issue?.id || null;
-  state.selectedIssue = issue || null;
+function setSelectedTicket(ticket, { updateRoute = true } = {}) {
+  state.selectedId = ticket?.id || null;
+  state.selectedTicket = ticket || null;
   if (updateRoute) syncRoute();
 }
 
@@ -3558,19 +3558,19 @@ function canAccessProductsView() {
   return isAdmin() || manageableProducts().length > 0;
 }
 
-function canCreateIssue(productId = state.ticketProductId) {
+function canCreateTicket(productId = state.ticketProductId) {
   if (!productId) {
-    return state.products.some((product) => canCreateIssue(product.id));
+    return state.products.some((product) => canCreateTicket(product.id));
   }
   return isAdmin() || ["owner", "agent", "customer"].includes(productRole(productId));
 }
 
-function canCommentTicket(issue = null) {
-  return Boolean(issue?.product_id) && canCreateIssue(issue.product_id);
+function canCommentTicket(ticket = null) {
+  return Boolean(ticket?.product_id) && canCreateTicket(ticket.product_id);
 }
 
-function canEditTicket(issue = null) {
-  const productId = issue?.product_id || state.ticketProductId;
+function canEditTicket(ticket = null) {
+  const productId = ticket?.product_id || state.ticketProductId;
   return Boolean(productId) && !isCustomer() && (isAdmin() || ["owner", "agent"].includes(productRole(productId)));
 }
 

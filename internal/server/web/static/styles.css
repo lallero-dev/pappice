@@ -435,7 +435,7 @@ button:disabled {
 }
 
 .workspace,
-.issue-pane {
+.ticket-pane {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -787,11 +787,11 @@ button:focus-visible {
   width: 1px;
 }
 
-.issue-list {
+.ticket-list {
   overflow: auto;
 }
 
-.issue-row {
+.ticket-row {
   background: #ffffff;
   border: 1px solid transparent;
   border-bottom-color: var(--border-soft);
@@ -806,20 +806,20 @@ button:focus-visible {
   width: 100%;
 }
 
-.issue-row:hover {
+.ticket-row:hover {
   background: #f8fbfd;
 }
 
-.issue-row.unread {
+.ticket-row.unread {
   background: #f1f8ff;
   box-shadow: inset 3px 0 0 var(--blue);
 }
 
-.issue-row.unread:hover {
+.ticket-row.unread:hover {
   background: #eaf4ff;
 }
 
-.issue-row.active {
+.ticket-row.active {
   background: #ffffff;
   border-color: var(--blue);
   box-shadow: inset 0 0 0 1px var(--blue), 0 2px 8px rgba(35, 103, 164, 0.16);
@@ -827,20 +827,20 @@ button:focus-visible {
   z-index: 1;
 }
 
-.issue-row.active.unread {
+.ticket-row.active.unread {
   background: #f7fbff;
   box-shadow: inset 0 0 0 1px var(--blue), inset 4px 0 0 var(--blue), 0 2px 8px rgba(35, 103, 164, 0.18);
 }
 
-.issue-row.unread .issue-row-product,
-.issue-row.unread .issue-row-time,
-.issue-row.unread .issue-row-title,
-.issue-row.unread .issue-row-person {
+.ticket-row.unread .ticket-row-product,
+.ticket-row.unread .ticket-row-time,
+.ticket-row.unread .ticket-row-title,
+.ticket-row.unread .ticket-row-person {
   color: #183d5e;
   font-weight: 850;
 }
 
-.issue-unread-dot {
+.ticket-unread-dot {
   background: #d92d20;
   border-radius: 999px;
   display: inline-block;
@@ -850,14 +850,14 @@ button:focus-visible {
   width: 8px;
 }
 
-.issue-row-product,
-.issue-row-time,
-.issue-row-title,
-.issue-row-footer {
+.ticket-row-product,
+.ticket-row-time,
+.ticket-row-title,
+.ticket-row-footer {
   min-width: 0;
 }
 
-.issue-row-product {
+.ticket-row-product {
   align-items: center;
   color: var(--blue-dark);
   display: flex;
@@ -868,13 +868,13 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.issue-row-time {
+.ticket-row-time {
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-.issue-row-title {
+.ticket-row-title {
   font-size: 14px;
   font-weight: 650;
   grid-column: 1 / -1;
@@ -883,7 +883,7 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.issue-row-footer {
+.ticket-row-footer {
   align-items: center;
   color: var(--muted);
   display: flex;
@@ -896,7 +896,7 @@ button:focus-visible {
   text-align: right;
 }
 
-.issue-row-person {
+.ticket-row-person {
   background: #f2f6fa;
   border-radius: 999px;
   color: #53657a;
@@ -2388,12 +2388,12 @@ button:focus-visible {
     min-width: 0;
   }
 
-  .issue-row {
+  .ticket-row {
     gap: 6px;
     grid-template-columns: 1fr;
   }
 
-  .issue-row > * {
+  .ticket-row > * {
     grid-column: 1;
   }
 }

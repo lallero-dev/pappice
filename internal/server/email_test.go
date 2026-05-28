@@ -9,7 +9,7 @@ import (
 
 func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 	server := &Server{options: Options{PublicURL: "https://tracker.example.test"}}
-	issue := store.Issue{
+	ticket := store.Ticket{
 		Key:           "PME-1",
 		ProductKey:    "PME",
 		Title:         "Need <help>",
@@ -22,7 +22,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		}},
 	}
 
-	subject, textBody, htmlBody := server.requesterEmailContent("ticket.commented", issue, "Alice")
+	subject, textBody, htmlBody := server.requesterEmailContent("ticket.commented", ticket, "Alice")
 
 	if subject != "[PME-1] Ticket update: Need <help>" {
 		t.Fatalf("subject = %q", subject)
@@ -59,10 +59,10 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 	}
 }
 
-func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
+func TestTicketEmailContentUsesReadableLayout(t *testing.T) {
 	server := &Server{options: Options{PublicURL: "https://tracker.example.test"}}
 	product := store.Product{Key: "PME", Name: "Pappice"}
-	issue := store.Issue{
+	ticket := store.Ticket{
 		Key:         "PME-2",
 		ProductKey:  "PME",
 		Title:       "Cannot sign in",
@@ -74,7 +74,7 @@ func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
 	}
 	actor := store.User{Username: "paolo", DisplayName: "Paolo"}
 
-	subject, textBody, htmlBody := server.issueEmailContent("ticket.assigned", product, issue, actor)
+	subject, textBody, htmlBody := server.ticketEmailContent("ticket.assigned", product, ticket, actor)
 
 	if subject != "[PME-2] Ticket update: Cannot sign in" {
 		t.Fatalf("subject = %q", subject)

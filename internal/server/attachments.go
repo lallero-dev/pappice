@@ -107,12 +107,12 @@ func (s *Server) handleAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
-	issue, err := s.store.GetIssue(attachment.IssueID)
+	ticket, err := s.store.GetTicket(attachment.TicketID)
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	if !s.canReadIssue(auth.User, issue) || !s.canReadAttachment(auth.User, issue, attachment) {
+	if !s.canReadTicket(auth.User, ticket) || !s.canReadAttachment(auth.User, ticket, attachment) {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -148,15 +148,15 @@ func isInlinePreviewImage(contentType string) bool {
 	}
 }
 
-func (s *Server) canReadAttachment(user store.User, issue store.Issue, attachment store.Attachment) bool {
+func (s *Server) canReadAttachment(user store.User, ticket store.Ticket, attachment store.Attachment) bool {
 	if attachment.CommentID == nil {
 		return true
 	}
-	for _, comment := range issue.Comments {
+	for _, comment := range ticket.Comments {
 		if comment.ID != *attachment.CommentID {
 			continue
 		}
-		return comment.Visibility == "" || comment.Visibility == "public" || s.canEditIssue(user, issue.ProductID)
+		return comment.Visibility == "" || comment.Visibility == "public" || s.canEditTicket(user, ticket.ProductID)
 	}
 	return false
 }
@@ -413,16 +413,16 @@ func attachmentInputs(uploads []storedUpload) []store.CreateAttachment {
 	return inputs
 }
 
-func multipartCreateIssueInput(r *http.Request, fallbackProductID int64) (store.CreateIssue, error) {
+func multipartCreateTicketInput(r *http.Request, fallbackProductID int64) (store.CreateTicket, error) {
 	productID := fallbackProductID
 	if productID == 0 {
 		parsed, err := strconv.ParseInt(strings.TrimSpace(multipartValue(r, "product_id")), 10, 64)
 		if err != nil || parsed < 1 {
-			return store.CreateIssue{}, fmt.Errorf("%w: product_id is required", store.ErrValidation)
+			return store.CreateTicket{}, fmt.Errorf("%w: product_id is required", store.ErrValidation)
 		}
 		productID = parsed
 	}
-	return store.CreateIssue{
+	return store.CreateTicket{
 		ProductID:      productID,
 		Title:          multipartValue(r, "title"),
 		Description:    multipartValue(r, "description"),

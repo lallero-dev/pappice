@@ -196,9 +196,9 @@ func (s *Store) DeleteWebhook(id int64) error {
 func (s *Store) RecordDelivery(delivery WebhookDelivery) error {
 	now := time.Now().UTC()
 	result, err := s.db.Exec(`
-		INSERT INTO webhook_deliveries (webhook_id, product_id, event, issue_id, status_code, error, duration_ms, created_at)
+		INSERT INTO webhook_deliveries (webhook_id, product_id, event, ticket_id, status_code, error, duration_ms, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		delivery.WebhookID, nullableInt64(delivery.ProductID), delivery.Event, nullZero(delivery.IssueID),
+		delivery.WebhookID, nullableInt64(delivery.ProductID), delivery.Event, nullZero(delivery.TicketID),
 		nullZero(int64(delivery.StatusCode)), delivery.Error, delivery.DurationMS, formatTime(now),
 	)
 	if err != nil {
@@ -223,7 +223,7 @@ func (s *Store) ListDeliveries(limit int) []WebhookDelivery {
 		limit = 50
 	}
 	rows, err := s.db.Query(`
-		SELECT id, webhook_id, product_id, event, issue_id, status_code, error, duration_ms, created_at
+		SELECT id, webhook_id, product_id, event, ticket_id, status_code, error, duration_ms, created_at
 		FROM webhook_deliveries
 		ORDER BY created_at DESC
 		LIMIT ?`, limit)
@@ -235,15 +235,15 @@ func (s *Store) ListDeliveries(limit int) []WebhookDelivery {
 	var deliveries []WebhookDelivery
 	for rows.Next() {
 		var delivery WebhookDelivery
-		var productID, issueID, status sql.NullInt64
+		var productID, ticketID, status sql.NullInt64
 		var created string
-		if err := rows.Scan(&delivery.ID, &delivery.WebhookID, &productID, &delivery.Event, &issueID, &status, &delivery.Error, &delivery.DurationMS, &created); err == nil {
+		if err := rows.Scan(&delivery.ID, &delivery.WebhookID, &productID, &delivery.Event, &ticketID, &status, &delivery.Error, &delivery.DurationMS, &created); err == nil {
 			if productID.Valid {
 				v := productID.Int64
 				delivery.ProductID = &v
 			}
-			if issueID.Valid {
-				delivery.IssueID = issueID.Int64
+			if ticketID.Valid {
+				delivery.TicketID = ticketID.Int64
 			}
 			if status.Valid {
 				delivery.StatusCode = int(status.Int64)

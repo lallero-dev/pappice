@@ -131,9 +131,9 @@ func TestProductRBACAndCSRF(t *testing.T) {
 		"title": "Customer can create",
 	}, bobCookie, bobCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	issueID := decodeInt64(t, body, "id")
+	ticketID := decodeInt64(t, body, "id")
 
-	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]any{
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status": "assigned",
 	}, bobCookie, bobCSRF, server.URL)
 	if resp.StatusCode != http.StatusForbidden {
@@ -146,7 +146,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 
-	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]any{
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status": "assigned",
 	}, bobCookie, bobCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
@@ -284,7 +284,7 @@ func TestAPIMethodContracts(t *testing.T) {
 		"description": "Exercise route methods",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	issueID := decodeInt64(t, body, "id")
+	ticketID := decodeInt64(t, body, "id")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tokens", map[string]any{"name": "method-contract"}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
@@ -322,9 +322,9 @@ func TestAPIMethodContracts(t *testing.T) {
 		{"product webhooks", http.MethodPut, "/api/products/" + itoa(productID) + "/webhooks", "GET, POST"},
 		{"product deliveries", http.MethodPost, "/api/products/" + itoa(productID) + "/webhook-deliveries", http.MethodGet},
 		{"tickets", http.MethodPut, "/api/tickets", "GET, POST"},
-		{"single ticket", http.MethodPost, "/api/tickets/" + itoa(issueID), "GET, PATCH, DELETE"},
-		{"ticket comments", http.MethodGet, "/api/tickets/" + itoa(issueID) + "/comments", http.MethodPost},
-		{"ticket read", http.MethodGet, "/api/tickets/" + itoa(issueID) + "/read", http.MethodPost},
+		{"single ticket", http.MethodPost, "/api/tickets/" + itoa(ticketID), "GET, PATCH, DELETE"},
+		{"ticket comments", http.MethodGet, "/api/tickets/" + itoa(ticketID) + "/comments", http.MethodPost},
+		{"ticket read", http.MethodGet, "/api/tickets/" + itoa(ticketID) + "/read", http.MethodPost},
 		{"attachments", http.MethodPost, "/api/attachments/1", http.MethodGet},
 		{"users", http.MethodPut, "/api/users", "GET, POST"},
 		{"single user", http.MethodGet, "/api/users/" + itoa(userID), "PATCH, DELETE"},
@@ -481,23 +481,23 @@ func TestTicketDeletionRequiresAdmin(t *testing.T) {
 		"title":      "Delete from admin only",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	issueID := decodeInt64(t, body, "id")
+	ticketID := decodeInt64(t, body, "id")
 
-	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(issueID), nil, ownerCookie, ownerCSRF, server.URL)
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(ticketID), nil, ownerCookie, ownerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusForbidden)
-	if _, err := tracker.GetIssue(issueID); err != nil {
+	if _, err := tracker.GetTicket(ticketID); err != nil {
 		t.Fatalf("owner delete removed ticket: %v", err)
 	}
 
-	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(issueID), nil, adminCookie, adminCSRF, server.URL)
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	if !decodeBool(t, body, "ok") {
 		t.Fatalf("delete ticket response = %s", body)
 	}
-	if _, err := tracker.GetIssue(issueID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := tracker.GetTicket(ticketID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted ticket err = %v, want not found", err)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, adminCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events?q=ticket.deleted", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -526,7 +526,7 @@ func TestAPIValidationContracts(t *testing.T) {
 		"title":      "Validation ticket",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	issueID := decodeInt64(t, body, "id")
+	ticketID := decodeInt64(t, body, "id")
 
 	tests := []struct {
 		name   string
@@ -542,7 +542,7 @@ func TestAPIValidationContracts(t *testing.T) {
 		{"invalid ticket id", http.MethodGet, "/api/tickets/not-a-number", ``, http.StatusBadRequest},
 		{"invalid token id", http.MethodDelete, "/api/tokens/not-a-number", ``, http.StatusBadRequest},
 		{"invalid email notification id", http.MethodPost, "/api/email-notifications/not-a-number/retry", `{}`, http.StatusBadRequest},
-		{"empty ticket patch", http.MethodPatch, "/api/tickets/" + itoa(issueID), `{}`, http.StatusBadRequest},
+		{"empty ticket patch", http.MethodPatch, "/api/tickets/" + itoa(ticketID), `{}`, http.StatusBadRequest},
 		{"direct password patch blocked", http.MethodPatch, "/api/users/" + itoa(userID), `{"password":"new password"}`, http.StatusBadRequest},
 	}
 
@@ -677,7 +677,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if len(resp.Cookies()) == 0 {
-		t.Fatalf("setup link did not issue session: %s", body)
+		t.Fatalf("setup link did not create session: %s", body)
 	}
 	userCookie := resp.Cookies()[0]
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+setupToken, map[string]any{
@@ -843,7 +843,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	}
 }
 
-func TestAdminProductIssueCommentAndNotificationFlow(t *testing.T) {
+func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
 	_ = tracker
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
@@ -907,36 +907,36 @@ func TestAdminProductIssueCommentAndNotificationFlow(t *testing.T) {
 		"priority":    "high",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	issueID := decodeInt64(t, body, "id")
-	issueKey := decodeString(t, body, "key")
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/key/"+issueKey, nil, adminCookie, "", "")
+	ticketID := decodeInt64(t, body, "id")
+	ticketKey := decodeString(t, body, "key")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/key/"+ticketKey, nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if decodeInt64(t, body, "id") != issueID {
+	if decodeInt64(t, body, "id") != ticketID {
 		t.Fatalf("ticket by key returned wrong ticket: %s", body)
 	}
 
 	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(ticketID), nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
 
 	devCookie, devCSRF := loginUser(t, client, server.URL, "dev", "correct horse")
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(issueID)+"/comments", map[string]any{
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(ticketID)+"/comments", map[string]any{
 		"body":       "I can reproduce this",
 		"visibility": "public",
 	}, devCookie, devCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(issueID)+"/comments", map[string]any{
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(ticketID)+"/comments", map[string]any{
 		"body":       "Customer tries an internal note",
 		"visibility": "internal",
 	}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusNotFound)
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(issueID)+"/comments", map[string]any{
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(ticketID)+"/comments", map[string]any{
 		"body":       "Internal triage",
 		"visibility": "internal",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 
-	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]any{
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status":   "assigned",
 		"assignee": "dev",
 	}, adminCookie, adminCSRF, server.URL)
@@ -946,7 +946,7 @@ func TestAdminProductIssueCommentAndNotificationFlow(t *testing.T) {
 	if !bytes.Contains(body, []byte("Dashboard fails")) {
 		t.Fatalf("filtered tickets missing ticket: %s", body)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, adminCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Internal triage")) || !bytes.Contains(body, []byte(`"visibility":"internal"`)) {
 		t.Fatalf("ticket body missing internal note: %s", body)
@@ -1073,9 +1073,9 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 		"description": "Needs one email",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	issueID := decodeInt64(t, body, "id")
+	ticketID := decodeInt64(t, body, "id")
 
-	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]any{
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status":   "assigned",
 		"assignee": "dev",
 		"comment": map[string]any{
@@ -1084,13 +1084,13 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 		},
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusBadRequest)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(issueID), nil, adminCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if bytes.Contains(body, []byte("This should roll back")) || bytes.Contains(body, []byte(`"status":"assigned"`)) {
 		t.Fatalf("failed grouped save was not rolled back: %s", body)
 	}
 
-	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]any{
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status":   "assigned",
 		"assignee": "dev",
 		"comment": map[string]any{
@@ -1393,14 +1393,14 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	intruderCookie, intruderCSRF := loginUser(t, client, server.URL, "intruder", "correct horse")
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"product_id":  productID,
-		"title":       "Intruder issue",
+		"title":       "Intruder ticket",
 		"description": "Another customer ticket",
 	}, intruderCookie, intruderCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Need help")) || bytes.Contains(body, []byte("Intruder issue")) {
+	if !bytes.Contains(body, []byte("Need help")) || bytes.Contains(body, []byte("Intruder ticket")) {
 		t.Fatalf("customer ticket list has wrong visibility: %s", body)
 	}
 
@@ -1545,7 +1545,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	customerTicketID := decodeInt64(t, body, "id")
-	var created store.Issue
+	var created store.Ticket
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("decode customer ticket: %v", err)
 	}
@@ -1693,9 +1693,9 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 		Body:     "GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
 	}}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	var created store.Issue
+	var created store.Ticket
 	if err := json.Unmarshal(body, &created); err != nil {
-		t.Fatalf("decode created issue: %v", err)
+		t.Fatalf("decode created ticket: %v", err)
 	}
 	if len(created.Attachments) != 2 {
 		t.Fatalf("created attachments = %#v body=%s", created.Attachments, body)
@@ -1748,9 +1748,9 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 		Body:     "internal attachment content",
 	}}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	var withInternal store.Issue
+	var withInternal store.Ticket
 	if err := json.Unmarshal(body, &withInternal); err != nil {
-		t.Fatalf("decode internal issue: %v", err)
+		t.Fatalf("decode internal ticket: %v", err)
 	}
 	internalAttachmentID := int64(0)
 	for _, comment := range withInternal.Comments {
@@ -1782,9 +1782,9 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 		Body:     "public attachment content",
 	}}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	var withPublic store.Issue
+	var withPublic store.Ticket
 	if err := json.Unmarshal(body, &withPublic); err != nil {
-		t.Fatalf("decode public issue: %v", err)
+		t.Fatalf("decode public ticket: %v", err)
 	}
 	publicAttachmentID := int64(0)
 	for _, comment := range withPublic.Comments {
@@ -1825,9 +1825,9 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 		"description": "Original description",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	issueID := decodeInt64(t, body, "id")
+	ticketID := decodeInt64(t, body, "id")
 
-	resp, body = doMultipart(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(issueID), map[string]string{
+	resp, body = doMultipart(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]string{
 		"title":       "Multipart patched ticket",
 		"description": "Updated through a multipart save",
 		"status":      "assigned",
@@ -1841,7 +1841,7 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 		Body:     "multipart patch attachment content",
 	}}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	var patched store.Issue
+	var patched store.Ticket
 	if err := json.Unmarshal(body, &patched); err != nil {
 		t.Fatalf("decode patched ticket: %v", err)
 	}
@@ -1948,7 +1948,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 	}
 
 	workflowOnlyID := createTicket("Workflow-only change")
-	notification := requireNotificationForIssueEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	notification := requireNotificationForTicketEmail(t, tracker, workflowOnlyID, "customer@example.test")
 	if notification.Event != "ticket.created" {
 		t.Fatalf("initial requester notification = %#v", notification)
 	}
@@ -1963,7 +1963,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 		},
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	notification = requireNotificationForIssueEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	notification = requireNotificationForTicketEmail(t, tracker, workflowOnlyID, "customer@example.test")
 	if notification.Event != "ticket.created" || strings.Contains(notification.BodyText, "Internal triage details") {
 		t.Fatalf("workflow-only change should not notify requester: %#v", notification)
 	}
@@ -1972,7 +1972,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 		"status": "resolved",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	notification = requireNotificationForIssueEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	notification = requireNotificationForTicketEmail(t, tracker, workflowOnlyID, "customer@example.test")
 	if notification.Event != "ticket.updated" || !strings.Contains(notification.BodyText, "Current status: Resolved") {
 		t.Fatalf("resolved status should notify requester: %#v", notification)
 	}
@@ -1987,7 +1987,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 		},
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	notification = requireNotificationForIssueEmail(t, tracker, publicReplyID, "customer@example.test")
+	notification = requireNotificationForTicketEmail(t, tracker, publicReplyID, "customer@example.test")
 	if notification.Event != "ticket.commented" ||
 		!strings.Contains(notification.BodyText, "Visible staff reply") ||
 		strings.Contains(notification.BodyText, "Current status: Assigned") {
@@ -2307,16 +2307,16 @@ func decodeFirstProductID(t *testing.T, body []byte) int64 {
 	return payload.Products[0].ID
 }
 
-func requireNotificationForIssueEmail(t *testing.T, tracker *store.Store, issueID int64, email string) store.EmailNotification {
+func requireNotificationForTicketEmail(t *testing.T, tracker *store.Store, ticketID int64, email string) store.EmailNotification {
 	t.Helper()
 	var matches []store.EmailNotification
 	for _, notification := range tracker.ListEmailNotifications(100) {
-		if notification.IssueID == issueID && strings.EqualFold(notification.RecipientEmail, email) {
+		if notification.TicketID == ticketID && strings.EqualFold(notification.RecipientEmail, email) {
 			matches = append(matches, notification)
 		}
 	}
 	if len(matches) != 1 {
-		t.Fatalf("notifications for issue %d and %s = %#v, want exactly one", issueID, email, matches)
+		t.Fatalf("notifications for ticket %d and %s = %#v, want exactly one", ticketID, email, matches)
 	}
 	return matches[0]
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func (s *Store) IssueEmailRecipients(event string, issue Issue, actor User) []EmailRecipient {
+func (s *Store) TicketEmailRecipients(event string, ticket Ticket, actor User) []EmailRecipient {
 	recipients := make(map[int64]EmailRecipient)
 	add := func(recipient EmailRecipient) {
 		if recipient.UserID == 0 || recipient.UserID == actor.ID || strings.TrimSpace(recipient.Email) == "" {
@@ -22,18 +22,18 @@ func (s *Store) IssueEmailRecipients(event string, issue Issue, actor User) []Em
 
 	switch event {
 	case "ticket.created":
-		for _, recipient := range s.productOwnerEmailRecipients(issue.ProductID) {
+		for _, recipient := range s.productOwnerEmailRecipients(ticket.ProductID) {
 			add(recipient)
 		}
 	case "ticket.updated", "ticket.commented":
-		if recipient, ok := s.emailRecipientByUsername(issue.Reporter); ok {
+		if recipient, ok := s.emailRecipientByUsername(ticket.Reporter); ok {
 			add(recipient)
 		}
-		if recipient, ok := s.emailRecipientByUsername(issue.Assignee); ok {
+		if recipient, ok := s.emailRecipientByUsername(ticket.Assignee); ok {
 			add(recipient)
 		}
 	case "ticket.assigned":
-		if recipient, ok := s.emailRecipientByUsername(issue.Assignee); ok {
+		if recipient, ok := s.emailRecipientByUsername(ticket.Assignee); ok {
 			add(recipient)
 		}
 	}
@@ -69,7 +69,7 @@ func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]E
 		}
 		notification := EmailNotification{
 			ProductID:      input.ProductID,
-			IssueID:        input.IssueID,
+			TicketID:       input.TicketID,
 			UserID:         input.UserID,
 			RecipientEmail: email,
 			RecipientName:  strings.TrimSpace(input.RecipientName),
@@ -120,11 +120,11 @@ func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]E
 		}
 		result, err := tx.Exec(`
 			INSERT INTO email_notifications (
-				product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+				product_id, ticket_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 				status, attempts, next_attempt_at, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-			nullZero(notification.ProductID), nullZero(notification.IssueID), nullZero(notification.UserID), notification.RecipientEmail,
+			nullZero(notification.ProductID), nullZero(notification.TicketID), nullZero(notification.UserID), notification.RecipientEmail,
 			notification.RecipientName, notification.Event, notification.Subject, notification.BodyText, notification.BodyHTML,
 			formatTime(notification.NextAttemptAt), formatTime(notification.CreatedAt),
 		)
@@ -265,7 +265,7 @@ func (s *Store) MarkEmailFailed(id int64, sendErr error, maxAttempts int) error 
 
 func (s *Store) GetEmailNotification(id int64) (EmailNotification, error) {
 	row := s.db.QueryRow(`
-		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		SELECT id, product_id, ticket_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications
 		WHERE id = ?`, id)
@@ -289,7 +289,7 @@ func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) Email
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit, offset)
 	rows, err := s.db.Query(`
-		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		SELECT id, product_id, ticket_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications
 		`+where+`
@@ -440,21 +440,21 @@ func scanEmailRecipient(rows scanner) (EmailRecipient, error) {
 
 func pendingEmailNotificationIDTx(tx *sql.Tx, notification EmailNotification) (int64, bool, error) {
 	var row *sql.Row
-	if notification.IssueID > 0 {
+	if notification.TicketID > 0 {
 		row = tx.QueryRow(`
 			SELECT id
 			FROM email_notifications
 			WHERE status = 'pending'
-			  AND issue_id = ?
+			  AND ticket_id = ?
 			  AND lower(recipient_email) = lower(?)
 			ORDER BY created_at DESC
-			LIMIT 1`, notification.IssueID, notification.RecipientEmail)
+			LIMIT 1`, notification.TicketID, notification.RecipientEmail)
 	} else {
 		row = tx.QueryRow(`
 			SELECT id
 			FROM email_notifications
 			WHERE status = 'pending'
-			  AND issue_id IS NULL
+			  AND ticket_id IS NULL
 			  AND lower(recipient_email) = lower(?)
 			  AND event = ?
 			ORDER BY created_at DESC
@@ -472,7 +472,7 @@ func pendingEmailNotificationIDTx(tx *sql.Tx, notification EmailNotification) (i
 
 func getEmailNotificationTx(tx *sql.Tx, id int64) (EmailNotification, error) {
 	row := tx.QueryRow(`
-		SELECT id, product_id, issue_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
+		SELECT id, product_id, ticket_id, user_id, recipient_email, recipient_name, event, subject, body_text, body_html,
 		       status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM email_notifications
 		WHERE id = ?`, id)
@@ -485,11 +485,11 @@ func getEmailNotificationTx(tx *sql.Tx, id int64) (EmailNotification, error) {
 
 func scanEmailNotification(rows scanner) (EmailNotification, error) {
 	var notification EmailNotification
-	var productID, issueID, userID sql.NullInt64
+	var productID, ticketID, userID sql.NullInt64
 	var nextAttempt, created string
 	var lockedUntil, sentAt sql.NullString
 	if err := rows.Scan(
-		&notification.ID, &productID, &issueID, &userID, &notification.RecipientEmail,
+		&notification.ID, &productID, &ticketID, &userID, &notification.RecipientEmail,
 		&notification.RecipientName, &notification.Event, &notification.Subject, &notification.BodyText, &notification.BodyHTML,
 		&notification.Status, &notification.Attempts, &nextAttempt, &lockedUntil, &notification.LastError, &created, &sentAt,
 	); err != nil {
@@ -498,8 +498,8 @@ func scanEmailNotification(rows scanner) (EmailNotification, error) {
 	if productID.Valid {
 		notification.ProductID = productID.Int64
 	}
-	if issueID.Valid {
-		notification.IssueID = issueID.Int64
+	if ticketID.Valid {
+		notification.TicketID = ticketID.Int64
 	}
 	if userID.Valid {
 		notification.UserID = userID.Int64

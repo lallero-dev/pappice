@@ -11,21 +11,21 @@ import (
 	"pappice/internal/security"
 )
 
-func (s *Store) CreateIssue(input CreateIssue) (Issue, error) {
-	return s.CreateIssueWithAttachments(input, nil, 0)
+func (s *Store) CreateTicket(input CreateTicket) (Ticket, error) {
+	return s.CreateTicketWithAttachments(input, nil, 0)
 }
 
-func (s *Store) CreateIssueWithAttachments(input CreateIssue, attachments []CreateAttachment, attachmentUserID int64) (Issue, error) {
+func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []CreateAttachment, attachmentUserID int64) (Ticket, error) {
 	now := time.Now().UTC()
 	source := defaultString(input.Source, "staff")
-	if !isValid(validIssueSources, source) {
-		return Issue{}, fmt.Errorf("%w: invalid issue source %q", ErrValidation, source)
+	if !isValid(validTicketSources, source) {
+		return Ticket{}, fmt.Errorf("%w: invalid ticket source %q", ErrValidation, source)
 	}
 	requesterEmail, err := normalizeEmail(input.RequesterEmail)
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	issue := Issue{
+	ticket := Ticket{
 		ProductID:      input.ProductID,
 		Title:          strings.TrimSpace(input.Title),
 		Description:    strings.TrimSpace(input.Description),
@@ -40,80 +40,80 @@ func (s *Store) CreateIssueWithAttachments(input CreateIssue, attachments []Crea
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if issue.Source == "portal" {
-		if issue.RequesterEmail == "" {
-			return Issue{}, fmt.Errorf("%w: requester email is required", ErrValidation)
+	if ticket.Source == "portal" {
+		if ticket.RequesterEmail == "" {
+			return Ticket{}, fmt.Errorf("%w: requester email is required", ErrValidation)
 		}
-		if issue.RequesterName == "" {
-			issue.RequesterName = issue.RequesterEmail
+		if ticket.RequesterName == "" {
+			ticket.RequesterName = ticket.RequesterEmail
 		}
-		if issue.Reporter == "" {
-			issue.Reporter = issue.RequesterEmail
+		if ticket.Reporter == "" {
+			ticket.Reporter = ticket.RequesterEmail
 		}
 	}
-	if issue.RequesterEmail != "" {
+	if ticket.RequesterEmail != "" {
 		token, err := security.RandomToken()
 		if err != nil {
-			return Issue{}, err
+			return Ticket{}, err
 		}
-		issue.CustomerToken = token
+		ticket.CustomerToken = token
 	}
-	if issue.ProductID < 1 {
-		return Issue{}, fmt.Errorf("%w: product_id is required", ErrValidation)
+	if ticket.ProductID < 1 {
+		return Ticket{}, fmt.Errorf("%w: product_id is required", ErrValidation)
 	}
-	if issue.Title == "" {
-		return Issue{}, fmt.Errorf("%w: title is required", ErrValidation)
+	if ticket.Title == "" {
+		return Ticket{}, fmt.Errorf("%w: title is required", ErrValidation)
 	}
-	if !isValid(validSeverities, issue.Severity) {
-		return Issue{}, fmt.Errorf("%w: invalid severity %q", ErrValidation, issue.Severity)
+	if !isValid(validSeverities, ticket.Severity) {
+		return Ticket{}, fmt.Errorf("%w: invalid severity %q", ErrValidation, ticket.Severity)
 	}
-	if !isValid(validPriorities, issue.Priority) {
-		return Issue{}, fmt.Errorf("%w: invalid priority %q", ErrValidation, issue.Priority)
+	if !isValid(validPriorities, ticket.Priority) {
+		return Ticket{}, fmt.Errorf("%w: invalid priority %q", ErrValidation, ticket.Priority)
 	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
 	defer tx.Rollback()
-	if _, err := getProductTx(tx, issue.ProductID); err != nil {
-		return Issue{}, err
+	if _, err := getProductTx(tx, ticket.ProductID); err != nil {
+		return Ticket{}, err
 	}
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE product_id = ?`, issue.ProductID).Scan(&issue.Number); err != nil {
-		return Issue{}, err
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE product_id = ?`, ticket.ProductID).Scan(&ticket.Number); err != nil {
+		return Ticket{}, err
 	}
 	result, err := tx.Exec(`
-		INSERT INTO issues (
+		INSERT INTO tickets (
 			product_id, number, title, description, status, severity, priority, assignee, reporter,
 			source, requester_name, requester_email, customer_token, created_at, updated_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		issue.ProductID, issue.Number, issue.Title, issue.Description, issue.Status, issue.Severity, issue.Priority,
-		issue.Assignee, issue.Reporter, issue.Source, issue.RequesterName, issue.RequesterEmail,
-		nullEmptyString(issue.CustomerToken), formatTime(issue.CreatedAt), formatTime(issue.UpdatedAt),
+		ticket.ProductID, ticket.Number, ticket.Title, ticket.Description, ticket.Status, ticket.Severity, ticket.Priority,
+		ticket.Assignee, ticket.Reporter, ticket.Source, ticket.RequesterName, ticket.RequesterEmail,
+		nullEmptyString(ticket.CustomerToken), formatTime(ticket.CreatedAt), formatTime(ticket.UpdatedAt),
 	)
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	issue.ID, _ = result.LastInsertId()
-	if err := insertAttachmentsTx(tx, issue.ID, nil, attachmentUserID, attachments, now); err != nil {
-		return Issue{}, err
+	ticket.ID, _ = result.LastInsertId()
+	if err := insertAttachmentsTx(tx, ticket.ID, nil, attachmentUserID, attachments, now); err != nil {
+		return Ticket{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	return s.GetIssue(issue.ID)
+	return s.GetTicket(ticket.ID)
 }
 
-func (s *Store) ListIssues(filter Filter) []Issue {
-	return s.listIssues(filter, User{Role: "admin"})
+func (s *Store) ListTickets(filter Filter) []Ticket {
+	return s.listTickets(filter, User{Role: "admin"})
 }
 
-func (s *Store) ListIssuesForUser(filter Filter, user User) []Issue {
-	return s.listIssues(filter, user)
+func (s *Store) ListTicketsForUser(filter Filter, user User) []Ticket {
+	return s.listTickets(filter, user)
 }
 
-func (s *Store) listIssues(filter Filter, user User) []Issue {
+func (s *Store) listTickets(filter Filter, user User) []Ticket {
 	filter.Query = strings.ToLower(strings.TrimSpace(filter.Query))
 	filter.Status = strings.TrimSpace(filter.Status)
 	filter.Statuses = normalizeFilterStatuses(filter.Status, filter.Statuses)
@@ -170,7 +170,7 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
 		       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
-		FROM issues i
+		FROM tickets i
 		JOIN products p ON p.id = i.product_id
 		LEFT JOIN users requester ON requester.username = lower(i.reporter)
 		WHERE ` + strings.Join(conditions, " AND ") + `
@@ -181,124 +181,124 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 	}
 	defer rows.Close()
 
-	var issues []Issue
+	var tickets []Ticket
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		ticket, err := scanTicket(rows)
 		if err == nil {
-			issues = append(issues, issue)
+			tickets = append(tickets, ticket)
 		}
 	}
 	rows.Close()
-	for i := range issues {
-		_ = s.hydrateIssue(&issues[i])
+	for i := range tickets {
+		_ = s.hydrateTicket(&tickets[i])
 	}
-	return issues
+	return tickets
 }
 
-func (s *Store) GetIssue(id int64) (Issue, error) {
-	return s.getIssue(id)
+func (s *Store) GetTicket(id int64) (Ticket, error) {
+	return s.getTicket(id)
 }
 
-func (s *Store) GetIssueByKey(key string) (Issue, error) {
-	productKey, number, ok := parseIssueKey(key)
+func (s *Store) GetTicketByKey(key string) (Ticket, error) {
+	productKey, number, ok := parseTicketKey(key)
 	if !ok {
-		return Issue{}, ErrNotFound
+		return Ticket{}, ErrNotFound
 	}
-	row := s.db.QueryRow(issueSelectSQL+` WHERE p.key = ? AND i.number = ?`, productKey, number)
-	issue, err := scanIssue(row)
+	row := s.db.QueryRow(ticketSelectSQL+` WHERE p.key = ? AND i.number = ?`, productKey, number)
+	ticket, err := scanTicket(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Issue{}, ErrNotFound
+		return Ticket{}, ErrNotFound
 	}
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	return issue, s.hydrateIssue(&issue)
+	return ticket, s.hydrateTicket(&ticket)
 }
 
-func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
+func (s *Store) GetTicketByCustomerToken(token string) (Ticket, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return Issue{}, ErrNotFound
+		return Ticket{}, ErrNotFound
 	}
 	row := s.db.QueryRow(`
 		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
 		       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
-		FROM issues i
+		FROM tickets i
 		JOIN products p ON p.id = i.product_id
 		LEFT JOIN users requester ON requester.username = lower(i.reporter)
 		WHERE i.customer_token = ?`, token)
-	issue, err := scanIssue(row)
+	ticket, err := scanTicket(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Issue{}, ErrNotFound
+		return Ticket{}, ErrNotFound
 	}
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	if err := s.hydrateIssue(&issue); err != nil {
-		return Issue{}, err
+	if err := s.hydrateTicket(&ticket); err != nil {
+		return Ticket{}, err
 	}
-	issue.Comments = publicComments(issue.Comments)
-	return issue, nil
+	ticket.Comments = publicComments(ticket.Comments)
+	return ticket, nil
 }
 
-func (s *Store) UpdateIssue(id int64, patch UpdateIssue) (Issue, error) {
-	result, err := s.SaveIssue(SaveIssueInput{IssueID: id, Patch: patch})
+func (s *Store) UpdateTicket(id int64, patch UpdateTicket) (Ticket, error) {
+	result, err := s.SaveTicket(SaveTicketInput{TicketID: id, Patch: patch})
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	return result.Issue, nil
+	return result.Ticket, nil
 }
 
-func (s *Store) SaveIssue(input SaveIssueInput) (SaveIssueResult, error) {
-	hasPatch := issuePatchPresent(input.Patch)
+func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
+	hasPatch := ticketPatchPresent(input.Patch)
 	hasAttachments := len(input.Attachments) > 0
 	hasCommentBody := input.Comment != nil && strings.TrimSpace(input.Comment.Body) != ""
 	hasComment := input.Comment != nil && (hasCommentBody || hasAttachments)
 	if !hasPatch && input.Comment != nil && !hasComment {
 		_, _, err := normalizeComment(*input.Comment, false)
-		return SaveIssueResult{}, err
+		return SaveTicketResult{}, err
 	}
 	if !hasPatch && !hasComment && !hasAttachments {
-		return SaveIssueResult{}, fmt.Errorf("%w: issue changes or comment are required", ErrValidation)
+		return SaveTicketResult{}, fmt.Errorf("%w: ticket changes or comment are required", ErrValidation)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return SaveIssueResult{}, err
+		return SaveTicketResult{}, err
 	}
 	defer tx.Rollback()
 
-	previous, err := getIssueTx(tx, input.IssueID)
+	previous, err := getTicketTx(tx, input.TicketID)
 	if err != nil {
-		return SaveIssueResult{}, err
+		return SaveTicketResult{}, err
 	}
 
 	now := time.Now().UTC()
 	current := previous
-	result := SaveIssueResult{
+	result := SaveTicketResult{
 		Previous:   previous,
 		HasPatch:   hasPatch,
 		HasComment: hasComment,
 	}
 	if hasPatch {
-		if err := applyIssuePatch(&current, input.Patch, now); err != nil {
-			return SaveIssueResult{}, err
+		if err := applyTicketPatch(&current, input.Patch, now); err != nil {
+			return SaveTicketResult{}, err
 		}
 		result.AssignmentChanged = input.Patch.Assignee != nil &&
 			strings.TrimSpace(*input.Patch.Assignee) != "" &&
 			!strings.EqualFold(strings.TrimSpace(*input.Patch.Assignee), strings.TrimSpace(previous.Assignee))
-		if err := updateIssueTx(tx, current); err != nil {
-			return SaveIssueResult{}, err
+		if err := updateTicketTx(tx, current); err != nil {
+			return SaveTicketResult{}, err
 		}
 	}
 	if hasComment {
 		comment, publicComment, err := normalizeComment(*input.Comment, hasAttachments)
 		if err != nil {
-			return SaveIssueResult{}, err
+			return SaveTicketResult{}, err
 		}
-		commentID, err := addCommentTx(tx, input.IssueID, comment, now)
+		commentID, err := addCommentTx(tx, input.TicketID, comment, now)
 		if err != nil {
-			return SaveIssueResult{}, err
+			return SaveTicketResult{}, err
 		}
 		result.CommentID = commentID
 		result.PublicComment = publicComment
@@ -308,33 +308,33 @@ func (s *Store) SaveIssue(input SaveIssueInput) (SaveIssueResult, error) {
 		if result.CommentID > 0 {
 			commentID = &result.CommentID
 		}
-		if err := insertAttachmentsTx(tx, input.IssueID, commentID, input.AttachmentUserID, input.Attachments, now); err != nil {
-			return SaveIssueResult{}, err
+		if err := insertAttachmentsTx(tx, input.TicketID, commentID, input.AttachmentUserID, input.Attachments, now); err != nil {
+			return SaveTicketResult{}, err
 		}
 	}
 	if !hasPatch && (hasComment || hasAttachments) {
 		current.UpdatedAt = now
-		if err := updateIssueTimestampTx(tx, input.IssueID, now); err != nil {
-			return SaveIssueResult{}, err
+		if err := updateTicketTimestampTx(tx, input.TicketID, now); err != nil {
+			return SaveTicketResult{}, err
 		}
 	}
 
-	current, err = getIssueTx(tx, input.IssueID)
+	current, err = getTicketTx(tx, input.TicketID)
 	if err != nil {
-		return SaveIssueResult{}, err
+		return SaveTicketResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return SaveIssueResult{}, err
+		return SaveTicketResult{}, err
 	}
-	result.Issue = current
+	result.Ticket = current
 	return result, nil
 }
 
-func issuePatchPresent(patch UpdateIssue) bool {
+func ticketPatchPresent(patch UpdateTicket) bool {
 	return patch.Title != nil || patch.Description != nil || patch.Status != nil || patch.Severity != nil || patch.Priority != nil || patch.Assignee != nil
 }
 
-func applyIssuePatch(current *Issue, patch UpdateIssue, now time.Time) error {
+func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error {
 	if patch.Title != nil {
 		title := strings.TrimSpace(*patch.Title)
 		if title == "" {
@@ -379,23 +379,23 @@ func applyIssuePatch(current *Issue, patch UpdateIssue, now time.Time) error {
 	return nil
 }
 
-func updateIssueTx(tx *sql.Tx, issue Issue) error {
+func updateTicketTx(tx *sql.Tx, ticket Ticket) error {
 	_, err := tx.Exec(`
-		UPDATE issues
+		UPDATE tickets
 		SET title = ?, description = ?, status = ?, severity = ?, priority = ?, assignee = ?, updated_at = ?, closed_at = ?
 		WHERE id = ?`,
-		issue.Title, issue.Description, issue.Status, issue.Severity, issue.Priority, issue.Assignee,
-		formatTime(issue.UpdatedAt), formatTimePtr(issue.ClosedAt), issue.ID,
+		ticket.Title, ticket.Description, ticket.Status, ticket.Severity, ticket.Priority, ticket.Assignee,
+		formatTime(ticket.UpdatedAt), formatTimePtr(ticket.ClosedAt), ticket.ID,
 	)
 	return err
 }
 
-func (s *Store) AddComment(id int64, input AddComment) (Issue, error) {
-	result, err := s.SaveIssue(SaveIssueInput{IssueID: id, Comment: &input})
+func (s *Store) AddComment(id int64, input AddComment) (Ticket, error) {
+	result, err := s.SaveTicket(SaveTicketInput{TicketID: id, Comment: &input})
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	return result.Issue, nil
+	return result.Ticket, nil
 }
 
 func normalizeComment(input AddComment, allowEmptyBody bool) (AddComment, bool, error) {
@@ -417,7 +417,7 @@ func addCommentTx(tx *sql.Tx, id int64, input AddComment, now time.Time) (int64,
 		authorUserID = sql.NullInt64{Int64: input.AuthorUserID, Valid: true}
 	}
 	result, err := tx.Exec(
-		`INSERT INTO comments (issue_id, author, author_user_id, body, visibility, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO comments (ticket_id, author, author_user_id, body, visibility, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		id, input.Author, authorUserID, input.Body, input.Visibility, formatTime(now),
 	)
 	if err != nil {
@@ -430,8 +430,8 @@ func addCommentTx(tx *sql.Tx, id int64, input AddComment, now time.Time) (int64,
 	return commentID, nil
 }
 
-func updateIssueTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
-	result, err := tx.Exec(`UPDATE issues SET updated_at = ? WHERE id = ?`, formatTime(now), id)
+func updateTicketTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
+	result, err := tx.Exec(`UPDATE tickets SET updated_at = ? WHERE id = ?`, formatTime(now), id)
 	if err != nil {
 		return err
 	}
@@ -441,13 +441,13 @@ func updateIssueTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
 	return nil
 }
 
-func (s *Store) IssueIDByProductNumber(productID, number int64) (int64, bool) {
+func (s *Store) TicketIDByProductNumber(productID, number int64) (int64, bool) {
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM issues WHERE product_id = ? AND number = ?`, productID, number).Scan(&id)
+	err := s.db.QueryRow(`SELECT id FROM tickets WHERE product_id = ? AND number = ?`, productID, number).Scan(&id)
 	return id, err == nil
 }
 
-func insertAttachmentsTx(tx *sql.Tx, issueID int64, commentID *int64, userID int64, attachments []CreateAttachment, now time.Time) error {
+func insertAttachmentsTx(tx *sql.Tx, ticketID int64, commentID *int64, userID int64, attachments []CreateAttachment, now time.Time) error {
 	for _, attachment := range attachments {
 		filename := strings.TrimSpace(attachment.Filename)
 		if filename == "" {
@@ -474,10 +474,10 @@ func insertAttachmentsTx(tx *sql.Tx, issueID int64, commentID *int64, userID int
 		}
 		_, err := tx.Exec(`
 			INSERT INTO attachments (
-				issue_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
+				ticket_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			issueID, comment, filename, contentType, attachment.SizeBytes, strings.TrimSpace(attachment.SHA256),
+			ticketID, comment, filename, contentType, attachment.SizeBytes, strings.TrimSpace(attachment.SHA256),
 			storageKey, createdBy, formatTime(now),
 		)
 		if err != nil {
@@ -489,7 +489,7 @@ func insertAttachmentsTx(tx *sql.Tx, issueID int64, commentID *int64, userID int
 
 func (s *Store) GetAttachment(id int64) (Attachment, error) {
 	row := s.db.QueryRow(`
-		SELECT id, issue_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
+		SELECT id, ticket_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
 		FROM attachments
 		WHERE id = ?`, id)
 	attachment, err := scanAttachment(row)
@@ -502,7 +502,7 @@ func (s *Store) GetAttachment(id int64) (Attachment, error) {
 	return attachment, nil
 }
 
-func (s *Store) DeleteIssue(id int64) ([]string, error) {
+func (s *Store) DeleteTicket(id int64) ([]string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
@@ -512,7 +512,7 @@ func (s *Store) DeleteIssue(id int64) ([]string, error) {
 	rows, err := tx.Query(`
 		SELECT DISTINCT storage_key
 		FROM attachments
-		WHERE issue_id = ? AND storage_key <> ''`, id)
+		WHERE ticket_id = ? AND storage_key <> ''`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +531,7 @@ func (s *Store) DeleteIssue(id int64) ([]string, error) {
 	}
 	rows.Close()
 
-	result, err := tx.Exec(`DELETE FROM issues WHERE id = ?`, id)
+	result, err := tx.Exec(`DELETE FROM tickets WHERE id = ?`, id)
 	if err != nil {
 		return nil, normalizeSQLError(err)
 	}
@@ -555,58 +555,58 @@ func (s *Store) DeleteIssue(id int64) ([]string, error) {
 	return orphaned, nil
 }
 
-func (s *Store) getIssue(id int64) (Issue, error) {
-	row := s.db.QueryRow(issueSelectSQL+` WHERE i.id = ?`, id)
-	issue, err := scanIssue(row)
+func (s *Store) getTicket(id int64) (Ticket, error) {
+	row := s.db.QueryRow(ticketSelectSQL+` WHERE i.id = ?`, id)
+	ticket, err := scanTicket(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Issue{}, ErrNotFound
+		return Ticket{}, ErrNotFound
 	}
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	return issue, s.hydrateIssue(&issue)
+	return ticket, s.hydrateTicket(&ticket)
 }
 
-func getIssueTx(tx *sql.Tx, id int64) (Issue, error) {
-	row := tx.QueryRow(issueSelectSQL+` WHERE i.id = ?`, id)
-	issue, err := scanIssue(row)
+func getTicketTx(tx *sql.Tx, id int64) (Ticket, error) {
+	row := tx.QueryRow(ticketSelectSQL+` WHERE i.id = ?`, id)
+	ticket, err := scanTicket(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Issue{}, ErrNotFound
+		return Ticket{}, ErrNotFound
 	}
 	if err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	return issue, hydrateIssueTx(tx, &issue)
+	return ticket, hydrateTicketTx(tx, &ticket)
 }
 
-func (s *Store) hydrateIssue(issue *Issue) error {
-	return hydrateIssueWithQuery(s.db, issue)
+func (s *Store) hydrateTicket(ticket *Ticket) error {
+	return hydrateTicketWithQuery(s.db, ticket)
 }
 
-func hydrateIssueTx(tx *sql.Tx, issue *Issue) error {
-	return hydrateIssueWithQuery(tx, issue)
+func hydrateTicketTx(tx *sql.Tx, ticket *Ticket) error {
+	return hydrateTicketWithQuery(tx, ticket)
 }
 
-type issueQueryer interface {
+type ticketQueryer interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 }
 
-func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
-	issue.Key = fmt.Sprintf("%s-%d", issue.ProductKey, issue.Number)
-	issue.Product = issue.ProductName
-	if issue.Product == "" {
-		issue.Product = issue.ProductKey
+func hydrateTicketWithQuery(queryer ticketQueryer, ticket *Ticket) error {
+	ticket.Key = fmt.Sprintf("%s-%d", ticket.ProductKey, ticket.Number)
+	ticket.Product = ticket.ProductName
+	if ticket.Product == "" {
+		ticket.Product = ticket.ProductKey
 	}
-	issue.Attachments = nil
-	issue.Comments = nil
+	ticket.Attachments = nil
+	ticket.Comments = nil
 
 	commentRows, err := queryer.Query(`
 		SELECT c.id, COALESCE(NULLIF(author_by_id.display_name, ''), NULLIF(author_by_name.display_name, ''), c.author), c.author_user_id, c.body, c.visibility, c.created_at
 		FROM comments c
 		LEFT JOIN users author_by_id ON author_by_id.id = c.author_user_id
 		LEFT JOIN users author_by_name ON c.author_user_id IS NULL AND author_by_name.username = lower(c.author)
-		WHERE c.issue_id = ?
-		ORDER BY c.created_at`, issue.ID)
+		WHERE c.ticket_id = ?
+		ORDER BY c.created_at`, ticket.ID)
 	if err != nil {
 		return err
 	}
@@ -623,22 +623,22 @@ func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 				comment.Visibility = "public"
 			}
 			comment.CreatedAt = parseTime(created)
-			issue.Comments = append(issue.Comments, comment)
+			ticket.Comments = append(ticket.Comments, comment)
 		}
 	}
 	if err := commentRows.Err(); err != nil {
 		return err
 	}
 
-	commentIndexes := make(map[int64]int, len(issue.Comments))
-	for i := range issue.Comments {
-		commentIndexes[issue.Comments[i].ID] = i
+	commentIndexes := make(map[int64]int, len(ticket.Comments))
+	for i := range ticket.Comments {
+		commentIndexes[ticket.Comments[i].ID] = i
 	}
 	attachmentRows, err := queryer.Query(`
-		SELECT id, issue_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
+		SELECT id, ticket_id, comment_id, filename, content_type, size_bytes, sha256, storage_key, created_by_user_id, created_at
 		FROM attachments
-		WHERE issue_id = ?
-		ORDER BY created_at, id`, issue.ID)
+		WHERE ticket_id = ?
+		ORDER BY created_at, id`, ticket.ID)
 	if err != nil {
 		return err
 	}
@@ -649,17 +649,17 @@ func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 			return err
 		}
 		if attachment.CommentID == nil {
-			issue.Attachments = append(issue.Attachments, attachment)
+			ticket.Attachments = append(ticket.Attachments, attachment)
 			continue
 		}
 		if index, ok := commentIndexes[*attachment.CommentID]; ok {
-			issue.Comments[index].Attachments = append(issue.Comments[index].Attachments, attachment)
+			ticket.Comments[index].Attachments = append(ticket.Comments[index].Attachments, attachment)
 		}
 	}
 	return attachmentRows.Err()
 }
 
-func parseIssueKey(key string) (string, int64, bool) {
+func parseTicketKey(key string) (string, int64, bool) {
 	parts := strings.Split(strings.ToUpper(strings.TrimSpace(key)), "-")
 	if len(parts) != 2 || !productKeyPattern.MatchString(parts[0]) {
 		return "", 0, false
@@ -671,38 +671,38 @@ func parseIssueKey(key string) (string, int64, bool) {
 	return parts[0], number, true
 }
 
-const issueSelectSQL = `
+const ticketSelectSQL = `
 	SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
 	       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
 	       i.created_at, i.updated_at, i.closed_at
-	FROM issues i
+	FROM tickets i
 	JOIN products p ON p.id = i.product_id
 	LEFT JOIN users requester ON requester.username = lower(i.reporter)`
 
-func scanIssue(rows scanner) (Issue, error) {
-	var issue Issue
+func scanTicket(rows scanner) (Ticket, error) {
+	var ticket Ticket
 	var closed, customerToken sql.NullString
 	var created, updated string
 	if err := rows.Scan(
-		&issue.ID, &issue.ProductID, &issue.ProductKey, &issue.ProductName, &issue.Number, &issue.Title, &issue.Description,
-		&issue.Status, &issue.Severity, &issue.Priority, &issue.Assignee, &issue.Reporter,
-		&issue.Source, &issue.RequesterName, &issue.RequesterEmail, &customerToken, &created, &updated, &closed,
+		&ticket.ID, &ticket.ProductID, &ticket.ProductKey, &ticket.ProductName, &ticket.Number, &ticket.Title, &ticket.Description,
+		&ticket.Status, &ticket.Severity, &ticket.Priority, &ticket.Assignee, &ticket.Reporter,
+		&ticket.Source, &ticket.RequesterName, &ticket.RequesterEmail, &customerToken, &created, &updated, &closed,
 	); err != nil {
-		return Issue{}, err
+		return Ticket{}, err
 	}
-	if issue.Source == "" {
-		issue.Source = "staff"
+	if ticket.Source == "" {
+		ticket.Source = "staff"
 	}
-	issue.CustomerToken = nullString(customerToken)
-	issue.CreatedAt = parseTime(created)
-	issue.UpdatedAt = parseTime(updated)
-	issue.ClosedAt = parseNullTime(closed)
-	issue.Key = fmt.Sprintf("%s-%d", issue.ProductKey, issue.Number)
-	issue.Product = issue.ProductName
-	if issue.Product == "" {
-		issue.Product = issue.ProductKey
+	ticket.CustomerToken = nullString(customerToken)
+	ticket.CreatedAt = parseTime(created)
+	ticket.UpdatedAt = parseTime(updated)
+	ticket.ClosedAt = parseNullTime(closed)
+	ticket.Key = fmt.Sprintf("%s-%d", ticket.ProductKey, ticket.Number)
+	ticket.Product = ticket.ProductName
+	if ticket.Product == "" {
+		ticket.Product = ticket.ProductKey
 	}
-	return issue, nil
+	return ticket, nil
 }
 
 func scanAttachment(rows scanner) (Attachment, error) {
@@ -710,7 +710,7 @@ func scanAttachment(rows scanner) (Attachment, error) {
 	var commentID, createdBy sql.NullInt64
 	var created string
 	if err := rows.Scan(
-		&attachment.ID, &attachment.IssueID, &commentID, &attachment.Filename, &attachment.ContentType,
+		&attachment.ID, &attachment.TicketID, &commentID, &attachment.Filename, &attachment.ContentType,
 		&attachment.SizeBytes, &attachment.SHA256, &attachment.StorageKey, &createdBy, &created,
 	); err != nil {
 		return Attachment{}, err

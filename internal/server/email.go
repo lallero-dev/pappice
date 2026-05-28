@@ -9,21 +9,21 @@ import (
 	"pappice/internal/store"
 )
 
-func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store.User) {
+func (s *Server) enqueueTicketEmails(event string, ticket store.Ticket, actor store.User) {
 	if !s.options.EmailNotifications {
 		return
 	}
-	recipients := s.store.IssueEmailRecipients(event, issue, actor)
+	recipients := s.store.TicketEmailRecipients(event, ticket, actor)
 	if len(recipients) == 0 {
 		return
 	}
-	product, _ := s.store.GetProduct(issue.ProductID)
-	subject, textBody, htmlBody := s.issueEmailContent(event, product, issue, actor)
+	product, _ := s.store.GetProduct(ticket.ProductID)
+	subject, textBody, htmlBody := s.ticketEmailContent(event, product, ticket, actor)
 	inputs := make([]store.CreateEmailNotification, 0, len(recipients))
 	for _, recipient := range recipients {
 		inputs = append(inputs, store.CreateEmailNotification{
-			ProductID:      issue.ProductID,
-			IssueID:        issue.ID,
+			ProductID:      ticket.ProductID,
+			TicketID:       ticket.ID,
 			UserID:         recipient.UserID,
 			RecipientEmail: recipient.Email,
 			RecipientName:  defaultString(recipient.DisplayName, recipient.Username),
@@ -38,17 +38,17 @@ func (s *Server) enqueueIssueEmails(event string, issue store.Issue, actor store
 	_, _ = s.store.EnqueueEmailNotifications(inputs)
 }
 
-func (s *Server) enqueueRequesterEmail(event string, issue store.Issue, actorName string) {
-	if !s.options.EmailNotifications || strings.TrimSpace(issue.RequesterEmail) == "" || strings.TrimSpace(issue.CustomerToken) == "" {
+func (s *Server) enqueueRequesterEmail(event string, ticket store.Ticket, actorName string) {
+	if !s.options.EmailNotifications || strings.TrimSpace(ticket.RequesterEmail) == "" || strings.TrimSpace(ticket.CustomerToken) == "" {
 		return
 	}
-	subject, textBody, htmlBody := s.requesterEmailContent(event, issue, actorName)
+	subject, textBody, htmlBody := s.requesterEmailContent(event, ticket, actorName)
 	_, _ = s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
-		ProductID:      issue.ProductID,
-		IssueID:        issue.ID,
+		ProductID:      ticket.ProductID,
+		TicketID:       ticket.ID,
 		UserID:         0,
-		RecipientEmail: issue.RequesterEmail,
-		RecipientName:  defaultString(issue.RequesterName, issue.RequesterEmail),
+		RecipientEmail: ticket.RequesterEmail,
+		RecipientName:  defaultString(ticket.RequesterName, ticket.RequesterEmail),
 		Event:          event,
 		Subject:        subject,
 		BodyText:       textBody,
@@ -101,31 +101,31 @@ func (s *Server) accountLinkEmailContent(event string, user store.User, token st
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
 
-func (s *Server) requesterEmailContent(event string, issue store.Issue, actorName string) (string, string, string) {
-	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, requesterEmailSubjectAction(event), issue.Title)
-	link := s.ticketURL(issue.CustomerToken)
+func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorName string) (string, string, string) {
+	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, requesterEmailSubjectAction(event), ticket.Title)
+	link := s.ticketURL(ticket.CustomerToken)
 
 	intro := "We received your ticket."
 	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
 		intro = fmt.Sprintf("%s replied to your ticket.", actorName)
 	}
-	if event == "ticket.updated" && requesterTerminalStatus(issue.Status) {
-		intro = fmt.Sprintf("Your ticket is now %s.", strings.ToLower(requesterStatusLabel(issue.Status)))
+	if event == "ticket.updated" && requesterTerminalStatus(ticket.Status) {
+		intro = fmt.Sprintf("Your ticket is now %s.", strings.ToLower(requesterStatusLabel(ticket.Status)))
 	}
 
 	fields := []emailField{
-		{Label: "Ticket", Value: issue.Key},
-		{Label: "Status", Value: issue.Status},
+		{Label: "Ticket", Value: ticket.Key},
+		{Label: "Status", Value: ticket.Status},
 	}
 	if event != "ticket.created" {
-		if requesterTerminalStatus(issue.Status) {
-			fields = append(fields, emailField{Label: "Current status", Value: requesterStatusLabel(issue.Status)})
+		if requesterTerminalStatus(ticket.Status) {
+			fields = append(fields, emailField{Label: "Current status", Value: requesterStatusLabel(ticket.Status)})
 		}
 	}
 
 	blocks := make([]emailBlock, 0, 1)
 	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(issue); ok {
+		if comment, ok := latestPublicComment(ticket); ok {
 			blocks = append(blocks, emailBlock{Title: "Latest public reply", Meta: "from " + comment.Author, Body: comment.Body})
 		}
 	}
@@ -143,31 +143,31 @@ func (s *Server) requesterEmailContent(event string, issue store.Issue, actorNam
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
 
-func (s *Server) issueEmailContent(event string, product store.Product, issue store.Issue, actor store.User) (string, string, string) {
+func (s *Server) ticketEmailContent(event string, product store.Product, ticket store.Ticket, actor store.User) (string, string, string) {
 	actorName := defaultString(actor.DisplayName, actor.Username)
-	action := issueEventAction(event)
-	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, issueEmailSubjectAction(event), issue.Title)
-	productLabel := defaultString(product.Name, issue.ProductName)
-	productLabel = defaultString(productLabel, issue.ProductKey)
+	action := ticketEventAction(event)
+	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, ticketEmailSubjectAction(event), ticket.Title)
+	productLabel := defaultString(product.Name, ticket.ProductName)
+	productLabel = defaultString(productLabel, ticket.ProductKey)
 	link := strings.TrimRight(s.options.PublicURL, "/")
 	if link != "" {
 		link += "/"
 	}
 
 	fields := []emailField{
-		{Label: "Ticket", Value: issue.Key},
+		{Label: "Ticket", Value: ticket.Key},
 		{Label: "Product", Value: productLabel},
-		{Label: "Status", Value: issue.Status},
-		{Label: "Priority", Value: issue.Priority},
-		{Label: "Assignee", Value: issue.Assignee},
-		{Label: "Requester", Value: issue.Reporter},
+		{Label: "Status", Value: ticket.Status},
+		{Label: "Priority", Value: ticket.Priority},
+		{Label: "Assignee", Value: ticket.Assignee},
+		{Label: "Requester", Value: ticket.Reporter},
 	}
 	blocks := make([]emailBlock, 0, 2)
-	if strings.TrimSpace(issue.Description) != "" {
-		blocks = append(blocks, emailBlock{Title: "Description", Body: issue.Description})
+	if strings.TrimSpace(ticket.Description) != "" {
+		blocks = append(blocks, emailBlock{Title: "Description", Body: ticket.Description})
 	}
 	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(issue); ok {
+		if comment, ok := latestPublicComment(ticket); ok {
 			blocks = append(blocks, emailBlock{Title: "Latest public reply", Meta: "from " + comment.Author, Body: comment.Body})
 		}
 	}
@@ -175,7 +175,7 @@ func (s *Server) issueEmailContent(event string, product store.Product, issue st
 	layout := emailLayout{
 		Kicker:      "Pappice staff notification",
 		Title:       subject,
-		Intro:       fmt.Sprintf("%s %s %s.", actorName, strings.ToLower(action), issue.Key),
+		Intro:       fmt.Sprintf("%s %s %s.", actorName, strings.ToLower(action), ticket.Key),
 		Fields:      fields,
 		Blocks:      blocks,
 		ActionLabel: "Open in Pappice",
@@ -340,9 +340,9 @@ func emailHTMLLines(value string) string {
 	return strings.ReplaceAll(html.EscapeString(value), "\n", "<br>")
 }
 
-func latestPublicComment(issue store.Issue) (store.Comment, bool) {
-	for i := len(issue.Comments) - 1; i >= 0; i-- {
-		comment := issue.Comments[i]
+func latestPublicComment(ticket store.Ticket) (store.Comment, bool) {
+	for i := len(ticket.Comments) - 1; i >= 0; i-- {
+		comment := ticket.Comments[i]
 		if comment.Visibility == "" || comment.Visibility == "public" {
 			return comment, true
 		}
@@ -366,7 +366,7 @@ func requesterStatusLabel(status string) string {
 	}
 }
 
-func issueEventAction(event string) string {
+func ticketEventAction(event string) string {
 	switch event {
 	case "ticket.created":
 		return "Created"
@@ -379,7 +379,7 @@ func issueEventAction(event string) string {
 	}
 }
 
-func issueEmailSubjectAction(event string) string {
+func ticketEmailSubjectAction(event string) string {
 	if event == "ticket.created" {
 		return "New ticket"
 	}

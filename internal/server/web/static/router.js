@@ -40,7 +40,7 @@ function parseLocation({ pathname, hash }, config) {
   const ticketKey = ticketKeyFromHash(hash);
   const base = { normalize: trailingSlash || (Boolean(hash) && !ticketKey) };
   if (parts.length === 0 || parts[0] === "tickets") {
-    return { ...base, view: "issues", ticketKey, normalize: base.normalize || parts.length !== 1 };
+    return { ...base, view: "tickets", ticketKey, normalize: base.normalize || parts.length !== 1 };
   }
   if (parts[0] === "admin") {
     const adminSection = section(parts[1], config.adminSections, config.defaultAdminSection);
@@ -51,7 +51,7 @@ function parseLocation({ pathname, hash }, config) {
     };
   }
   if (parts[0] === "products") return productRoute(parts, hash, trailingSlash, config);
-  return { ...base, view: "issues", ticketKey, normalize: true };
+  return { ...base, view: "tickets", ticketKey, normalize: true };
 }
 
 function productRoute(parts, hash, trailingSlash, config) {
