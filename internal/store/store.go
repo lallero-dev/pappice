@@ -25,6 +25,7 @@ type Issue struct {
 	ID             int64        `json:"id"`
 	ProductID      int64        `json:"product_id"`
 	ProductKey     string       `json:"product_key"`
+	ProductName    string       `json:"product_name"`
 	Number         int64        `json:"number"`
 	Key            string       `json:"key"`
 	Title          string       `json:"title"`

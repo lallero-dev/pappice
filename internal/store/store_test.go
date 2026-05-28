@@ -37,6 +37,9 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if issue.ID != 1 {
 		t.Fatalf("issue ID = %d, want 1", issue.ID)
 	}
+	if issue.ProductKey != products[0].Key || issue.ProductName != products[0].Name || issue.Product != products[0].Name {
+		t.Fatalf("issue product labels = key %q name %q product %q", issue.ProductKey, issue.ProductName, issue.Product)
+	}
 	byKey, err := tracker.GetIssueByKey(issue.Key)
 	if err != nil {
 		t.Fatalf("get issue by key: %v", err)

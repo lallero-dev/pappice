@@ -201,7 +201,6 @@ async function addCustomerToProduct(cdp, productID) {
     const productFilter = document.querySelector("#productFilter");
     const selectedProductLabel = [...productFilter.options].find((option) => option.value === selectedProductID)?.textContent || "";
     const separatorIndex = selectedProductLabel.indexOf(" / ");
-    const selectedProductKey = separatorIndex > -1 ? selectedProductLabel.slice(0, separatorIndex) : selectedProductLabel;
     const selectedProductName = separatorIndex > -1 ? selectedProductLabel.slice(separatorIndex + 3) : selectedProductLabel;
     document.querySelector("#productTab").click();
     await waitFor(() => {
@@ -216,8 +215,7 @@ async function addCustomerToProduct(cdp, productID) {
     await waitFor(() => window.location.pathname === `/products/${selectedProductID}/members`, "product members route");
     await waitFor(() => {
       const title = document.querySelector("#productContextTitle")?.textContent.trim();
-      const meta = document.querySelector("#productContextMeta")?.textContent || "";
-      return title === selectedProductName && meta.includes(selectedProductKey);
+      return title === selectedProductName;
     }, "selected product context");
     const deleteProduct = await waitFor(() => {
       const button = document.querySelector("#deleteProductButton");

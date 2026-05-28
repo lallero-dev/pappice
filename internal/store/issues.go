@@ -167,7 +167,7 @@ func (s *Store) listIssues(filter Filter, user User) []Issue {
 	}
 
 	query := `
-		SELECT i.id, i.product_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
 		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
@@ -220,7 +220,7 @@ func (s *Store) GetIssueByCustomerToken(token string) (Issue, error) {
 		return Issue{}, ErrNotFound
 	}
 	row := s.db.QueryRow(`
-		SELECT i.id, i.product_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
 		       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
 		       i.created_at, i.updated_at, i.closed_at
 		FROM issues i
@@ -538,7 +538,10 @@ type issueQueryer interface {
 
 func hydrateIssueWithQuery(queryer issueQueryer, issue *Issue) error {
 	issue.Key = fmt.Sprintf("%s-%d", issue.ProductKey, issue.Number)
-	issue.Product = issue.ProductKey
+	issue.Product = issue.ProductName
+	if issue.Product == "" {
+		issue.Product = issue.ProductKey
+	}
 	issue.Attachments = nil
 	issue.Comments = nil
 
@@ -608,7 +611,7 @@ func parseIssueKey(key string) (string, int64, bool) {
 }
 
 const issueSelectSQL = `
-	SELECT i.id, i.product_id, p.key, i.number, i.title, i.description, i.status, i.severity, i.priority,
+	SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
 	       i.assignee, i.reporter, i.source, i.requester_name, i.requester_email, i.customer_token,
 	       i.created_at, i.updated_at, i.closed_at
 	FROM issues i
@@ -619,7 +622,7 @@ func scanIssue(rows scanner) (Issue, error) {
 	var closed, customerToken sql.NullString
 	var created, updated string
 	if err := rows.Scan(
-		&issue.ID, &issue.ProductID, &issue.ProductKey, &issue.Number, &issue.Title, &issue.Description,
+		&issue.ID, &issue.ProductID, &issue.ProductKey, &issue.ProductName, &issue.Number, &issue.Title, &issue.Description,
 		&issue.Status, &issue.Severity, &issue.Priority, &issue.Assignee, &issue.Reporter,
 		&issue.Source, &issue.RequesterName, &issue.RequesterEmail, &customerToken, &created, &updated, &closed,
 	); err != nil {
@@ -633,7 +636,10 @@ func scanIssue(rows scanner) (Issue, error) {
 	issue.UpdatedAt = parseTime(updated)
 	issue.ClosedAt = parseNullTime(closed)
 	issue.Key = fmt.Sprintf("%s-%d", issue.ProductKey, issue.Number)
-	issue.Product = issue.ProductKey
+	issue.Product = issue.ProductName
+	if issue.Product == "" {
+		issue.Product = issue.ProductKey
+	}
 	return issue, nil
 }
 

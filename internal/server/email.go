@@ -147,10 +147,8 @@ func (s *Server) issueEmailContent(event string, product store.Product, issue st
 	actorName := defaultString(actor.DisplayName, actor.Username)
 	action := issueEventAction(event)
 	subject := fmt.Sprintf("[%s] %s: %s", issue.Key, issueEmailSubjectAction(event), issue.Title)
-	productLabel := issue.ProductKey
-	if product.Name != "" {
-		productLabel = fmt.Sprintf("%s / %s", product.Key, product.Name)
-	}
+	productLabel := defaultString(product.Name, issue.ProductName)
+	productLabel = defaultString(productLabel, issue.ProductKey)
 	link := strings.TrimRight(s.options.PublicURL, "/")
 	if link != "" {
 		link += "/"

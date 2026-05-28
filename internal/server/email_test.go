@@ -81,7 +81,7 @@ func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Paolo assigned PME-2.",
-		"Product: PME / Pappice",
+		"Product: Pappice",
 		"Priority: urgent",
 		"Description:\nLogin fails after password reset.",
 		"Open in Pappice:\nhttps://tracker.example.test/",
@@ -92,7 +92,7 @@ func TestIssueEmailContentUsesReadableLayout(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Pappice staff notification",
-		"PME / Pappice",
+		"Pappice",
 		"Login fails after password reset.",
 		`href="https://tracker.example.test/"`,
 	} {

@@ -764,7 +764,7 @@ function renderProductFilter() {
   els.productFilter.disabled = false;
   els.productFilter.append(new Option("All products", ""));
   for (const product of state.products) {
-    els.productFilter.append(new Option(`${product.key} / ${product.name}`, String(product.id)));
+    els.productFilter.append(new Option(productDisplayName(product), String(product.id)));
   }
   els.productFilter.value = state.ticketProductId ? String(state.ticketProductId) : "";
   renderTicketFilterButton();
@@ -972,7 +972,7 @@ function renderIssueList() {
       renderIssuesView();
     });
     const product = issueProductParts(issue);
-    const productLabel = el("span", { className: "issue-row-product" }, product.key);
+    const productLabel = el("span", { className: "issue-row-product" }, product.name);
     if (issue.has_unread) {
       productLabel.prepend(el("span", { className: "issue-unread-dot", title: "Unread" }));
     }
@@ -1073,15 +1073,16 @@ function compareOrdered(left, right, order) {
 
 function issueProductParts(issue) {
   const product = currentProduct(issue.product_id);
+  const key = issue.product_key || product?.key || "";
+  const name = issue.product_name || productDisplayName(product) || issue.product || key || "Product";
   return {
-    key: issue.product_key || product?.key || issue.product || "Product",
-    name: product?.name || ""
+    key,
+    name
   };
 }
 
 function issueProductLabel(issue) {
-  const { key, name } = issueProductParts(issue);
-  return `${key} ${name}`.trim();
+  return issueProductParts(issue).name;
 }
 
 function renderTicketDetail() {
@@ -1200,7 +1201,7 @@ function ticketDetailContent({ issue, editable, canComment }) {
     side.append(sideSection("Requester", requester));
   }
   const facts = [
-    factBlock("Product", issue.product_key || issue.product || "Product"),
+    factBlock("Product", issueProductLabel(issue)),
     factBlock("Created", relativeTime(issue.created_at)),
     factBlock("Updated", relativeTime(issue.updated_at))
   ];
@@ -1213,7 +1214,7 @@ function ticketDetailContent({ issue, editable, canComment }) {
 }
 
 function ticketProductOptions(products) {
-  return products.map((product) => ({ value: String(product.id), label: `${product.key} / ${product.name}` }));
+  return products.map((product) => ({ value: String(product.id), label: productDisplayName(product) }));
 }
 
 function openTicketCreateModal() {
@@ -1283,7 +1284,7 @@ function showTicketCreateConfirm(container, { data, form, footer, submitButton }
     el("p", {}, "The ticket will be opened and visible to the people who can access this product."),
     el("dl", { className: "confirm-detail-list" }, [
       el("dt", {}, "Product"),
-      el("dd", {}, product ? `${product.key} / ${product.name}` : "Selected product"),
+      el("dd", {}, product ? productDisplayName(product) : "Selected product"),
       el("dt", {}, "Priority"),
       el("dd", {}, labelize(payload.priority)),
       el("dt", {}, "Attachments"),
@@ -2080,7 +2081,7 @@ async function confirmTicketComment(issue, composer) {
       : "The reply will be added to the ticket conversation.",
     confirmLabel: internal ? "Save Note" : "Send Reply",
     details: [
-      ["Ticket", issue.key || `#${issue.id}`],
+      ["Ticket", issue.title || "Selected ticket"],
       ["Visibility", internal ? "Internal note" : "Public reply"],
       ["Attachments", files.length === 0 ? "None" : String(files.length)]
     ]
@@ -3446,6 +3447,10 @@ async function refreshCurrent() {
 
 function currentProduct(productId) {
   return state.products.find((product) => product.id === productId) || null;
+}
+
+function productDisplayName(product) {
+  return product?.name || product?.key || (product?.id ? `Product ${product.id}` : "");
 }
 
 function currentProductDetail() {
