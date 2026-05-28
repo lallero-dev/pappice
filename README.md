@@ -13,7 +13,7 @@ build, and no inbound email processing.
 
 ## Project Status
 
-Current target: `v0.2.0-alpha` (see [VERSION](./VERSION)).
+Current target: `v0.3.0-alpha` (see [VERSION](./VERSION)).
 
 Pappice is intended for small-team self-hosting and public audit. It is not yet
 externally security audited, and the API/schema should be considered unstable
