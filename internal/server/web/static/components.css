@@ -619,10 +619,16 @@ button:disabled {
 }
 
 .attachment-chip-name {
+  color: inherit;
   min-width: 0;
   overflow: hidden;
+  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.attachment-chip-name:hover {
+  text-decoration: underline;
 }
 
 .attachment-remove {

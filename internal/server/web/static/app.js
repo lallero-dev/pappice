@@ -1416,21 +1416,34 @@ function attachmentIcon() {
 }
 
 function renderAttachmentPreview(input, preview) {
+  cleanupAttachmentPreview(preview);
   const files = Array.from(input.files || []);
   preview.classList.toggle("empty", files.length === 0);
   preview.replaceChildren();
   if (files.length === 0) return;
+  const urls = [];
   files.forEach((file, index) => {
+    const filename = file.name || "Attachment";
+    const url = URL.createObjectURL(file);
+    urls.push(url);
     const remove = el("button", { className: "attachment-remove", type: "button", "aria-label": `Remove ${file.name}` }, "x");
     remove.addEventListener("click", () => {
       const next = Array.from(input.files || []).filter((_, fileIndex) => fileIndex !== index);
       setAttachmentFiles(input, next);
     });
-    preview.append(el("span", { className: "attachment-preview-chip", title: file.name || "Attachment" }, [
-      el("span", { className: "attachment-chip-name" }, file.name || "Attachment"),
+    preview.append(el("span", { className: "attachment-preview-chip", title: `Download ${filename}` }, [
+      el("a", { className: "attachment-chip-name", href: url, download: filename }, filename),
       remove
     ]));
   });
+  preview.attachmentPreviewURLs = urls;
+}
+
+function cleanupAttachmentPreview(preview) {
+  for (const url of preview.attachmentPreviewURLs || []) {
+    URL.revokeObjectURL(url);
+  }
+  preview.attachmentPreviewURLs = [];
 }
 
 function mergeAttachmentFiles(...groups) {

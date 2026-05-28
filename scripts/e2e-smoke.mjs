@@ -413,6 +413,11 @@ async function createCustomerTicket(cdp) {
       return [...root.querySelectorAll(".attachment-preview-chip")]
         .some((chip) => chip.textContent.includes("e2e-create-drop.txt"));
     }, "ticket creation dropped attachment chip");
+    const createDropLink = [...root.querySelectorAll(".attachment-preview-chip .attachment-chip-name")]
+      .find((link) => link.textContent.includes("e2e-create-drop.txt"));
+    if (!createDropLink?.matches("a[download='e2e-create-drop.txt']") || !createDropLink.href.startsWith("blob:")) {
+      throw new Error("ticket creation attachment chip should be a downloadable blob link");
+    }
     pasteFiles(root.querySelector("[name='description']"), [
       new File(["pasted during ticket creation"], "e2e-create-paste.txt", { type: "text/plain" })
     ]);
@@ -603,6 +608,11 @@ async function staffReplyAndResolve(cdp) {
       return [...composer.querySelectorAll(".attachment-preview-chip")]
         .some((chip) => chip.textContent.includes("e2e-reply-paste.txt"));
     }, "reply pasted attachment chip");
+    const replyPasteLink = [...composer.querySelectorAll(".attachment-preview-chip .attachment-chip-name")]
+      .find((link) => link.textContent.includes("e2e-reply-paste.txt"));
+    if (!replyPasteLink?.matches("a[download='e2e-reply-paste.txt']") || !replyPasteLink.href.startsWith("blob:")) {
+      throw new Error("reply attachment chip should be a downloadable blob link");
+    }
     const conversationDropTarget = detail.querySelector(".conversation-stream");
     const conversationPane = detail.querySelector(".ticket-main");
     const transfer = new DataTransfer();
