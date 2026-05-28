@@ -149,6 +149,7 @@ const els = {
   productDetailView: document.querySelector("#productDetailView"),
   productContextTitle: document.querySelector("#productContextTitle"),
   productContextMeta: document.querySelector("#productContextMeta"),
+  deleteProductButton: document.querySelector("#deleteProductButton"),
   issueList: document.querySelector("#issueList"),
   ticketDetailPane: document.querySelector("#ticketDetailPane"),
   searchInput: document.querySelector("#searchInput"),
@@ -1689,6 +1690,7 @@ function renderProductContext() {
   const product = currentProductDetail();
   if (!els.productContextTitle || !els.productContextMeta) return;
   els.productContextMeta.replaceChildren();
+  if (els.deleteProductButton) els.deleteProductButton.hidden = true;
 
   if (!product) {
     els.productContextTitle.textContent = "No product selected";
@@ -1701,6 +1703,10 @@ function renderProductContext() {
     el("span", { className: "product-key-pill" }, product.key || `#${product.id}`),
     el("span", { className: "muted" }, `${labelize(product.role || "owner")} access`)
   );
+  if (els.deleteProductButton) {
+    els.deleteProductButton.hidden = !isAdmin();
+    els.deleteProductButton.dataset.productId = String(product.id);
+  }
 }
 
 function renderUsers() {
@@ -2081,7 +2087,7 @@ async function confirmTicketComment(issue, composer) {
   });
 }
 
-function confirmSendAction({ title, body, confirmLabel, details = [] }) {
+function confirmSendAction({ title, body, confirmLabel, details = [], danger = false }) {
   if (!els.modalHost) return Promise.resolve(window.confirm(body));
   return new Promise((resolve) => {
     let settled = false;
@@ -2102,6 +2108,7 @@ function confirmSendAction({ title, body, confirmLabel, details = [] }) {
     els.modalHost.open({
       title,
       submitText: confirmLabel,
+      submitClass: danger ? "danger" : "primary",
       content: el("div", { className: "send-confirm" }, [
         el("p", {}, body),
         detailList
@@ -3330,6 +3337,9 @@ function bindEvents() {
   });
   els.auditSearchInput.addEventListener("input", runAuditSearch);
   els.addProductButton.addEventListener("click", () => openProductModal());
+  els.deleteProductButton.addEventListener("click", () => {
+    deleteCurrentProduct().catch(showError);
+  });
   els.addUserButton.addEventListener("click", () => openUserModal());
   els.createTokenButton.addEventListener("click", () => openTokenModal());
   els.sendTestEmailButton.addEventListener("click", () => openTestEmailModal());
@@ -3379,6 +3389,38 @@ function openProductsIndex() {
   state.productMode = "index";
   state.productDetailId = null;
   switchView("product");
+}
+
+async function deleteCurrentProduct() {
+  const product = currentProductDetail();
+  if (!product || !isAdmin()) return;
+  const confirmed = await confirmSendAction({
+    title: "Delete this product?",
+    body: "This permanently removes the product, its tickets, members, webhooks, email history, and delivery history.",
+    confirmLabel: "Delete Product",
+    danger: true,
+    details: [
+      ["Product", `${product.key || `#${product.id}`} / ${product.name || product.key || "Product"}`],
+      ["Tickets", "All tickets in this product will be deleted"]
+    ]
+  });
+  if (!confirmed) return;
+
+  if (els.deleteProductButton) els.deleteProductButton.disabled = true;
+  try {
+    await request(`/api/products/${product.id}`, { method: "DELETE" });
+    if (state.ticketProductId === product.id) state.ticketProductId = null;
+    setSelectedIssue(null, { updateRoute: false });
+    state.productMode = "index";
+    state.productDetailId = null;
+    state.productSection = DEFAULT_PRODUCT_SECTION;
+    await loadProducts();
+    renderProductsView();
+    syncRoute({ replace: true });
+    showAppAlert("Product deleted.");
+  } finally {
+    if (els.deleteProductButton) els.deleteProductButton.disabled = false;
+  }
 }
 
 async function openProductDetail(productId, section = DEFAULT_PRODUCT_SECTION) {

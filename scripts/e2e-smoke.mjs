@@ -219,6 +219,20 @@ async function addCustomerToProduct(cdp, productID) {
       const meta = document.querySelector("#productContextMeta")?.textContent || "";
       return title === selectedProductName && meta.includes(selectedProductKey);
     }, "selected product context");
+    const deleteProduct = await waitFor(() => {
+      const button = document.querySelector("#deleteProductButton");
+      return button && !button.hidden ? button : null;
+    }, "admin product delete control");
+    deleteProduct.click();
+    const deleteConfirmRoot = await waitFor(() => {
+      const rootNode = modalRoot();
+      return rootNode?.querySelector("dialog[open] h2")?.textContent.includes("Delete this product?") ? rootNode : null;
+    }, "product delete confirmation");
+    if (!deleteConfirmRoot.querySelector("footer .danger")) {
+      throw new Error("product deletion confirmation should use a danger action");
+    }
+    deleteConfirmRoot.querySelector("footer .ghost").click();
+    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "product delete confirmation dismissed");
     await waitFor(() => {
       return document.querySelector("[data-product-section='members']")?.classList.contains("active") &&
         !document.querySelector("[data-product-panel='members']")?.hidden;

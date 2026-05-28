@@ -402,6 +402,42 @@ func TestAPIAuthAndCSRFContracts(t *testing.T) {
 	}
 }
 
+func TestProductDeletionRequiresAdmin(t *testing.T) {
+	tracker, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+
+	ownerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"username": "owner",
+		"password": "correct horse",
+		"email":    "owner@example.test",
+		"role":     "staff",
+	})
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, ownerID, "owner")
+	ownerCookie, ownerCSRF := loginUser(t, client, server.URL, "owner", "correct horse")
+
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/products/"+itoa(productID), nil, ownerCookie, ownerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusForbidden)
+	if _, err := tracker.GetProduct(productID); err != nil {
+		t.Fatalf("owner delete removed product: %v", err)
+	}
+
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/products/"+itoa(productID), nil, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if !decodeBool(t, body, "ok") {
+		t.Fatalf("delete product response = %s", body)
+	}
+	if _, err := tracker.GetProduct(productID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted product err = %v, want not found", err)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusNotFound)
+}
+
 func TestAPIValidationContracts(t *testing.T) {
 	_, server, client := newTestServer(t)
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
