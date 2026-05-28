@@ -1244,6 +1244,8 @@ function openTicketCreateModal() {
   });
   submitButton = els.modalHost.shadowRoot?.querySelector("footer .primary");
   bindTicketCreateState({ root: content, submitButton });
+  const attachmentInput = content.querySelector(".attachment-input");
+  if (attachmentInput) bindAttachmentPasteZone(content, attachmentInput);
 }
 
 function confirmTicketCreate(data, form) {
@@ -1486,6 +1488,26 @@ function bindAttachmentDropZone(target, input, activeClass = "attachment-drop-ac
     handledAttachmentDropEvents.add(event);
     if (event.dataTransfer?.files?.length) appendAttachmentFiles(input, event.dataTransfer.files);
   });
+}
+
+function bindAttachmentPasteZone(target, input) {
+  target.addEventListener("paste", (event) => {
+    const files = clipboardAttachmentFiles(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    appendAttachmentFiles(input, files);
+  });
+}
+
+function clipboardAttachmentFiles(clipboardData) {
+  const files = [];
+  for (const item of Array.from(clipboardData?.items || [])) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file) files.push(file);
+  }
+  if (files.length > 0) return files;
+  return Array.from(clipboardData?.files || []);
 }
 
 function setAttachmentFiles(input, files) {
@@ -2491,7 +2513,10 @@ function commentComposer(issue) {
   ]);
   wrap.append(entry, attachments);
   const attachmentInput = attachments.querySelector(".attachment-input");
-  if (attachmentInput) bindAttachmentDropZone(wrap, attachmentInput);
+  if (attachmentInput) {
+    bindAttachmentDropZone(wrap, attachmentInput);
+    bindAttachmentPasteZone(wrap, attachmentInput);
+  }
   return wrap;
 }
 

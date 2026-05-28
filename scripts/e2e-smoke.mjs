@@ -376,7 +376,7 @@ async function completeCustomerSetup(cdp, setupLink) {
 
 async function createCustomerTicket(cdp) {
   return runInPage(cdp, async (input) => {
-    const { isScrolledToBottom, modalRoot, openModalRoot, setValue, waitFor } = pageTools();
+    const { isScrolledToBottom, modalRoot, openModalRoot, pasteFiles, setValue, waitFor } = pageTools();
     await waitFor(() => document.querySelector("#newIssueButton") && !document.querySelector("#newIssueButton").hidden, "new ticket button");
     document.querySelector("#newIssueButton").click();
     const root = await waitFor(() => {
@@ -399,6 +399,13 @@ async function createCustomerTicket(cdp) {
     await waitFor(() => !root.querySelector("[name='title']").disabled, "issue detail step enabled");
     setValue(root.querySelector("[name='title']"), input.title);
     setValue(root.querySelector("[name='description']"), input.description);
+    pasteFiles(root.querySelector("[name='description']"), [
+      new File(["pasted during ticket creation"], "e2e-create-paste.txt", { type: "text/plain" })
+    ]);
+    await waitFor(() => {
+      return [...root.querySelectorAll(".attachment-preview-chip")]
+        .some((chip) => chip.textContent.includes("e2e-create-paste.txt"));
+    }, "ticket creation pasted attachment chip");
     const create = root.querySelector("footer .primary");
     await waitFor(() => !create.disabled, "enabled create ticket button");
     create.click();
@@ -410,6 +417,9 @@ async function createCustomerTicket(cdp) {
       const candidate = confirmRoot.querySelector("footer .primary");
       return candidate && !candidate.disabled ? candidate : null;
     }, "ticket create confirmation action");
+    if (!confirmRoot.textContent.includes("Attachments") || !confirmRoot.textContent.includes("1")) {
+      throw new Error("ticket create confirmation should include pasted attachment count");
+    }
     confirm.click();
     await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "new ticket modal closed", 12000);
     await waitFor(() => document.querySelector("#issueList")?.textContent.includes(input.title), "created ticket in list", 12000);
@@ -529,7 +539,7 @@ async function loginAsAdmin(cdp) {
 
 async function staffReplyAndResolve(cdp) {
   await runInPage(cdp, async (input) => {
-    const { isScrolledToBottom, setValue, submitModal, waitFor } = pageTools();
+    const { isScrolledToBottom, pasteFiles, setValue, submitModal, waitFor } = pageTools();
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
       return !document.querySelector("#issueList .issue-row.active") && detailText.includes("No ticket selected");
@@ -572,6 +582,13 @@ async function staffReplyAndResolve(cdp) {
     setValue(detail.querySelector("[name='status']"), "resolved");
     setValue(detail.querySelector("[name='body']"), input.reply);
     const composer = detail.querySelector(".comment-form");
+    pasteFiles(detail.querySelector("[name='body']"), [
+      new File(["pasted reply attachment"], "e2e-reply-paste.txt", { type: "text/plain" })
+    ]);
+    await waitFor(() => {
+      return [...composer.querySelectorAll(".attachment-preview-chip")]
+        .some((chip) => chip.textContent.includes("e2e-reply-paste.txt"));
+    }, "reply pasted attachment chip");
     const conversationDropTarget = detail.querySelector(".conversation-stream");
     const conversationPane = detail.querySelector(".ticket-main");
     const transfer = new DataTransfer();
@@ -606,6 +623,7 @@ async function staffReplyAndResolve(cdp) {
       const chipNames = [...composer.querySelectorAll(".attachment-preview-chip")].map((chip) => chip.textContent);
       return chipNames.some((name) => name.includes("e2e-first.txt")) &&
         chipNames.some((name) => name.includes("e2e-second.txt")) &&
+        chipNames.some((name) => name.includes("e2e-reply-paste.txt")) &&
         chipNames.some((name) => name.includes("e2e-image.gif")) &&
         !conversationPane.classList.contains("conversation-drop-active");
     }, "reply attachment chips after conversation drop");
@@ -712,6 +730,14 @@ function pageTools() {
     control.dispatchEvent(new Event("input", { bubbles: true }));
     control.dispatchEvent(new Event("change", { bubbles: true }));
   };
+  const pasteFiles = (target, files) => {
+    if (!target) throw new Error("Missing paste target");
+    const transfer = new DataTransfer();
+    for (const file of files) transfer.items.add(file);
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: transfer });
+    target.dispatchEvent(event);
+  };
   const modalRoot = () => document.querySelector("#modalHost")?.shadowRoot || null;
   const modalRoots = () => [...document.querySelectorAll("pappice-modal")]
     .map((modal) => modal.shadowRoot)
@@ -736,7 +762,7 @@ function pageTools() {
     if (!element) return false;
     return Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 2;
   };
-  return { isScrolledToBottom, modalRoot, openModalRoot, setValue, submitModal, waitFor };
+  return { isScrolledToBottom, modalRoot, openModalRoot, pasteFiles, setValue, submitModal, waitFor };
 }
 
 async function runInPage(cdp, fn, ...args) {
