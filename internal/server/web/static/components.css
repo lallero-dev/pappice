@@ -322,6 +322,43 @@ button:disabled {
 .ticket-create-modal {
   display: grid;
   gap: 10px;
+  position: relative;
+}
+
+.ticket-create-modal.ticket-create-drop-active {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 2px rgba(35, 103, 164, 0.22);
+  outline: 2px dashed #7fb1dc;
+  outline-offset: -7px;
+}
+
+.ticket-create-modal.ticket-create-drop-active::before {
+  background: rgba(220, 239, 255, 0.76);
+  border-radius: 12px;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 4;
+}
+
+.ticket-create-modal.ticket-create-drop-active::after {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #9cc4e7;
+  border-radius: 999px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+  color: #194d7b;
+  content: "Drop files to attach";
+  font-size: 13px;
+  font-weight: 800;
+  left: 50%;
+  letter-spacing: 0;
+  padding: 9px 14px;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
 }
 
 .ticket-create-flow {

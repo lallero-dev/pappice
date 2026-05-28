@@ -1245,7 +1245,10 @@ function openTicketCreateModal() {
   submitButton = els.modalHost.shadowRoot?.querySelector("footer .primary");
   bindTicketCreateState({ root: content, submitButton });
   const attachmentInput = content.querySelector(".attachment-input");
-  if (attachmentInput) bindAttachmentPasteZone(content, attachmentInput);
+  if (attachmentInput) {
+    bindAttachmentDropZone(content, attachmentInput, "ticket-create-drop-active");
+    bindAttachmentPasteZone(content, attachmentInput);
+  }
 }
 
 function confirmTicketCreate(data, form) {

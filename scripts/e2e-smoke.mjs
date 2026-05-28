@@ -386,6 +386,7 @@ async function createCustomerTicket(cdp) {
       const title = candidate?.querySelector(".ticket-create-flow [name='title']");
       return dialog && heading.includes("New Ticket") && title ? candidate : null;
     }, "new ticket modal");
+    const createModal = root.querySelector(".ticket-create-modal");
     if (document.querySelector("#issueList .issue-row.draft")) {
       throw new Error("ticket creation should use a modal, not a draft row");
     }
@@ -399,6 +400,19 @@ async function createCustomerTicket(cdp) {
     await waitFor(() => !root.querySelector("[name='title']").disabled, "issue detail step enabled");
     setValue(root.querySelector("[name='title']"), input.title);
     setValue(root.querySelector("[name='description']"), input.description);
+    const createTransfer = new DataTransfer();
+    createTransfer.items.add(new File(["dropped during ticket creation"], "e2e-create-drop.txt", { type: "text/plain" }));
+    createModal.dispatchEvent(new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: createTransfer }));
+    await waitFor(() => createModal.classList.contains("ticket-create-drop-active"), "ticket creation drop highlight");
+    await waitFor(() => {
+      return getComputedStyle(createModal, "::before").backgroundColor !== "rgba(0, 0, 0, 0)" &&
+        getComputedStyle(createModal, "::after").content.includes("Drop files to attach");
+    }, "ticket creation drop label");
+    createModal.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: createTransfer }));
+    await waitFor(() => {
+      return [...root.querySelectorAll(".attachment-preview-chip")]
+        .some((chip) => chip.textContent.includes("e2e-create-drop.txt"));
+    }, "ticket creation dropped attachment chip");
     pasteFiles(root.querySelector("[name='description']"), [
       new File(["pasted during ticket creation"], "e2e-create-paste.txt", { type: "text/plain" })
     ]);
@@ -417,8 +431,8 @@ async function createCustomerTicket(cdp) {
       const candidate = confirmRoot.querySelector("footer .primary");
       return candidate && !candidate.disabled ? candidate : null;
     }, "ticket create confirmation action");
-    if (!confirmRoot.textContent.includes("Attachments") || !confirmRoot.textContent.includes("1")) {
-      throw new Error("ticket create confirmation should include pasted attachment count");
+    if (!confirmRoot.textContent.includes("Attachments") || !confirmRoot.textContent.includes("2")) {
+      throw new Error("ticket create confirmation should include attachment count");
     }
     confirm.click();
     await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "new ticket modal closed", 12000);
