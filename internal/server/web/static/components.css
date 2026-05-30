@@ -274,6 +274,61 @@ button:disabled {
   border-bottom: 0;
 }
 
+@media (max-width: 720px) {
+  dialog,
+  dialog.compact,
+  dialog.wide {
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+    bottom: 0;
+    left: 0;
+    margin: auto 0 0;
+    max-height: 100dvh;
+    max-width: none;
+    right: 0;
+    width: 100vw;
+  }
+
+  form,
+  dialog.compact form,
+  dialog.wide form {
+    max-height: 100dvh;
+  }
+
+  header {
+    padding: 13px 14px;
+  }
+
+  footer {
+    padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+  }
+
+  footer button {
+    flex: 1 1 0;
+  }
+
+  section[part="body"],
+  dialog.compact section[part="body"],
+  dialog.wide section[part="body"] {
+    max-height: calc(100dvh - 122px);
+    padding: 14px;
+  }
+
+  .grid,
+  .confirm-detail-list {
+    grid-template-columns: 1fr;
+  }
+
+  .confirm-detail-list dt {
+    border-bottom: 0;
+    padding-bottom: 2px;
+  }
+
+  .confirm-detail-list dd {
+    padding-top: 2px;
+  }
+}
+
 .ticket-detail {
   display: grid;
   gap: 16px;
@@ -433,8 +488,7 @@ button:disabled {
 }
 
 .ticket-create-step-body {
-  display: grid;
-  gap: 8px;
+  display: contents;
   min-width: 0;
 }
 
@@ -442,6 +496,7 @@ button:disabled {
   align-items: center;
   display: flex;
   gap: 8px;
+  grid-column: 2;
   min-height: 26px;
 }
 
@@ -456,6 +511,7 @@ button:disabled {
 .ticket-create-step-content {
   display: grid;
   gap: 9px;
+  grid-column: 1 / -1;
 }
 
 .detail-meta {

@@ -24,7 +24,13 @@
         <button class="nav-button" id="productTab" type="button">Products</button>
       </nav>
       <div class="topbar-actions">
-        <button class="nav-button topbar-admin-button" id="adminTab" type="button" hidden>Admin</button>
+        <button class="nav-button topbar-admin-button" id="adminTab" type="button" aria-label="Admin" title="Admin" hidden>
+          <svg class="admin-settings-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" stroke="currentColor" stroke-width="2"/>
+            <path d="M12 2.8v2.1M12 19.1v2.1M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M2.8 12h2.1M19.1 12h2.1M4.9 19.1l1.5-1.5M17.6 6.4l1.5-1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span class="visually-hidden">Admin</span>
+        </button>
         <div class="profile-menu" id="profileMenu" hidden>
           <button class="profile-button" id="profileButton" type="button" aria-haspopup="menu" aria-expanded="false">
             <span class="profile-avatar" id="profileAvatar">P</span>

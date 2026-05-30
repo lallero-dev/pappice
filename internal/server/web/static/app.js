@@ -476,6 +476,7 @@ function showAuth(mode) {
   state.csrf = "";
   state.selectedId = null;
   state.selectedTicket = null;
+  syncTicketMobileState();
   document.body.classList.remove("app-mode");
   clearAppAlert();
   clearAuthError();
@@ -782,6 +783,7 @@ function updateProductActions() {
 }
 
 function renderTicketsView() {
+  syncTicketMobileState();
   renderCounts();
   renderSortHeaders();
   renderTicketList();
@@ -1175,6 +1177,7 @@ async function createTicketFromForm(data, form, fallbackProductId) {
 
 function ticketDetailContent({ ticket, editable, canComment }) {
   const wrap = el("div", { className: "ticket-detail" });
+  const mobileHeader = ticketMobileHeader(ticket);
   const header = el("div", { className: "detail-header" });
   if (editable) {
     header.append(ticketTextField("", "title", ticket?.title || "", {
@@ -1195,28 +1198,70 @@ function ticketDetailContent({ ticket, editable, canComment }) {
   const attachmentInput = composer.querySelector(".attachment-input");
   if (attachmentInput) bindAttachmentDropZone(main, attachmentInput, "conversation-drop-active");
 
+  const side = ticketSidePanel(ticket, editable);
+
+  const conversationPanel = el("section", { className: "ticket-conversation-panel" }, [mobileHeader, header, main]);
+  wrap.append(el("div", { className: "ticket-detail-grid" }, [conversationPanel, side]));
+  return wrap;
+}
+
+function ticketMobileHeader(ticket) {
+  const back = el("button", { className: "mobile-ticket-back", type: "button" }, "Back");
+  back.addEventListener("click", () => closeSelectedTicket());
+  const info = el("button", { className: "mobile-ticket-info", type: "button" }, "Info");
+  info.addEventListener("click", () => openTicketInfoSheet(ticket));
+  return el("div", { className: "ticket-mobile-header" }, [
+    back,
+    el("div", { className: "ticket-mobile-title" }, [
+      el("strong", { title: ticket.title || "Untitled ticket" }, ticket.title || "Untitled ticket")
+    ]),
+    info
+  ]);
+}
+
+function ticketSidePanel(ticket, editable) {
   const side = el("aside", { className: "ticket-side" });
+  for (const section of ticketSideSections(ticket, editable)) side.append(section);
+  return side;
+}
+
+function ticketSideSections(ticket, editable) {
+  const sections = [];
   if (editable && !isCustomer()) {
-    side.append(sideSection("Workflow", workflowEditor(ticket || { assignee: "", priority: "normal", status: "new" })));
+    sections.push(sideSection("Workflow", workflowEditor(ticket || { assignee: "", priority: "normal", status: "new" })));
   }
   const requester = requesterBlock(ticket);
   if (requester) {
-    side.append(sideSection("Requester", requester));
+    sections.push(sideSection("Requester", requester));
   }
   const facts = [
+    factBlock("Title", ticket.title || "Untitled ticket"),
     factBlock("Product", ticketProductLabel(ticket)),
     factBlock("Created", relativeTime(ticket.created_at)),
     factBlock("Updated", relativeTime(ticket.updated_at))
   ];
   if (!canEditTicket(ticket)) facts.splice(1, 0, factBlock("Assignee", ticket.assignee || "Unassigned"));
-  side.append(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
+  sections.push(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
   if (isAdmin()) {
-    side.append(sideSection("Danger zone", ticketDangerActions(ticket)));
+    sections.push(sideSection("Danger zone", ticketDangerActions(ticket)));
   }
+  return sections;
+}
 
-  const conversationPanel = el("section", { className: "ticket-conversation-panel" }, [header, main]);
-  wrap.append(el("div", { className: "ticket-detail-grid" }, [conversationPanel, side]));
-  return wrap;
+function openTicketInfoSheet(ticket) {
+  const current = selectedTicket() || ticket;
+  if (!current) return;
+  const editable = canEditTicket(current);
+  const content = el("div", { className: "ticket-info-sheet" }, [
+    ticketSidePanel(current, editable)
+  ]);
+  els.modalHost.open({
+    title: "Ticket Info",
+    content,
+    hideFooter: true,
+    size: "compact"
+  });
+  if (editable) bindTicketAutosave(els.modalHost.form, current);
 }
 
 function ticketDangerActions(ticket) {
@@ -3447,6 +3492,7 @@ function switchView(view, options = {}) {
   els.ticketsTab.classList.toggle("active", view === "tickets");
   els.adminTab.classList.toggle("active", view === "admin");
   els.productTab.classList.toggle("active", view === "product");
+  syncTicketMobileState();
   if (options.updateRoute !== false) syncRoute({ replace: Boolean(options.replaceRoute) });
   if (view === "admin" && options.load !== false) loadAdmin().catch(showError);
   if (view === "product" && options.load !== false) loadProductAdmin().catch(showError);
@@ -3531,7 +3577,14 @@ function selectedTicket() {
 function setSelectedTicket(ticket, { updateRoute = true } = {}) {
   state.selectedId = ticket?.id || null;
   state.selectedTicket = ticket || null;
+  syncTicketMobileState();
   if (updateRoute) syncRoute();
+}
+
+function syncTicketMobileState() {
+  const open = state.view === "tickets" && Boolean(state.selectedId);
+  els.ticketView?.classList.toggle("has-selected-ticket", open);
+  document.body.classList.toggle("ticket-detail-open", open);
 }
 
 function isAdmin() {

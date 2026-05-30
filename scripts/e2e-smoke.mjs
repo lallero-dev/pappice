@@ -88,6 +88,18 @@ async function main() {
   const customerTicketKey = await createCustomerTicket(page);
   await verifyFixedTicketLayout(page);
   await verifyTicketHashRoute(page, customerTicketKey);
+  await verifySinglePaneTicketFlow(page, customerTicketKey, {
+    deviceScaleFactor: 1,
+    height: 900,
+    mobile: false,
+    width: 820
+  }, "narrow ticket");
+  await verifySinglePaneTicketFlow(page, customerTicketKey, {
+    deviceScaleFactor: 2,
+    height: 844,
+    mobile: true,
+    width: 390
+  }, "mobile ticket");
   await logout(page);
   await loginAsAdmin(page);
   await staffReplyAndResolve(page);
@@ -524,8 +536,113 @@ async function verifyFixedTicketLayout(cdp) {
     if (!["auto", "scroll"].includes(conversationOverflow)) {
       throw new Error(`conversation stream should be internally scrollable; got ${conversationOverflow}`);
     }
+    const composer = document.querySelector(".comment-form");
+    const paneRect = detailPane.getBoundingClientRect();
+    const composerRect = composer?.getBoundingClientRect();
+    if (!composerRect || paneRect.bottom - composerRect.bottom > 32) {
+      throw new Error("reply composer should stay anchored at the bottom of the ticket detail pane");
+    }
     return true;
   });
+}
+
+async function verifySinglePaneTicketFlow(cdp, ticketKey, viewport, label) {
+  await cdp.send("Emulation.setDeviceMetricsOverride", viewport);
+  try {
+    await runInPage(cdp, async (input) => {
+      const { modalRoot, waitFor } = pageTools();
+      await waitFor(() => {
+        const list = document.querySelector(".ticket-list-pane");
+        const detail = document.querySelector(".ticket-detail-pane");
+        return list &&
+          detail &&
+          !document.querySelector("#ticketList .ticket-row.active") &&
+          getComputedStyle(list).display !== "none" &&
+          getComputedStyle(detail).display === "none";
+      }, `${input.label} list default state`);
+
+      const row = await waitFor(() => {
+        return [...document.querySelectorAll("#ticketList .ticket-row")]
+          .find((candidate) => candidate.textContent.includes(input.title));
+      }, `${input.label} row`);
+      row.click();
+
+      const mobileHeader = await waitFor(() => {
+        const list = document.querySelector(".ticket-list-pane");
+        const detail = document.querySelector(".ticket-detail-pane");
+        const header = document.querySelector(".ticket-mobile-header");
+        return list &&
+          detail &&
+          header &&
+          getComputedStyle(list).display === "none" &&
+          getComputedStyle(detail).display !== "none" &&
+          getComputedStyle(header).display !== "none" ? header : null;
+      }, `${input.label} detail state`);
+      if (!mobileHeader.textContent.includes(input.title) || mobileHeader.textContent.includes(input.ticketKey)) {
+        throw new Error(`${input.label} header should show the selected ticket title without the ticket key`);
+      }
+      const detailPane = document.querySelector(".ticket-detail-pane");
+      const detailRect = detailPane.getBoundingClientRect();
+      const conversation = detailPane.querySelector(".conversation-stream");
+      const composer = detailPane.querySelector(".comment-form");
+      const conversationRect = conversation?.getBoundingClientRect();
+      const composerRect = composer?.getBoundingClientRect();
+      if (!conversationRect || !composerRect || detailRect.bottom - composerRect.bottom > 32) {
+        throw new Error(`${input.label} reply composer should stay anchored at the bottom of the ticket detail pane`);
+      }
+      if (composerRect.top - conversationRect.bottom > 18 || conversationRect.height < 220) {
+        throw new Error(`${input.label} conversation stream should expand before the reply composer`);
+      }
+
+      mobileHeader.querySelector(".mobile-ticket-info").click();
+      const infoRoot = await waitFor(() => {
+        const root = modalRoot();
+        return root?.querySelector("dialog[open] h2")?.textContent.includes("Ticket Info") ? root : null;
+      }, `${input.label} info sheet`);
+      const sheet = infoRoot.querySelector(".ticket-info-sheet");
+      if (!sheet?.textContent.includes("Product") || !sheet.textContent.includes("Ticket") || !sheet.textContent.includes(input.title)) {
+        throw new Error(`${input.label} info sheet should contain ticket title and facts`);
+      }
+      infoRoot.querySelector("[value='cancel']").click();
+      await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), `${input.label} info sheet closed`);
+
+      mobileHeader.querySelector(".mobile-ticket-back").click();
+      await waitFor(() => {
+        const list = document.querySelector(".ticket-list-pane");
+        const detail = document.querySelector(".ticket-detail-pane");
+        return !document.querySelector("#ticketList .ticket-row.active") &&
+          getComputedStyle(list).display !== "none" &&
+          getComputedStyle(detail).display === "none";
+      }, `${input.label} back to ticket list`);
+
+      document.querySelector("#ticketFilterButton").click();
+      await waitFor(() => {
+        const popover = document.querySelector("#ticketFilterPopover");
+        if (!popover || popover.hidden) return false;
+        const rect = popover.getBoundingClientRect();
+        return getComputedStyle(popover).position === "fixed" &&
+          rect.left >= -1 &&
+          rect.right <= window.innerWidth + 1 &&
+          rect.bottom <= window.innerHeight + 1;
+      }, `${input.label} filter sheet`);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      document.querySelector("#ticketSortButton").click();
+      await waitFor(() => {
+        const popover = document.querySelector("#ticketSortPopover");
+        if (!popover || popover.hidden) return false;
+        const rect = popover.getBoundingClientRect();
+        return getComputedStyle(popover).position === "fixed" &&
+          rect.left >= -1 &&
+          rect.right <= window.innerWidth + 1 &&
+          rect.bottom <= window.innerHeight + 1;
+      }, `${input.label} sort sheet`);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return true;
+    }, { label, ticketKey, title: ticket.title });
+  } finally {
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+  }
 }
 
 async function logout(cdp) {
