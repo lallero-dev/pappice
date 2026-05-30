@@ -2630,6 +2630,7 @@ button:focus-visible {
   }
 
   .admin-sidebar {
+    align-items: flex-start;
     border-left: 0;
     border-radius: 0;
     border-right: 0;
@@ -2640,6 +2641,8 @@ button:focus-visible {
   }
 
   .admin-side-button {
+    align-self: flex-start;
+    flex: 0 0 auto;
     min-width: 132px;
     padding: 8px 9px;
   }
