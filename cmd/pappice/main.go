@@ -133,9 +133,12 @@ func serve(cfg appConfig, stderr io.Writer) error {
 		logger.Printf("email notifications enabled via SMTP host %s", smtpConfig.Host)
 	}
 
+	app := server.NewServer(tracker, cfg.serverOptions(emailEnabled))
+	go app.RunEventDispatcher(ctx, 5*time.Second, logger)
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           server.New(tracker, cfg.serverOptions(emailEnabled)),
+		Handler:           app,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -94,6 +94,15 @@ pappice serve -h
 `pappice doctor` validates paths, TLS, public URL, SMTP, upload limits, rate
 limits, and development-only webhook settings before starting the server.
 
+## Alpha Schema Updates
+
+Fresh databases are created with the current schema. For an existing alpha
+database, run the included one-off migration script when needed:
+
+```sh
+scripts/migrate-domain-events.sh /path/to/pappice.db
+```
+
 ## Branding
 
 Set `PAPPICE_BRAND_NAME`, `PAPPICE_BRAND_SUBTITLE`, `PAPPICE_BRAND_MARK`, and

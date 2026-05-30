@@ -77,6 +77,7 @@ type Server struct {
 	store              *store.Store
 	started            time.Time
 	mux                *http.ServeMux
+	handler            http.Handler
 	client             *http.Client
 	options            Options
 	loginLimiter       *requestLimiter
@@ -113,11 +114,11 @@ func (input ticketPatchInput) hasTicketPatch() bool {
 	return input.Title != nil || input.Description != nil || input.Status != nil || input.Priority != nil || input.Assignee != nil
 }
 
-func (input ticketPatchInput) onlyAssigneePatch() bool {
-	return input.Assignee != nil && input.Title == nil && input.Description == nil && input.Status == nil && input.Priority == nil
+func New(tracker *store.Store, opts ...Options) http.Handler {
+	return NewServer(tracker, opts...)
 }
 
-func New(tracker *store.Store, opts ...Options) http.Handler {
+func NewServer(tracker *store.Store, opts ...Options) *Server {
 	options := Options{}
 	if len(opts) > 0 {
 		options = opts[0]
@@ -150,7 +151,12 @@ func New(tracker *store.Store, opts ...Options) http.Handler {
 	}
 	s.client = s.newWebhookClient()
 	s.routes()
-	return securityHeaders(s.mux)
+	s.handler = securityHeaders(s.mux)
+	return s
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *Server) routes() {
@@ -434,11 +440,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	updated, err := s.store.UpdateUser(auth.User.ID, store.UpdateUser{
 		DisplayName: input.DisplayName,
 		Email:       input.Email,
+		Event:       s.eventContext(r, auth.User),
 	})
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusOK, store.ToPublicUser(updated))
 }
 
@@ -462,12 +470,12 @@ func (s *Server) handleMePassword(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	updated, err := s.store.ChangePassword(auth.User.ID, input.CurrentPassword, input.NewPassword, auth.SessionToken)
+	updated, err := s.store.ChangePassword(auth.User.ID, input.CurrentPassword, input.NewPassword, auth.SessionToken, s.eventContext(r, auth.User))
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	s.audit(r, auth.User, "password.changed", "user", auth.User.ID, auth.User.Username, nil)
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusOK, map[string]any{
 		"user":       store.ToPublicUser(updated),
 		"csrf_token": auth.CSRF,
@@ -486,6 +494,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
+	input.Event = store.EventContext{Enabled: true, IP: clientIP(r)}
 	user, err := s.store.CreateFirstAdmin(input)
 	if err != nil {
 		respondStoreError(w, err)
@@ -495,7 +504,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.audit(r, user, "setup.completed", "user", user.ID, user.Username, nil)
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusCreated, map[string]any{
 		"user":       store.ToPublicUser(user),
 		"csrf_token": csrf,
@@ -608,7 +617,7 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		user, err := s.store.ConsumeAccountLink(token, input.Password)
+		user, err := s.store.ConsumeAccountLink(token, input.Password, store.EventContext{Enabled: true, IP: clientIP(r)})
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				s.respondAccountLinkError(w, token)
@@ -622,6 +631,7 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 			return
 		}
 		s.accountLinkLimiter.Reset(limitKey)
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, map[string]any{
 			"user":       store.ToPublicUser(user),
 			"csrf_token": csrf,
@@ -684,12 +694,13 @@ func (s *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, &input) {
 			return
 		}
+		input.Event = s.eventContext(r, auth.User)
 		product, err := s.store.CreateProduct(input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "product.created", "product", product.ID, product.Key, map[string]any{"name": product.Name})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, product)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -757,28 +768,24 @@ func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, aut
 		if !decodeJSON(w, r, &patch) {
 			return
 		}
+		patch.Event = s.eventContext(r, auth.User)
 		product, err := s.store.UpdateProduct(productID, patch)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "product.updated", "product", product.ID, product.Key, map[string]any{"name": product.Name})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, product)
 	case http.MethodDelete:
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-		product, err := s.store.GetProduct(productID)
-		if err != nil {
+		if err := s.store.DeleteProduct(productID, s.eventContext(r, auth.User)); err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		if err := s.store.DeleteProduct(productID); err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		s.audit(r, auth.User, "product.deleted", "product", product.ID, product.Key, map[string]any{"name": product.Name})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch, http.MethodDelete)
@@ -799,15 +806,13 @@ func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, au
 			if !decodeJSON(w, r, &input) {
 				return
 			}
+			input.Event = s.eventContext(r, auth.User)
 			member, err := s.store.UpsertProductMember(productID, input)
 			if err != nil {
 				respondStoreError(w, err)
 				return
 			}
-			s.audit(r, auth.User, "product_member.upserted", "user", member.UserID, member.Username, map[string]any{
-				"product_id": productID,
-				"role":       member.Role,
-			})
+			s.dispatchEventsSoon()
 			respondJSON(w, http.StatusCreated, member)
 		default:
 			methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -820,16 +825,11 @@ func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, au
 			respondError(w, http.StatusBadRequest, "invalid user id")
 			return
 		}
-		user, _ := s.store.GetUser(userID)
-		if err := s.store.DeleteProductMember(productID, userID); err != nil {
+		if err := s.store.DeleteProductMember(productID, userID, s.eventContext(r, auth.User)); err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		targetName := user.Username
-		if targetName == "" {
-			targetName = strconv.FormatInt(userID, 10)
-		}
-		s.audit(r, auth.User, "product_member.removed", "user", userID, targetName, map[string]any{"product_id": productID})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
@@ -884,21 +884,19 @@ func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, au
 			}
 			input.ProductID = productID
 		}
-		customerTicket, ok := s.prepareTicketInput(w, auth.User, productID, &input)
+		_, ok := s.prepareTicketInput(w, auth.User, productID, &input)
 		if !ok {
 			cleanupStoredUploads(uploads)
 			return
 		}
+		input.Actor = store.EventActorFromUser(auth.User)
 		ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
 		if err != nil {
 			cleanupStoredUploads(uploads)
 			respondStoreError(w, err)
 			return
 		}
-		s.emitTicketEvent("ticket.created", ticket, auth.User)
-		if customerTicket {
-			s.enqueueRequesterEmail("ticket.created", ticket, "Pappice Support")
-		}
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, ticket))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -944,7 +942,7 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusForbidden, "product write access is required")
 			return
 		}
-		customerTicket, ok := s.prepareTicketInput(w, auth.User, input.ProductID, &input)
+		_, ok := s.prepareTicketInput(w, auth.User, input.ProductID, &input)
 		if !ok {
 			return
 		}
@@ -955,16 +953,14 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		input.Actor = store.EventActorFromUser(auth.User)
 		ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
 		if err != nil {
 			cleanupStoredUploads(uploads)
 			respondStoreError(w, err)
 			return
 		}
-		s.emitTicketEvent("ticket.created", ticket, auth.User)
-		if customerTicket {
-			s.enqueueRequesterEmail("ticket.created", ticket, "Pappice Support")
-		}
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, ticket))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1066,16 +1062,13 @@ func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-		orphanedStorageKeys, err := s.store.DeleteTicket(ticket.ID)
+		orphanedStorageKeys, err := s.store.DeleteTicket(ticket.ID, s.eventContext(r, auth.User))
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
 		s.removeOrphanedAttachmentFiles(orphanedStorageKeys)
-		s.audit(r, auth.User, "ticket.deleted", "ticket", ticket.ID, ticket.Key, map[string]any{
-			"product_id": ticket.ProductID,
-			"title":      ticket.Title,
-		})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch, http.MethodDelete)
@@ -1121,23 +1114,14 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 		Comment:          comment,
 		Attachments:      attachments,
 		AttachmentUserID: attachmentUserID,
+		Actor:            store.EventActorFromUser(auth.User),
 	})
 	if err != nil {
 		respondStoreError(w, err)
 		return store.Ticket{}, false
 	}
 	updated := result.Ticket
-
-	if result.HasPatch {
-		s.emitTicketWebhook("ticket.updated", updated, auth.User)
-		if result.AssignmentChanged {
-			s.emitTicketWebhook("ticket.assigned", updated, auth.User)
-		}
-	}
-	if result.PublicComment {
-		s.emitTicketWebhook("ticket.commented", updated, auth.User)
-	}
-	s.enqueueTicketPatchEmails(input, updated, auth.User, result.Previous, result.AssignmentChanged, result.PublicComment)
+	s.dispatchEventsSoon()
 	if result.HasPatch || result.HasComment {
 		if err := s.store.MarkTicketRead(updated.ID, auth.User.ID, time.Now().UTC()); err == nil {
 			if refreshed, err := s.store.GetTicket(updated.ID); err == nil {
@@ -1146,33 +1130,6 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 		}
 	}
 	return updated, true
-}
-
-func (s *Server) enqueueTicketPatchEmails(input ticketPatchInput, updated store.Ticket, actor store.User, previous store.Ticket, assignmentChanged, publicComment bool) {
-	if !input.hasTicketPatch() && !publicComment {
-		return
-	}
-	event := "ticket.updated"
-	if !input.hasTicketPatch() && publicComment {
-		event = "ticket.commented"
-	}
-	if input.hasTicketPatch() && !publicComment && assignmentChanged && input.onlyAssigneePatch() {
-		event = "ticket.assigned"
-	}
-	s.enqueueTicketEmails(event, updated, actor)
-	if requesterEvent, ok := requesterTicketPatchEmailEvent(input, previous, updated, publicComment); ok && !s.isSupportTicketRequester(actor, previous) {
-		s.enqueueRequesterEmail(requesterEvent, updated, defaultString(actor.DisplayName, actor.Username))
-	}
-}
-
-func requesterTicketPatchEmailEvent(input ticketPatchInput, previous, updated store.Ticket, publicComment bool) (string, bool) {
-	if publicComment {
-		return "ticket.commented", true
-	}
-	if input.Status != nil && !strings.EqualFold(strings.TrimSpace(previous.Status), strings.TrimSpace(updated.Status)) && requesterTerminalStatus(updated.Status) {
-		return "ticket.updated", true
-	}
-	return "", false
 }
 
 func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket) {
@@ -1255,13 +1212,14 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, &input) {
 			return
 		}
+		input.Event = s.eventContext(r, auth.User)
 		created, link, token, err := s.store.CreateUserWithSetupLink(input, accountLinkExpiry)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		queued := s.enqueueAccountLinkEmail("account.setup", created, token, link.ExpiresAt)
-		s.audit(r, auth.User, "user.created", "user", created.ID, created.Username, map[string]any{"role": created.Role, "email": created.Email != ""})
+		queued := s.accountLinkEmailRequested(created, token)
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, userAccountLinkResponse(created, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1293,11 +1251,6 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPatch:
-		before, err := s.store.GetUser(id)
-		if err != nil {
-			respondStoreError(w, err)
-			return
-		}
 		var patch store.UpdateUser
 		if !decodeJSON(w, r, &patch) {
 			return
@@ -1306,24 +1259,20 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "use password reset")
 			return
 		}
+		patch.Event = s.eventContext(r, auth.User)
 		user, err := s.store.UpdateUser(id, patch)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "user.updated", "user", user.ID, user.Username, userPatchAuditDetails(before, user, patch))
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, store.ToPublicUser(user))
 	case http.MethodDelete:
-		user, err := s.store.GetUser(id)
-		if err != nil {
+		if err := s.store.DeleteUser(id, s.eventContext(r, auth.User)); err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		if err := s.store.DeleteUser(id); err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		s.audit(r, auth.User, "user.deleted", "user", user.ID, user.Username, map[string]any{"role": user.Role})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodPatch, http.MethodDelete)
@@ -1335,13 +1284,13 @@ func (s *Server) handleUserPasswordReset(w http.ResponseWriter, r *http.Request,
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	user, link, token, err := s.store.CreatePasswordResetLink(userID, accountLinkExpiry)
+	user, link, token, err := s.store.CreatePasswordResetLink(userID, accountLinkExpiry, s.eventContext(r, auth.User))
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	queued := s.enqueueAccountLinkEmail("account.reset", user, token, link.ExpiresAt)
-	s.audit(r, auth.User, "user.password_reset_requested", "user", user.ID, user.Username, map[string]any{"email_queued": queued})
+	queued := s.accountLinkEmailRequested(user, token)
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusCreated, userAccountLinkResponse(user, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 }
 
@@ -1358,12 +1307,13 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, &input) {
 			return
 		}
+		input.Event = s.eventContext(r, auth.User)
 		token, raw, err := s.store.CreateAPIToken(auth.User.ID, input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "api_token.created", "api_token", token.ID, token.Name, nil)
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, map[string]any{"token": token, "value": raw})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1383,11 +1333,11 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodDelete)
 		return
 	}
-	if err := s.store.DeleteAPIToken(auth.User.ID, id); err != nil {
+	if err := s.store.DeleteAPIToken(auth.User.ID, id, s.eventContext(r, auth.User)); err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	s.audit(r, auth.User, "api_token.deleted", "api_token", id, strconv.FormatInt(id, 10), nil)
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -1408,12 +1358,13 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		input.ProductID = nil
+		input.Event = s.eventContext(r, auth.User)
 		hook, err := s.store.CreateWebhook(input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "webhook.created", "webhook", hook.ID, hook.Name, map[string]any{"scope": "global"})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, map[string]any{"webhook": store.ToPublicWebhook(hook), "secret": hook.Secret})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1437,12 +1388,13 @@ func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, a
 			return
 		}
 		input.ProductID = &productID
+		input.Event = s.eventContext(r, auth.User)
 		hook, err := s.store.CreateWebhook(input)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "webhook.created", "webhook", hook.ID, hook.Name, map[string]any{"product_id": productID})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, map[string]any{"webhook": store.ToPublicWebhook(hook), "secret": hook.Secret})
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
@@ -1496,19 +1448,20 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 		if !decodeJSON(w, r, &patch) {
 			return
 		}
+		patch.Event = s.eventContext(r, auth.User)
 		updated, err := s.store.UpdateWebhook(id, patch)
 		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "webhook.updated", "webhook", updated.ID, updated.Name, map[string]any{"enabled": updated.Enabled})
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, store.ToPublicWebhook(updated))
 	case http.MethodDelete:
-		if err := s.store.DeleteWebhook(id); err != nil {
+		if err := s.store.DeleteWebhook(id, s.eventContext(r, auth.User)); err != nil {
 			respondStoreError(w, err)
 			return
 		}
-		s.audit(r, auth.User, "webhook.deleted", "webhook", hook.ID, hook.Name, nil)
+		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		methodNotAllowed(w, http.MethodPatch, http.MethodDelete)
@@ -1520,12 +1473,12 @@ func (s *Server) handleWebhookSecret(w http.ResponseWriter, r *http.Request, aut
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	updated, secret, err := s.store.RotateWebhookSecret(hook.ID)
+	updated, secret, err := s.store.RotateWebhookSecret(hook.ID, s.eventContext(r, auth.User))
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	s.audit(r, auth.User, "webhook.secret_rotated", "webhook", updated.ID, updated.Name, nil)
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusOK, map[string]any{"webhook": store.ToPublicWebhook(updated), "secret": secret})
 }
 
@@ -1608,12 +1561,12 @@ func (s *Server) handleEmailNotificationByID(w http.ResponseWriter, r *http.Requ
 		respondError(w, http.StatusBadRequest, "invalid email notification id")
 		return
 	}
-	notification, err := s.store.RetryEmailNotification(id)
+	notification, err := s.store.RetryEmailNotification(id, s.eventContext(r, auth.User))
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	s.audit(r, auth.User, "email_notification.retried", "email_notification", notification.ID, notification.Subject, map[string]any{"recipient": notification.RecipientEmail})
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusOK, map[string]any{"notification": notification})
 }
 
@@ -1644,7 +1597,7 @@ func (s *Server) handleEmailNotificationTest(w http.ResponseWriter, r *http.Requ
 	subject := "Pappice test email"
 	bodyText := "This is a no-reply test email from Pappice.\n\nIf you received this message, SMTP delivery is working."
 	bodyHTML := "<!doctype html><meta charset=\"utf-8\"><p>This is a no-reply test email from Pappice.</p><p>If you received this message, SMTP delivery is working.</p>"
-	created, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
+	created, err := s.store.EnqueueEmailNotificationsWithEvent([]store.CreateEmailNotification{{
 		UserID:         auth.User.ID,
 		RecipientEmail: recipientEmail,
 		RecipientName:  recipientName,
@@ -1652,12 +1605,12 @@ func (s *Server) handleEmailNotificationTest(w http.ResponseWriter, r *http.Requ
 		Subject:        subject,
 		BodyText:       bodyText,
 		BodyHTML:       bodyHTML,
-	}})
+	}}, s.eventContext(r, auth.User), "email_notification.test_queued", "email_notification", map[string]any{"recipient": recipientEmail})
 	if err != nil {
 		respondStoreError(w, err)
 		return
 	}
-	s.audit(r, auth.User, "email_notification.test_queued", "email_notification", created[0].ID, created[0].Subject, map[string]any{"recipient": recipientEmail})
+	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusCreated, map[string]any{"notification": created[0]})
 }
 
@@ -2052,49 +2005,23 @@ func (s *Server) hasProductRole(user store.User, productID int64, allowed ...str
 	return false
 }
 
-func (s *Server) audit(r *http.Request, actor store.User, action, targetType string, targetID int64, targetName string, details map[string]any) {
-	var detailsJSON string
-	if len(details) > 0 {
-		if data, err := json.Marshal(details); err == nil {
-			detailsJSON = string(data)
-		}
+func (s *Server) eventContext(r *http.Request, actor store.User) store.EventContext {
+	ctx := store.EventContext{
+		Enabled: true,
+		Actor:   store.EventActorFromUser(actor),
 	}
-	_, _ = s.store.RecordAuditEvent(store.CreateAuditEvent{
-		ActorUserID:   actor.ID,
-		ActorUsername: actor.Username,
-		Action:        action,
-		TargetType:    targetType,
-		TargetID:      targetID,
-		TargetName:    targetName,
-		IP:            clientIP(r),
-		DetailsJSON:   detailsJSON,
-	})
+	if r != nil {
+		ctx.IP = clientIP(r)
+	}
+	return ctx
 }
 
-func userPatchAuditDetails(before, after store.User, patch store.UpdateUser) map[string]any {
-	details := make(map[string]any)
-	if patch.DisplayName != nil && before.DisplayName != after.DisplayName {
-		details["display_name_changed"] = true
-	}
-	if patch.Email != nil && before.Email != after.Email {
-		details["email_changed"] = true
-	}
-	if patch.Role != nil && before.Role != after.Role {
-		details["role_from"] = before.Role
-		details["role_to"] = after.Role
-	}
-	if patch.Disabled != nil && before.Disabled != after.Disabled {
-		details["disabled"] = after.Disabled
-	}
-	if len(details) == 0 {
-		return nil
-	}
-	return details
+func (s *Server) dispatchEventsSoon() {
+	_ = s.dispatchPendingEvents(nil, 10)
 }
 
-func (s *Server) emitTicketEvent(event string, ticket store.Ticket, actor store.User) {
-	s.emitTicketWebhook(event, ticket, actor)
-	s.enqueueTicketEmails(event, ticket, actor)
+func (s *Server) accountLinkEmailRequested(user store.User, token string) bool {
+	return s.options.EmailNotifications && store.AccountLinkEmailRequested(user, token)
 }
 
 func queryStatuses(query url.Values) []string {

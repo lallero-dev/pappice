@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -258,6 +259,150 @@ func TestSaveTicketIsTransactional(t *testing.T) {
 	}
 }
 
+func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", DisplayName: "Alice Admin", Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	productID := tracker.ListProducts(admin)[0].ID
+	actor := EventActorFromUser(admin)
+	ticket, err := tracker.CreateTicket(CreateTicket{
+		ProductID: productID,
+		Title:     "Evented ticket",
+		Priority:  "normal",
+		Actor:     actor,
+	})
+	if err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	events := tracker.ListDomainEvents(10)
+	if len(events) != 1 || events[0].Type != "ticket.created" || events[0].TicketID != ticket.ID || events[0].ActorUsername != "admin" {
+		t.Fatalf("created events = %#v", events)
+	}
+
+	status := "assigned"
+	assignee := "alice"
+	_, err = tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
+		Patch:    UpdateTicket{Status: &status, Assignee: &assignee},
+		Comment: &AddComment{
+			Author:     "Admin",
+			Body:       "This should not be stored",
+			Visibility: "private",
+		},
+		Actor: actor,
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("save ticket error = %v, want ErrValidation", err)
+	}
+	if events := tracker.ListDomainEvents(10); len(events) != 1 {
+		t.Fatalf("failed save wrote events: %#v", events)
+	}
+
+	_, err = tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
+		Patch:    UpdateTicket{Status: &status, Assignee: &assignee},
+		Comment: &AddComment{
+			Author:     "Admin",
+			Body:       "Taking this now",
+			Visibility: "public",
+		},
+		Actor: actor,
+	})
+	if err != nil {
+		t.Fatalf("save ticket: %v", err)
+	}
+	claimed, err := tracker.ClaimDomainEvents(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim domain events: %v", err)
+	}
+	gotTypes := make([]string, 0, len(claimed))
+	for _, event := range claimed {
+		gotTypes = append(gotTypes, event.Type)
+	}
+	wantTypes := []string{"ticket.created", "ticket.updated", "ticket.assigned", "ticket.commented"}
+	if !slices.Equal(gotTypes, wantTypes) {
+		t.Fatalf("claimed event types = %#v, want %#v", gotTypes, wantTypes)
+	}
+	var payload TicketEventPayload
+	if err := json.Unmarshal([]byte(claimed[1].PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode event payload: %v", err)
+	}
+	if !payload.HasPatch || !payload.PublicComment || !payload.AssignmentChanged || payload.PreviousStatus != "new" || payload.CurrentStatus != "assigned" {
+		t.Fatalf("event payload = %#v", payload)
+	}
+	if err := tracker.MarkDomainEventProcessed(claimed[0].ID); err != nil {
+		t.Fatalf("mark processed: %v", err)
+	}
+	processed, err := tracker.GetDomainEvent(claimed[0].ID)
+	if err != nil {
+		t.Fatalf("get processed event: %v", err)
+	}
+	if processed.Status != "processed" || processed.ProcessedAt == nil || processed.LockedUntil != nil {
+		t.Fatalf("processed event = %#v", processed)
+	}
+}
+
+func TestAppMutationsWriteDomainEventsTransactionally(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", DisplayName: "Alice Admin", Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	ctx := EventContext{Enabled: true, Actor: EventActorFromUser(admin), IP: "127.0.0.1"}
+	product, err := tracker.CreateProduct(CreateProduct{Key: "OPS", Name: "Operations", Event: ctx})
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+	events := tracker.ListDomainEvents(10)
+	if len(events) != 1 || events[0].Type != "product.created" || events[0].ActorUsername != "admin" {
+		t.Fatalf("product events = %#v", events)
+	}
+	var payload AppEventPayload
+	if err := json.Unmarshal([]byte(events[0].PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode app payload: %v", err)
+	}
+	if payload.TargetType != "product" || payload.TargetID != product.ID || payload.TargetName != product.Key || payload.IP != "127.0.0.1" {
+		t.Fatalf("app payload = %#v", payload)
+	}
+
+	if _, err := tracker.CreateProduct(CreateProduct{Key: "OPS", Name: "Duplicate", Event: ctx}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate product error = %v, want ErrConflict", err)
+	}
+	if events := tracker.ListDomainEvents(10); len(events) != 1 {
+		t.Fatalf("failed product write created events: %#v", events)
+	}
+
+	user, link, token, err := tracker.CreateUserWithSetupLink(CreateUser{
+		Username: "Pending",
+		Email:    "pending@example.test",
+		Role:     "staff",
+		Event:    ctx,
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("create setup link user: %v", err)
+	}
+	_ = link
+	events = tracker.ListDomainEvents(10)
+	if len(events) != 2 || events[0].Type != "user.created" {
+		t.Fatalf("user events = %#v", events)
+	}
+	payload = AppEventPayload{}
+	if err := json.Unmarshal([]byte(events[0].PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode user payload: %v", err)
+	}
+	if payload.TargetID != user.ID || payload.AccountLink == nil || payload.AccountLink.Event != "account.setup" || payload.AccountLink.Token != token {
+		t.Fatalf("user payload = %#v", payload)
+	}
+}
+
 func TestTicketAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
@@ -511,6 +656,30 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	events := tracker.ListAuditEvents(10)
 	if len(events) != 1 || events[0].ID != event.ID || events[0].Action != "user.created" || events[0].DetailsJSON == "" {
 		t.Fatalf("audit events = %#v", events)
+	}
+	_, err = tracker.RecordAuditEvent(CreateAuditEvent{
+		DomainEventID: 42,
+		ActorUserID:   admin.ID,
+		ActorUsername: admin.Username,
+		Action:        "product.created",
+		TargetType:    "product",
+		TargetID:      productID,
+		TargetName:    "Inbox",
+	})
+	if err != nil {
+		t.Fatalf("record domain audit event: %v", err)
+	}
+	_, err = tracker.RecordAuditEvent(CreateAuditEvent{
+		DomainEventID: 42,
+		ActorUserID:   admin.ID,
+		ActorUsername: admin.Username,
+		Action:        "product.created",
+		TargetType:    "product",
+		TargetID:      productID,
+		TargetName:    "Inbox",
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate domain audit error = %v, want ErrConflict", err)
 	}
 }
 

@@ -10,6 +10,7 @@ var (
 	commentVisibilities       = []string{"public", "internal"}
 	webhookEvents             = []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}
 	defaultWebhookEvents      = []string{"ticket.created", "ticket.updated", "ticket.commented"}
+	auditEvents               = []string{"password.changed", "setup.completed", "product.created", "product.updated", "product.deleted", "product_member.upserted", "product_member.removed", "ticket.deleted", "user.created", "user.updated", "user.deleted", "user.password_reset_requested", "api_token.created", "api_token.deleted", "webhook.created", "webhook.updated", "webhook.deleted", "webhook.secret_rotated", "email_notification.retried", "email_notification.test_queued"}
 	emailEvents               = appendStrings(webhookEvents, "account.setup", "account.reset", "email.test")
 	emailNotificationStatuses = []string{"pending", "sending", "sent", "failed"}
 	accountLinkPurposes       = []string{"setup", "reset"}
@@ -22,6 +23,7 @@ var (
 	validTicketSources             = stringSet(ticketSources)
 	validCommentVisibility         = stringSet(commentVisibilities)
 	validEvents                    = stringSet(appendStrings(webhookEvents, "*"))
+	validDomainEvents              = stringSet(appendStrings(webhookEvents, auditEvents...))
 	validEmailEvents               = stringSet(emailEvents)
 	validEmailNotificationStatuses = stringSet(emailNotificationStatuses)
 	validAccountLinkPurposes       = stringSet(accountLinkPurposes)

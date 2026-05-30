@@ -14,6 +14,7 @@ func (s *Store) RecordAuditEvent(input CreateAuditEvent) (AuditEvent, error) {
 		return AuditEvent{}, fmt.Errorf("%w: audit action and target type are required", ErrValidation)
 	}
 	event := AuditEvent{
+		DomainEventID: input.DomainEventID,
 		ActorUserID:   input.ActorUserID,
 		ActorUsername: strings.TrimSpace(input.ActorUsername),
 		Action:        action,
@@ -28,9 +29,9 @@ func (s *Store) RecordAuditEvent(input CreateAuditEvent) (AuditEvent, error) {
 		event.ActorUsername = "system"
 	}
 	result, err := s.db.Exec(`
-		INSERT INTO audit_events (actor_user_id, actor_username, action, target_type, target_id, target_name, ip, details_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullZero(event.ActorUserID), event.ActorUsername, event.Action, event.TargetType, nullZero(event.TargetID),
+		INSERT INTO audit_events (domain_event_id, actor_user_id, actor_username, action, target_type, target_id, target_name, ip, details_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.DomainEventID, nullZero(event.ActorUserID), event.ActorUsername, event.Action, event.TargetType, nullZero(event.TargetID),
 		event.TargetName, event.IP, event.DetailsJSON, formatTime(event.CreatedAt),
 	)
 	if err != nil {
@@ -53,7 +54,7 @@ func (s *Store) ListAuditEventsPage(filter AuditEventFilter) AuditEventPage {
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit, offset)
 	rows, err := s.db.Query(`
-		SELECT id, actor_user_id, actor_username, action, target_type, target_id, target_name, ip, details_json, created_at
+		SELECT id, domain_event_id, actor_user_id, actor_username, action, target_type, target_id, target_name, ip, details_json, created_at
 		FROM audit_events
 		`+where+`
 		ORDER BY created_at DESC, id DESC
@@ -85,14 +86,18 @@ func auditEventWhere(filter AuditEventFilter) (string, []any) {
 
 func scanAuditEvent(rows scanner) (AuditEvent, error) {
 	var event AuditEvent
+	var domainEventID sql.NullInt64
 	var actorID sql.NullInt64
 	var targetID sql.NullInt64
 	var created string
 	if err := rows.Scan(
-		&event.ID, &actorID, &event.ActorUsername, &event.Action, &event.TargetType, &targetID,
+		&event.ID, &domainEventID, &actorID, &event.ActorUsername, &event.Action, &event.TargetType, &targetID,
 		&event.TargetName, &event.IP, &event.DetailsJSON, &created,
 	); err != nil {
 		return AuditEvent{}, err
+	}
+	if domainEventID.Valid {
+		event.DomainEventID = domainEventID.Int64
 	}
 	if actorID.Valid {
 		event.ActorUserID = actorID.Int64

@@ -61,17 +61,18 @@ type Comment struct {
 }
 
 type CreateTicket struct {
-	ProductID      int64  `json:"product_id"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	Product        string `json:"product"`
-	Severity       string `json:"-"`
-	Priority       string `json:"priority"`
-	Assignee       string `json:"assignee"`
-	Reporter       string `json:"requester"`
-	Source         string `json:"source"`
-	RequesterName  string `json:"requester_name"`
-	RequesterEmail string `json:"requester_email"`
+	ProductID      int64      `json:"product_id"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	Product        string     `json:"product"`
+	Severity       string     `json:"-"`
+	Priority       string     `json:"priority"`
+	Assignee       string     `json:"assignee"`
+	Reporter       string     `json:"requester"`
+	Source         string     `json:"source"`
+	RequesterName  string     `json:"requester_name"`
+	RequesterEmail string     `json:"requester_email"`
+	Actor          EventActor `json:"-"`
 }
 
 type UpdateTicket struct {
@@ -96,6 +97,7 @@ type SaveTicketInput struct {
 	Comment          *AddComment
 	Attachments      []CreateAttachment
 	AttachmentUserID int64
+	Actor            EventActor
 }
 
 type SaveTicketResult struct {
@@ -163,19 +165,21 @@ type CreateAttachment struct {
 }
 
 type CreateUser struct {
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`
-	Password    string `json:"password"`
-	Role        string `json:"role"`
+	Username    string       `json:"username"`
+	DisplayName string       `json:"display_name"`
+	Email       string       `json:"email"`
+	Password    string       `json:"password"`
+	Role        string       `json:"role"`
+	Event       EventContext `json:"-"`
 }
 
 type UpdateUser struct {
-	DisplayName *string `json:"display_name"`
-	Email       *string `json:"email"`
-	Password    *string `json:"password"`
-	Role        *string `json:"role"`
-	Disabled    *bool   `json:"disabled"`
+	DisplayName *string      `json:"display_name"`
+	Email       *string      `json:"email"`
+	Password    *string      `json:"password"`
+	Role        *string      `json:"role"`
+	Disabled    *bool        `json:"disabled"`
+	Event       EventContext `json:"-"`
 }
 
 type AccountLink struct {
@@ -196,6 +200,7 @@ type AccountLinkStatus struct {
 
 type AuditEvent struct {
 	ID            int64     `json:"id"`
+	DomainEventID int64     `json:"domain_event_id,omitempty"`
 	ActorUserID   int64     `json:"actor_user_id"`
 	ActorUsername string    `json:"actor_username"`
 	Action        string    `json:"action"`
@@ -208,6 +213,7 @@ type AuditEvent struct {
 }
 
 type CreateAuditEvent struct {
+	DomainEventID int64
 	ActorUserID   int64
 	ActorUsername string
 	Action        string
@@ -259,7 +265,8 @@ type PublicAPIToken struct {
 }
 
 type CreateAPIToken struct {
-	Name string `json:"name"`
+	Name  string       `json:"name"`
+	Event EventContext `json:"-"`
 }
 
 type Product struct {
@@ -273,14 +280,16 @@ type Product struct {
 }
 
 type CreateProduct struct {
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Key         string       `json:"key"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Event       EventContext `json:"-"`
 }
 
 type UpdateProduct struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
+	Name        *string      `json:"name"`
+	Description *string      `json:"description"`
+	Event       EventContext `json:"-"`
 }
 
 type ProductMember struct {
@@ -293,8 +302,9 @@ type ProductMember struct {
 }
 
 type UpsertProductMember struct {
-	UserID int64  `json:"user_id"`
-	Role   string `json:"role"`
+	UserID int64        `json:"user_id"`
+	Role   string       `json:"role"`
+	Event  EventContext `json:"-"`
 }
 
 type Webhook struct {
@@ -328,20 +338,22 @@ type PublicWebhook struct {
 }
 
 type CreateWebhook struct {
-	ProductID *int64   `json:"product_id"`
-	Name      string   `json:"name"`
-	URL       string   `json:"url"`
-	Secret    string   `json:"secret"`
-	Events    []string `json:"events"`
-	Enabled   *bool    `json:"enabled"`
+	ProductID *int64       `json:"product_id"`
+	Name      string       `json:"name"`
+	URL       string       `json:"url"`
+	Secret    string       `json:"secret"`
+	Events    []string     `json:"events"`
+	Enabled   *bool        `json:"enabled"`
+	Event     EventContext `json:"-"`
 }
 
 type UpdateWebhook struct {
-	Name    *string   `json:"name"`
-	URL     *string   `json:"url"`
-	Secret  *string   `json:"secret"`
-	Events  *[]string `json:"events"`
-	Enabled *bool     `json:"enabled"`
+	Name    *string      `json:"name"`
+	URL     *string      `json:"url"`
+	Secret  *string      `json:"secret"`
+	Events  *[]string    `json:"events"`
+	Enabled *bool        `json:"enabled"`
+	Event   EventContext `json:"-"`
 }
 
 type WebhookDelivery struct {
@@ -507,6 +519,36 @@ func (s *Store) init() error {
 func (s *Store) migrate() error {
 	// Fresh alpha databases are created directly from schemaSQL. Keep this hook
 	// for forward-only migrations once a released schema exists.
+	if err := s.ensureColumn("audit_events", "domain_event_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_events_domain_event ON audit_events(domain_event_id) WHERE domain_event_id > 0`)
+	return err
+}
+
+func (s *Store) ensureColumn(table, column, definition string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(name, column) {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
 	return nil
 }
 
@@ -748,6 +790,7 @@ CREATE TABLE IF NOT EXISTS account_links (
 
 CREATE TABLE IF NOT EXISTS audit_events (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	domain_event_id INTEGER NOT NULL DEFAULT 0,
 	actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 	actor_username TEXT NOT NULL,
 	action TEXT NOT NULL,
@@ -874,6 +917,26 @@ CREATE TABLE IF NOT EXISTS email_notifications (
 	sent_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS domain_events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	type TEXT NOT NULL,
+	product_id INTEGER NOT NULL DEFAULT 0,
+	ticket_id INTEGER NOT NULL DEFAULT 0,
+	actor_user_id INTEGER NOT NULL DEFAULT 0,
+	actor_username TEXT NOT NULL DEFAULT '',
+	actor_display_name TEXT NOT NULL DEFAULT '',
+	actor_email TEXT NOT NULL DEFAULT '',
+	actor_role TEXT NOT NULL DEFAULT '',
+	payload_json TEXT NOT NULL DEFAULT '{}',
+	status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'processed', 'failed')) DEFAULT 'pending',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	locked_until TEXT,
+	last_error TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	processed_at TEXT
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL AND email <> '';
 CREATE INDEX IF NOT EXISTS idx_tickets_product_updated ON tickets(product_id, updated_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_customer_token ON tickets(customer_token) WHERE customer_token IS NOT NULL AND customer_token <> '';
@@ -889,7 +952,10 @@ CREATE INDEX IF NOT EXISTS idx_webhooks_product ON webhooks(product_id);
 CREATE INDEX IF NOT EXISTS idx_account_links_user_purpose ON account_links(user_id, purpose, used_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_events_domain_event ON audit_events(domain_event_id) WHERE domain_event_id > 0;
 CREATE INDEX IF NOT EXISTS idx_email_notifications_pending ON email_notifications(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_ticket ON email_notifications(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_user ON email_notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_domain_events_pending ON domain_events(status, locked_until, created_at);
+CREATE INDEX IF NOT EXISTS idx_domain_events_ticket ON domain_events(ticket_id, id);
 `

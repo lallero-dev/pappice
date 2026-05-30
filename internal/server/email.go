@@ -9,13 +9,13 @@ import (
 	"pappice/internal/store"
 )
 
-func (s *Server) enqueueTicketEmails(event string, ticket store.Ticket, actor store.User) {
+func (s *Server) enqueueTicketEmails(event string, ticket store.Ticket, actor store.User) error {
 	if !s.options.EmailNotifications {
-		return
+		return nil
 	}
 	recipients := s.store.TicketEmailRecipients(event, ticket, actor)
 	if len(recipients) == 0 {
-		return
+		return nil
 	}
 	product, _ := s.store.GetProduct(ticket.ProductID)
 	subject, textBody, htmlBody := s.ticketEmailContent(event, product, ticket, actor)
@@ -35,15 +35,16 @@ func (s *Server) enqueueTicketEmails(event string, ticket store.Ticket, actor st
 			Coalesce:       true,
 		})
 	}
-	_, _ = s.store.EnqueueEmailNotifications(inputs)
+	_, err := s.store.EnqueueEmailNotifications(inputs)
+	return err
 }
 
-func (s *Server) enqueueRequesterEmail(event string, ticket store.Ticket, actorName string) {
+func (s *Server) enqueueRequesterEmail(event string, ticket store.Ticket, actorName string) error {
 	if !s.options.EmailNotifications || strings.TrimSpace(ticket.RequesterEmail) == "" || strings.TrimSpace(ticket.CustomerToken) == "" {
-		return
+		return nil
 	}
 	subject, textBody, htmlBody := s.requesterEmailContent(event, ticket, actorName)
-	_, _ = s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
+	_, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
 		ProductID:      ticket.ProductID,
 		TicketID:       ticket.ID,
 		UserID:         0,
@@ -56,11 +57,12 @@ func (s *Server) enqueueRequesterEmail(event string, ticket store.Ticket, actorN
 		SendAfter:      time.Now().UTC().Add(s.options.EmailBatchDelay),
 		Coalesce:       true,
 	}})
+	return err
 }
 
-func (s *Server) enqueueAccountLinkEmail(event string, user store.User, token string, expiresAt time.Time) bool {
+func (s *Server) enqueueAccountLinkEmail(event string, user store.User, token string, expiresAt time.Time) error {
 	if !s.options.EmailNotifications || strings.TrimSpace(user.Email) == "" || strings.TrimSpace(token) == "" {
-		return false
+		return nil
 	}
 	subject, textBody, htmlBody := s.accountLinkEmailContent(event, user, token, expiresAt)
 	_, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
@@ -73,7 +75,7 @@ func (s *Server) enqueueAccountLinkEmail(event string, user store.User, token st
 		BodyHTML:       htmlBody,
 		Coalesce:       true,
 	}})
-	return err == nil
+	return err
 }
 
 func (s *Server) accountLinkEmailContent(event string, user store.User, token string, expiresAt time.Time) (string, string, string) {

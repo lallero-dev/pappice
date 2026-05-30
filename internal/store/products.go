@@ -4,11 +4,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
 
 func (s *Store) CreateProduct(input CreateProduct) (Product, error) {
+	now := time.Now().UTC()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Product{}, err
@@ -16,6 +18,9 @@ func (s *Store) CreateProduct(input CreateProduct) (Product, error) {
 	defer tx.Rollback()
 	product, err := createProductTx(tx, input)
 	if err != nil {
+		return Product{}, err
+	}
+	if err := insertAppEventTx(tx, now, input.Event, "product.created", "product", product.ID, product.Key, map[string]any{"name": product.Name}, nil); err != nil {
 		return Product{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -70,7 +75,12 @@ func (s *Store) GetProduct(id int64) (Product, error) {
 }
 
 func (s *Store) UpdateProduct(id int64, patch UpdateProduct) (Product, error) {
-	product, err := s.GetProduct(id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Product{}, err
+	}
+	defer tx.Rollback()
+	product, err := getProductTx(tx, id)
 	if err != nil {
 		return Product{}, err
 	}
@@ -84,25 +94,43 @@ func (s *Store) UpdateProduct(id int64, patch UpdateProduct) (Product, error) {
 		product.Description = strings.TrimSpace(*patch.Description)
 	}
 	product.UpdatedAt = time.Now().UTC()
-	_, err = s.db.Exec(
+	_, err = tx.Exec(
 		`UPDATE products SET name = ?, description = ?, updated_at = ? WHERE id = ?`,
 		product.Name, product.Description, formatTime(product.UpdatedAt), id,
 	)
 	if err != nil {
 		return Product{}, err
 	}
+	if err := insertAppEventTx(tx, product.UpdatedAt, patch.Event, "product.updated", "product", product.ID, product.Key, map[string]any{"name": product.Name}, nil); err != nil {
+		return Product{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Product{}, err
+	}
 	return s.GetProduct(id)
 }
 
-func (s *Store) DeleteProduct(id int64) error {
-	result, err := s.db.Exec(`DELETE FROM products WHERE id = ?`, id)
+func (s *Store) DeleteProduct(id int64, event ...EventContext) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	product, err := getProductTx(tx, id)
+	if err != nil {
+		return err
+	}
+	result, err := tx.Exec(`DELETE FROM products WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "product.deleted", "product", product.ID, product.Key, map[string]any{"name": product.Name}, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ProductRole(userID, productID int64) (string, bool) {
@@ -141,10 +169,15 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 	if !isValid(validProductRoles, role) {
 		return ProductMember{}, fmt.Errorf("%w: invalid product role %q", ErrValidation, role)
 	}
-	if _, err := s.GetProduct(productID); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
 		return ProductMember{}, err
 	}
-	user, err := s.GetUser(input.UserID)
+	defer tx.Rollback()
+	if _, err := getProductTx(tx, productID); err != nil {
+		return ProductMember{}, err
+	}
+	user, err := getUserTx(tx, input.UserID)
 	if err != nil {
 		return ProductMember{}, err
 	}
@@ -152,7 +185,7 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 		return ProductMember{}, fmt.Errorf("%w: user is disabled", ErrValidation)
 	}
 	now := time.Now().UTC()
-	_, err = s.db.Exec(`
+	_, err = tx.Exec(`
 		INSERT INTO product_members (product_id, user_id, role, created_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(product_id, user_id) DO UPDATE SET role = excluded.role`,
@@ -161,23 +194,53 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 	if err != nil {
 		return ProductMember{}, err
 	}
-	for _, member := range s.ListProductMembers(productID) {
-		if member.UserID == input.UserID {
-			return member, nil
+	member := ProductMember{
+		ProductID:   productID,
+		UserID:      user.ID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		Role:        role,
+		CreatedAt:   now,
+	}
+	if err := insertAppEventTx(tx, now, input.Event, "product_member.upserted", "user", member.UserID, member.Username, map[string]any{
+		"product_id": productID,
+		"role":       member.Role,
+	}, nil); err != nil {
+		return ProductMember{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProductMember{}, err
+	}
+	for _, listed := range s.ListProductMembers(productID) {
+		if listed.UserID == input.UserID {
+			return listed, nil
 		}
 	}
-	return ProductMember{}, ErrNotFound
+	return member, nil
 }
 
-func (s *Store) DeleteProductMember(productID, userID int64) error {
-	result, err := s.db.Exec(`DELETE FROM product_members WHERE product_id = ? AND user_id = ?`, productID, userID)
+func (s *Store) DeleteProductMember(productID, userID int64, event ...EventContext) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	user, _ := getUserTx(tx, userID)
+	result, err := tx.Exec(`DELETE FROM product_members WHERE product_id = ? AND user_id = ?`, productID, userID)
 	if err != nil {
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return ErrNotFound
 	}
-	return nil
+	targetName := user.Username
+	if targetName == "" {
+		targetName = strconv.FormatInt(userID, 10)
+	}
+	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "product_member.removed", "user", userID, targetName, map[string]any{"product_id": productID}, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func createProductTx(tx *sql.Tx, input CreateProduct) (Product, error) {

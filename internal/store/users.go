@@ -48,6 +48,13 @@ func (s *Store) CreateFirstAdmin(input CreateUser) (User, error) {
 	); err != nil {
 		return User{}, err
 	}
+	ctx := input.Event
+	if ctx.Enabled {
+		ctx.Actor = EventActorFromUser(user)
+		if err := insertAppEventTx(tx, time.Now().UTC(), ctx, "setup.completed", "user", user.ID, user.Username, nil, nil); err != nil {
+			return User{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
@@ -62,6 +69,13 @@ func (s *Store) CreateUser(input CreateUser) (User, error) {
 	defer tx.Rollback()
 	user, err := createUserTx(tx, input)
 	if err != nil {
+		return User{}, err
+	}
+	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Username, map[string]any{
+		"role":            user.Role,
+		"email":           user.Email != "",
+		"email_requested": false,
+	}, nil); err != nil {
 		return User{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -82,6 +96,13 @@ func (s *Store) CreateUserWithSetupLink(input CreateUser, expiresFor time.Durati
 	}
 	link, token, err := createAccountLinkTx(tx, user.ID, "setup", expiresFor)
 	if err != nil {
+		return User{}, AccountLink{}, "", err
+	}
+	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Username, map[string]any{
+		"role":            user.Role,
+		"email":           user.Email != "",
+		"email_requested": AccountLinkEmailRequested(user, token),
+	}, accountLinkEventPayload("account.setup", user, token, link.ExpiresAt)); err != nil {
 		return User{}, AccountLink{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -118,6 +139,7 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+	before := user
 	oldRole := user.Role
 	oldDisabled := user.Disabled
 
@@ -166,13 +188,16 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	if (oldRole == "admin" || !oldDisabled) && !hasActiveAdminTx(tx) {
 		return User{}, fmt.Errorf("%w: at least one active admin is required", ErrValidation)
 	}
+	if err := insertAppEventTx(tx, time.Now().UTC(), patch.Event, "user.updated", "user", user.ID, user.Username, userPatchEventDetails(before, user, patch), nil); err != nil {
+		return User{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
 	return publicUserCopy(user), nil
 }
 
-func (s *Store) DeleteUser(id int64) error {
+func (s *Store) DeleteUser(id int64, event ...EventContext) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -188,6 +213,9 @@ func (s *Store) DeleteUser(id int64) error {
 	}
 	if user.Role == "admin" && !hasActiveAdminTx(tx) {
 		return fmt.Errorf("%w: at least one active admin is required", ErrValidation)
+	}
+	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "user.deleted", "user", user.ID, user.Username, map[string]any{"role": user.Role}, nil); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -290,7 +318,7 @@ func (s *Store) DeleteUserSessions(userID int64, keepToken string) error {
 	return err
 }
 
-func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepSessionToken string) (User, error) {
+func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepSessionToken string, event ...EventContext) (User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return User{}, err
@@ -328,13 +356,16 @@ func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepS
 	user.PasswordHash = hash
 	user.PasswordResetRequired = false
 	user.UpdatedAt = now
+	if err := insertAppEventTx(tx, now, firstEventContext(event), "password.changed", "user", user.ID, user.Username, nil, nil); err != nil {
+		return User{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
 	return publicUserCopy(user), nil
 }
 
-func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration) (User, AccountLink, string, error) {
+func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration, event ...EventContext) (User, AccountLink, string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return User{}, AccountLink{}, "", err
@@ -360,6 +391,11 @@ func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration) 
 	}
 	user.PasswordResetRequired = true
 	user.UpdatedAt = now
+	if err := insertAppEventTx(tx, now, firstEventContext(event), "user.password_reset_requested", "user", user.ID, user.Username, map[string]any{
+		"email_requested": AccountLinkEmailRequested(user, token),
+	}, accountLinkEventPayload("account.reset", user, token, link.ExpiresAt)); err != nil {
+		return User{}, AccountLink{}, "", err
+	}
 	if err := tx.Commit(); err != nil {
 		return User{}, AccountLink{}, "", err
 	}
@@ -400,7 +436,7 @@ func (s *Store) AccountLinkStatus(token string) (AccountLinkStatus, error) {
 	return status, nil
 }
 
-func (s *Store) ConsumeAccountLink(token, password string) (User, error) {
+func (s *Store) ConsumeAccountLink(token, password string, event ...EventContext) (User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return User{}, err
@@ -434,6 +470,15 @@ func (s *Store) ConsumeAccountLink(token, password string) (User, error) {
 	user.PasswordHash = hash
 	user.PasswordResetRequired = false
 	user.UpdatedAt = now
+	ctx := firstEventContext(event)
+	if ctx.Enabled {
+		if ctx.Actor.UserID == 0 {
+			ctx.Actor = EventActorFromUser(user)
+		}
+		if err := insertAppEventTx(tx, now, ctx, "password.changed", "user", user.ID, user.Username, nil, nil); err != nil {
+			return User{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
@@ -449,11 +494,16 @@ func (s *Store) CreateAPIToken(userID int64, input CreateAPIToken) (PublicAPITok
 	token := "pap_" + raw
 	now := time.Now().UTC()
 
-	user, err := s.GetUser(userID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return PublicAPIToken{}, "", err
+	}
+	defer tx.Rollback()
+	user, err := getUserTx(tx, userID)
 	if err != nil || user.Disabled {
 		return PublicAPIToken{}, "", ErrNotFound
 	}
-	result, err := s.db.Exec(
+	result, err := tx.Exec(
 		`INSERT INTO api_tokens (user_id, name, prefix, token_hash, created_at) VALUES (?, ?, ?, ?, ?)`,
 		userID, name, token[:12], security.HashToken(token), formatTime(now),
 	)
@@ -468,6 +518,12 @@ func (s *Store) CreateAPIToken(userID int64, input CreateAPIToken) (PublicAPITok
 		Prefix:    token[:12],
 		TokenHash: security.HashToken(token),
 		CreatedAt: now,
+	}
+	if err := insertAppEventTx(tx, now, input.Event, "api_token.created", "api_token", apiToken.ID, apiToken.Name, nil, nil); err != nil {
+		return PublicAPIToken{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return PublicAPIToken{}, "", err
 	}
 	return publicAPIToken(apiToken), token, nil
 }
@@ -496,15 +552,28 @@ func (s *Store) ListAPITokens(userID int64) []PublicAPIToken {
 	return tokens
 }
 
-func (s *Store) DeleteAPIToken(userID, tokenID int64) error {
-	result, err := s.db.Exec(`DELETE FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID)
+func (s *Store) DeleteAPIToken(userID, tokenID int64, event ...EventContext) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var targetName string
+	_ = tx.QueryRow(`SELECT name FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID).Scan(&targetName)
+	result, err := tx.Exec(`DELETE FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID)
 	if err != nil {
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if strings.TrimSpace(targetName) == "" {
+		targetName = fmt.Sprintf("%d", tokenID)
+	}
+	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "api_token.deleted", "api_token", tokenID, targetName, nil, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) UserByAPIToken(token string) (User, bool) {
@@ -635,6 +704,27 @@ func insertUserTx(tx *sql.Tx, username, displayName, email, role, hash string, p
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}, nil
+}
+
+func userPatchEventDetails(before, after User, patch UpdateUser) map[string]any {
+	details := make(map[string]any)
+	if patch.DisplayName != nil && before.DisplayName != after.DisplayName {
+		details["display_name_changed"] = true
+	}
+	if patch.Email != nil && before.Email != after.Email {
+		details["email_changed"] = true
+	}
+	if patch.Role != nil && before.Role != after.Role {
+		details["role_from"] = before.Role
+		details["role_to"] = after.Role
+	}
+	if patch.Disabled != nil && before.Disabled != after.Disabled {
+		details["disabled"] = after.Disabled
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return details
 }
 
 func createAccountLinkTx(tx *sql.Tx, userID int64, purpose string, expiresFor time.Duration) (AccountLink, string, error) {

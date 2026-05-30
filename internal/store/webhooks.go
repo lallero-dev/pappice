@@ -13,6 +13,11 @@ import (
 )
 
 func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Webhook{}, err
+	}
+	defer tx.Rollback()
 	enabled := true
 	if input.Enabled != nil {
 		enabled = *input.Enabled
@@ -22,10 +27,11 @@ func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
 		return Webhook{}, err
 	}
 	if input.ProductID != nil {
-		if _, err := s.GetProduct(*input.ProductID); err != nil {
+		if _, err := getProductTx(tx, *input.ProductID); err != nil {
 			return Webhook{}, err
 		}
 	}
+	now := time.Now().UTC()
 	hook := Webhook{
 		ProductID: input.ProductID,
 		Name:      strings.TrimSpace(input.Name),
@@ -33,7 +39,7 @@ func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
 		Secret:    strings.TrimSpace(input.Secret),
 		Events:    events,
 		Enabled:   enabled,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: now,
 	}
 	hook.UpdatedAt = hook.CreatedAt
 	if hook.Name == "" {
@@ -50,7 +56,7 @@ func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
 		hook.Secret = secret
 	}
 	eventsJSON, _ := json.Marshal(hook.Events)
-	result, err := s.db.Exec(`
+	result, err := tx.Exec(`
 		INSERT INTO webhooks (product_id, name, url, secret, events_json, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullableInt64(hook.ProductID), hook.Name, hook.URL, hook.Secret, string(eventsJSON), boolInt(hook.Enabled),
@@ -60,6 +66,12 @@ func (s *Store) CreateWebhook(input CreateWebhook) (Webhook, error) {
 		return Webhook{}, err
 	}
 	hook.ID, _ = result.LastInsertId()
+	if err := insertAppEventTx(tx, now, input.Event, "webhook.created", "webhook", hook.ID, hook.Name, webhookEventDetails(hook), nil); err != nil {
+		return Webhook{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Webhook{}, err
+	}
 	return copyWebhook(hook), nil
 }
 
@@ -84,15 +96,24 @@ func (s *Store) ListWebhooks(productID *int64) []Webhook {
 }
 
 func (s *Store) GetWebhook(id int64) (Webhook, error) {
-	row := s.db.QueryRow(`
-		SELECT id, product_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
-		FROM webhooks
-		WHERE id = ?`, id)
+	return getWebhookWithQuery(s.db, id)
+}
+
+type rowQueryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func getWebhookWithQuery(queryer rowQueryer, id int64) (Webhook, error) {
+	row := queryer.QueryRow(webhookSelectSQL+` WHERE id = ?`, id)
 	hook, err := scanWebhook(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Webhook{}, ErrNotFound
 	}
 	return hook, err
+}
+
+func getWebhookTx(tx *sql.Tx, id int64) (Webhook, error) {
+	return getWebhookWithQuery(tx, id)
 }
 
 func (s *Store) ListWebhooksForEvent(event string, productID int64) []Webhook {
@@ -116,7 +137,12 @@ func (s *Store) ListWebhooksForEvent(event string, productID int64) []Webhook {
 }
 
 func (s *Store) UpdateWebhook(id int64, patch UpdateWebhook) (Webhook, error) {
-	hook, err := s.GetWebhook(id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Webhook{}, err
+	}
+	defer tx.Rollback()
+	hook, err := getWebhookTx(tx, id)
 	if err != nil {
 		return Webhook{}, err
 	}
@@ -147,7 +173,7 @@ func (s *Store) UpdateWebhook(id int64, patch UpdateWebhook) (Webhook, error) {
 	}
 	hook.UpdatedAt = time.Now().UTC()
 	eventsJSON, _ := json.Marshal(hook.Events)
-	_, err = s.db.Exec(`
+	_, err = tx.Exec(`
 		UPDATE webhooks
 		SET name = ?, url = ?, secret = ?, events_json = ?, enabled = ?, updated_at = ?
 		WHERE id = ?`,
@@ -156,11 +182,23 @@ func (s *Store) UpdateWebhook(id int64, patch UpdateWebhook) (Webhook, error) {
 	if err != nil {
 		return Webhook{}, err
 	}
+	if err := insertAppEventTx(tx, hook.UpdatedAt, patch.Event, "webhook.updated", "webhook", hook.ID, hook.Name, webhookEventDetails(hook), nil); err != nil {
+		return Webhook{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Webhook{}, err
+	}
 	return s.GetWebhook(id)
 }
 
-func (s *Store) RotateWebhookSecret(id int64) (Webhook, string, error) {
-	if _, err := s.GetWebhook(id); err != nil {
+func (s *Store) RotateWebhookSecret(id int64, event ...EventContext) (Webhook, string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Webhook{}, "", err
+	}
+	defer tx.Rollback()
+	hook, err := getWebhookTx(tx, id)
+	if err != nil {
 		return Webhook{}, "", err
 	}
 	secret, err := security.RandomToken()
@@ -168,29 +206,49 @@ func (s *Store) RotateWebhookSecret(id int64) (Webhook, string, error) {
 		return Webhook{}, "", err
 	}
 	now := time.Now().UTC()
-	result, err := s.db.Exec(`UPDATE webhooks SET secret = ?, updated_at = ? WHERE id = ?`, secret, formatTime(now), id)
+	result, err := tx.Exec(`UPDATE webhooks SET secret = ?, updated_at = ? WHERE id = ?`, secret, formatTime(now), id)
 	if err != nil {
 		return Webhook{}, "", err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return Webhook{}, "", ErrNotFound
 	}
-	hook, err := s.GetWebhook(id)
+	hook.Secret = secret
+	hook.UpdatedAt = now
+	if err := insertAppEventTx(tx, now, firstEventContext(event), "webhook.secret_rotated", "webhook", hook.ID, hook.Name, nil, nil); err != nil {
+		return Webhook{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return Webhook{}, "", err
+	}
+	hook, err = s.GetWebhook(id)
 	if err != nil {
 		return Webhook{}, "", err
 	}
 	return hook, secret, nil
 }
 
-func (s *Store) DeleteWebhook(id int64) error {
-	result, err := s.db.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
+func (s *Store) DeleteWebhook(id int64, event ...EventContext) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	hook, err := getWebhookTx(tx, id)
+	if err != nil {
+		return err
+	}
+	result, err := tx.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "webhook.deleted", "webhook", hook.ID, hook.Name, webhookEventDetails(hook), nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) RecordDelivery(delivery WebhookDelivery) error {
@@ -266,6 +324,10 @@ func scanWebhooks(rows *sql.Rows) []Webhook {
 	return hooks
 }
 
+const webhookSelectSQL = `
+	SELECT id, product_id, name, url, secret, events_json, enabled, created_at, updated_at, last_status, last_error, last_delivered_at
+	FROM webhooks`
+
 func scanWebhook(rows scanner) (Webhook, error) {
 	var hook Webhook
 	var productID sql.NullInt64
@@ -308,4 +370,14 @@ func validateWebhookURL(raw string) error {
 func copyWebhook(hook Webhook) Webhook {
 	hook.Events = append([]string(nil), hook.Events...)
 	return hook
+}
+
+func webhookEventDetails(hook Webhook) map[string]any {
+	details := map[string]any{"enabled": hook.Enabled}
+	if hook.ProductID == nil {
+		details["scope"] = "global"
+		return details
+	}
+	details["product_id"] = *hook.ProductID
+	return details
 }

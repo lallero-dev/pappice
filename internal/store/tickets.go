@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -97,6 +98,9 @@ func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []Cr
 	}
 	ticket.ID, _ = result.LastInsertId()
 	if err := insertAttachmentsTx(tx, ticket.ID, nil, attachmentUserID, attachments, now); err != nil {
+		return Ticket{}, err
+	}
+	if err := insertTicketCreatedEventTx(tx, ticket, input.Actor, now); err != nil {
 		return Ticket{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -323,11 +327,109 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 	if err != nil {
 		return SaveTicketResult{}, err
 	}
+	if err := insertTicketSavedEventsTx(tx, input, result, current, now); err != nil {
+		return SaveTicketResult{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return SaveTicketResult{}, err
 	}
 	result.Ticket = current
 	return result, nil
+}
+
+func insertTicketCreatedEventTx(tx *sql.Tx, ticket Ticket, actor EventActor, now time.Time) error {
+	payload := ticketEventPayloadJSON(TicketEventPayload{
+		Source:               ticket.Source,
+		CurrentStatus:        ticket.Status,
+		CurrentAssignee:      ticket.Assignee,
+		RequesterEmail:       ticket.RequesterEmail,
+		RequesterCreatedCopy: ticket.Source == "portal" && strings.TrimSpace(ticket.RequesterEmail) != "",
+	})
+	_, err := insertDomainEventTx(tx, CreateDomainEvent{
+		Type:        "ticket.created",
+		ProductID:   ticket.ProductID,
+		TicketID:    ticket.ID,
+		Actor:       actor,
+		PayloadJSON: payload,
+	}, now)
+	return err
+}
+
+func insertTicketSavedEventsTx(tx *sql.Tx, input SaveTicketInput, result SaveTicketResult, current Ticket, now time.Time) error {
+	payload := TicketEventPayload{
+		HasPatch:          result.HasPatch,
+		HasComment:        result.HasComment,
+		PublicComment:     result.PublicComment,
+		AssignmentChanged: result.AssignmentChanged,
+		OnlyAssigneePatch: ticketPatchOnlyAssignee(input.Patch),
+		PreviousStatus:    result.Previous.Status,
+		CurrentStatus:     current.Status,
+		PreviousAssignee:  result.Previous.Assignee,
+		CurrentAssignee:   current.Assignee,
+		CommentID:         result.CommentID,
+		RequesterEmail:    current.RequesterEmail,
+		StatusChanged:     !strings.EqualFold(strings.TrimSpace(result.Previous.Status), strings.TrimSpace(current.Status)),
+		TerminalStatus:    ticketRequesterTerminalStatus(current.Status),
+	}
+	if input.Comment != nil {
+		payload.CommentVisibility = defaultString(input.Comment.Visibility, "public")
+	}
+	payloadJSON := ticketEventPayloadJSON(payload)
+	if result.HasPatch {
+		if _, err := insertDomainEventTx(tx, CreateDomainEvent{
+			Type:        "ticket.updated",
+			ProductID:   current.ProductID,
+			TicketID:    current.ID,
+			Actor:       input.Actor,
+			PayloadJSON: payloadJSON,
+		}, now); err != nil {
+			return err
+		}
+		if result.AssignmentChanged {
+			if _, err := insertDomainEventTx(tx, CreateDomainEvent{
+				Type:        "ticket.assigned",
+				ProductID:   current.ProductID,
+				TicketID:    current.ID,
+				Actor:       input.Actor,
+				PayloadJSON: payloadJSON,
+			}, now); err != nil {
+				return err
+			}
+		}
+	}
+	if result.PublicComment {
+		if _, err := insertDomainEventTx(tx, CreateDomainEvent{
+			Type:        "ticket.commented",
+			ProductID:   current.ProductID,
+			TicketID:    current.ID,
+			Actor:       input.Actor,
+			PayloadJSON: payloadJSON,
+		}, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ticketEventPayloadJSON(payload TicketEventPayload) string {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func ticketPatchOnlyAssignee(patch UpdateTicket) bool {
+	return patch.Assignee != nil && patch.Title == nil && patch.Description == nil && patch.Status == nil && patch.Severity == nil && patch.Priority == nil
+}
+
+func ticketRequesterTerminalStatus(status string) bool {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "resolved", "rejected":
+		return true
+	default:
+		return false
+	}
 }
 
 func ticketPatchPresent(patch UpdateTicket) bool {
@@ -502,13 +604,17 @@ func (s *Store) GetAttachment(id int64) (Attachment, error) {
 	return attachment, nil
 }
 
-func (s *Store) DeleteTicket(id int64) ([]string, error) {
+func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
+	ticket, err := getTicketTx(tx, id)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(`
 		SELECT DISTINCT storage_key
 		FROM attachments
@@ -548,6 +654,12 @@ func (s *Store) DeleteTicket(id int64) ([]string, error) {
 		if references == 0 {
 			orphaned = append(orphaned, storageKey)
 		}
+	}
+	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "ticket.deleted", "ticket", ticket.ID, ticket.Key, map[string]any{
+		"product_id": ticket.ProductID,
+		"title":      ticket.Title,
+	}, nil); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

@@ -56,6 +56,44 @@ func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]E
 	defer tx.Rollback()
 
 	now := time.Now().UTC()
+	created, err := enqueueEmailNotificationsTx(tx, inputs, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func (s *Store) EnqueueEmailNotificationsWithEvent(inputs []CreateEmailNotification, event EventContext, eventType, targetType string, details map[string]any) ([]EmailNotification, error) {
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	created, err := enqueueEmailNotificationsTx(tx, inputs, now)
+	if err != nil {
+		return nil, err
+	}
+	if len(created) > 0 {
+		target := created[0]
+		if err := insertAppEventTx(tx, now, event, eventType, targetType, target.ID, target.Subject, details, nil); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func enqueueEmailNotificationsTx(tx *sql.Tx, inputs []CreateEmailNotification, now time.Time) ([]EmailNotification, error) {
 	created := make([]EmailNotification, 0, len(inputs))
 	for _, input := range inputs {
 		email, err := normalizeEmail(input.RecipientEmail)
@@ -133,9 +171,6 @@ func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]E
 		}
 		notification.ID, _ = result.LastInsertId()
 		created = append(created, notification)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return created, nil
 }
@@ -369,12 +404,17 @@ func (s *Store) EmailNotificationStats() EmailNotificationStats {
 	return stats
 }
 
-func (s *Store) RetryEmailNotification(id int64) (EmailNotification, error) {
+func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNotification, error) {
 	if id < 1 {
 		return EmailNotification{}, ErrNotFound
 	}
 	now := time.Now().UTC()
-	result, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return EmailNotification{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`
 		UPDATE email_notifications
 		SET status = 'pending', attempts = 0, next_attempt_at = ?, locked_until = NULL, last_error = ''
 		WHERE id = ? AND status = 'failed'`,
@@ -386,7 +426,17 @@ func (s *Store) RetryEmailNotification(id int64) (EmailNotification, error) {
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return EmailNotification{}, ErrNotFound
 	}
-	return s.GetEmailNotification(id)
+	notification, err := getEmailNotificationTx(tx, id)
+	if err != nil {
+		return EmailNotification{}, err
+	}
+	if err := insertAppEventTx(tx, now, firstEventContext(event), "email_notification.retried", "email_notification", notification.ID, notification.Subject, map[string]any{"recipient": notification.RecipientEmail}, nil); err != nil {
+		return EmailNotification{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return EmailNotification{}, err
+	}
+	return notification, nil
 }
 
 func (s *Store) productOwnerEmailRecipients(productID int64) []EmailRecipient {

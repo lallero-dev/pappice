@@ -1238,14 +1238,18 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 
 	var webhookHits atomic.Int64
 	var signatureSeen atomic.Bool
+	var ticketEventSeen atomic.Bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		webhookHits.Add(1)
 		if strings.HasPrefix(r.Header.Get("X-Pappice-Signature"), "sha256=") {
 			signatureSeen.Store(true)
 		}
-		if got := r.Header.Get("X-Pappice-Event"); got == "webhook.test" {
+		switch got := r.Header.Get("X-Pappice-Event"); got {
+		case "webhook.test":
 			w.WriteHeader(http.StatusAccepted)
 			return
+		case "ticket.created":
+			ticketEventSeen.Store(true)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -1276,6 +1280,13 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 	if webhookHits.Load() != 1 || !signatureSeen.Load() {
 		t.Fatalf("webhook hits=%d signature=%v", webhookHits.Load(), signatureSeen.Load())
 	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"product_id": productID,
+		"title":      "Webhook-backed ticket",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	waitUntil(t, func() bool { return webhookHits.Load() >= 2 && ticketEventSeen.Load() })
+
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/webhooks/"+itoa(hookID)+"/secret", nil, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	rotatedSecret := decodeString(t, body, "secret")
@@ -2063,6 +2074,20 @@ func addProductMember(t *testing.T, client *http.Client, baseURL string, cookie 
 		"role":    role,
 	}, cookie, csrf, baseURL)
 	requireStatus(t, resp, body, http.StatusCreated)
+}
+
+func waitUntil(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !condition() {
+		t.Fatal("condition was not met before timeout")
+	}
 }
 
 type testUpload struct {
