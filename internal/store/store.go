@@ -397,6 +397,7 @@ type CreateWebhookNotification struct {
 	Event       string
 	PayloadJSON string
 	SendAfter   time.Time
+	Coalesce    bool
 }
 
 type EmailRecipient struct {

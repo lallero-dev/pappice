@@ -1360,6 +1360,79 @@ func TestWebhookNotificationsUseNotificationDelay(t *testing.T) {
 	}
 }
 
+func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+	app := NewServer(tracker, Options{
+		AllowInsecureWebhooks: true,
+		AllowPrivateWebhooks:  true,
+		NotificationDelay:     80 * time.Millisecond,
+	})
+	server := httptest.NewTLSServer(app)
+	t.Cleanup(server.Close)
+	client := server.Client()
+	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+
+	delivered := make(chan []byte, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		delivered <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/products/"+itoa(productID)+"/webhooks", map[string]any{
+		"name":   "coalesced-product-hook",
+		"url":    target.URL,
+		"events": []string{"ticket.updated"},
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"product_id": productID,
+		"title":      "Webhook coalesce ticket",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	ticketID := decodeInt64(t, body, "id")
+
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
+		"title": "First webhook update",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+
+	time.Sleep(40 * time.Millisecond)
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
+		"title": "Second webhook update",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+
+	time.Sleep(100 * time.Millisecond)
+	if err := app.dispatchPendingEvents(nil, 10); err != nil {
+		t.Fatalf("dispatch coalesced webhook: %v", err)
+	}
+	select {
+	case payload := <-delivered:
+		if !bytes.Contains(payload, []byte("Second webhook update")) || bytes.Contains(payload, []byte("First webhook update")) {
+			t.Fatalf("coalesced webhook payload = %s", payload)
+		}
+	default:
+		t.Fatalf("coalesced webhook was not delivered")
+	}
+	select {
+	case payload := <-delivered:
+		t.Fatalf("duplicate webhook delivery payload = %s", payload)
+	default:
+	}
+}
+
 func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T) {
 	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

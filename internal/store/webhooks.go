@@ -312,20 +312,7 @@ func enqueueWebhookNotificationsTx(tx *sql.Tx, inputs []CreateWebhookNotificatio
 		if !input.SendAfter.IsZero() {
 			nextAttemptAt = input.SendAfter.UTC()
 		}
-		result, err := tx.Exec(`
-			INSERT INTO webhook_notifications (
-				webhook_id, product_id, ticket_id, event, payload_json, status, attempts, next_attempt_at, created_at
-			)
-			VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-			input.WebhookID, nullableInt64(input.ProductID), nullZero(input.TicketID), event, payload,
-			formatTime(nextAttemptAt), formatTime(now),
-		)
-		if err != nil {
-			return nil, normalizeSQLError(err)
-		}
-		id, _ := result.LastInsertId()
-		created = append(created, WebhookNotification{
-			ID:            id,
+		notification := WebhookNotification{
 			WebhookID:     input.WebhookID,
 			ProductID:     input.ProductID,
 			TicketID:      input.TicketID,
@@ -334,9 +321,80 @@ func enqueueWebhookNotificationsTx(tx *sql.Tx, inputs []CreateWebhookNotificatio
 			Status:        "pending",
 			NextAttemptAt: nextAttemptAt,
 			CreatedAt:     now,
-		})
+		}
+		if input.Coalesce {
+			existingID, ok, err := pendingWebhookNotificationIDTx(tx, notification)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				_, err := tx.Exec(`
+					UPDATE webhook_notifications
+					SET product_id = ?, event = ?, payload_json = ?, status = 'pending',
+					    attempts = 0, next_attempt_at = ?, locked_until = NULL, last_error = ''
+					WHERE id = ?`,
+					nullableInt64(notification.ProductID), notification.Event, notification.PayloadJSON,
+					formatTime(notification.NextAttemptAt), existingID,
+				)
+				if err != nil {
+					return nil, normalizeSQLError(err)
+				}
+				updated, err := getWebhookNotificationTx(tx, existingID)
+				if err != nil {
+					return nil, err
+				}
+				created = append(created, updated)
+				continue
+			}
+		}
+		result, err := tx.Exec(`
+			INSERT INTO webhook_notifications (
+				webhook_id, product_id, ticket_id, event, payload_json, status, attempts, next_attempt_at, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+			notification.WebhookID, nullableInt64(notification.ProductID), nullZero(notification.TicketID), notification.Event, notification.PayloadJSON,
+			formatTime(nextAttemptAt), formatTime(now),
+		)
+		if err != nil {
+			return nil, normalizeSQLError(err)
+		}
+		id, _ := result.LastInsertId()
+		notification.ID = id
+		created = append(created, notification)
 	}
 	return created, nil
+}
+
+func pendingWebhookNotificationIDTx(tx *sql.Tx, notification WebhookNotification) (int64, bool, error) {
+	var row *sql.Row
+	if notification.TicketID > 0 {
+		row = tx.QueryRow(`
+			SELECT id
+			FROM webhook_notifications
+			WHERE status = 'pending'
+			  AND webhook_id = ?
+			  AND ticket_id = ?
+			ORDER BY created_at DESC
+			LIMIT 1`, notification.WebhookID, notification.TicketID)
+	} else {
+		row = tx.QueryRow(`
+			SELECT id
+			FROM webhook_notifications
+			WHERE status = 'pending'
+			  AND webhook_id = ?
+			  AND ticket_id IS NULL
+			  AND event = ?
+			ORDER BY created_at DESC
+			LIMIT 1`, notification.WebhookID, notification.Event)
+	}
+	var id int64
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 func (s *Store) ClaimWebhookNotifications(limit int, leaseFor time.Duration) ([]WebhookNotification, error) {

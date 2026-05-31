@@ -53,6 +53,7 @@ func (s *Server) ticketWebhookNotifications(event string, ticket store.Ticket, a
 			Event:       event,
 			PayloadJSON: string(body),
 			SendAfter:   normalizeNotificationSendAfter(sendAfter),
+			Coalesce:    true,
 		})
 	}
 	return inputs

@@ -1115,6 +1115,57 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("failed webhook notification = %#v", failedWebhook)
 	}
 
+	ticketForWebhook, err := tracker.CreateTicket(CreateTicket{ProductID: product.ID, Title: "Coalesced webhook ticket"})
+	if err != nil {
+		t.Fatalf("create webhook ticket: %v", err)
+	}
+	firstSendAfter := time.Now().UTC().Add(30 * time.Second)
+	firstWebhook, err := tracker.EnqueueWebhookNotifications([]CreateWebhookNotification{{
+		WebhookID:   hook.ID,
+		ProductID:   &product.ID,
+		TicketID:    ticketForWebhook.ID,
+		Event:       "ticket.updated",
+		PayloadJSON: `{"version":1}`,
+		SendAfter:   firstSendAfter,
+		Coalesce:    true,
+	}})
+	if err != nil {
+		t.Fatalf("enqueue first coalesced webhook: %v", err)
+	}
+	secondSendAfter := time.Now().UTC().Add(45 * time.Second)
+	secondWebhook, err := tracker.EnqueueWebhookNotifications([]CreateWebhookNotification{{
+		WebhookID:   hook.ID,
+		ProductID:   &product.ID,
+		TicketID:    ticketForWebhook.ID,
+		Event:       "ticket.commented",
+		PayloadJSON: `{"version":2}`,
+		SendAfter:   secondSendAfter,
+		Coalesce:    true,
+	}})
+	if err != nil {
+		t.Fatalf("enqueue second coalesced webhook: %v", err)
+	}
+	if len(firstWebhook) != 1 || len(secondWebhook) != 1 || secondWebhook[0].ID != firstWebhook[0].ID {
+		t.Fatalf("coalesced webhook IDs = first %#v second %#v", firstWebhook, secondWebhook)
+	}
+	coalescedWebhook, err := tracker.GetWebhookNotification(firstWebhook[0].ID)
+	if err != nil {
+		t.Fatalf("get coalesced webhook notification: %v", err)
+	}
+	if coalescedWebhook.Event != "ticket.commented" || coalescedWebhook.PayloadJSON != `{"version":2}` {
+		t.Fatalf("coalesced webhook payload = %#v", coalescedWebhook)
+	}
+	if coalescedWebhook.NextAttemptAt.Sub(secondSendAfter).Abs() > time.Second {
+		t.Fatalf("coalesced webhook next attempt = %s, want near %s", coalescedWebhook.NextAttemptAt, secondSendAfter)
+	}
+	claimedWebhooks, err = tracker.ClaimWebhookNotifications(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim coalesced delayed webhook: %v", err)
+	}
+	if len(claimedWebhooks) != 0 {
+		t.Fatalf("claimed coalesced delayed webhook too early: %#v", claimedWebhooks)
+	}
+
 	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: product.ID, Title: "Numbered support ticket"})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
