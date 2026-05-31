@@ -8,201 +8,32 @@ import {
   relativeTime,
   splitList
 } from "./components.js";
-import { createRouter } from "./router.js";
+import {
+  DEFAULT_ADMIN_SECTION,
+  DEFAULT_PRODUCT_SECTION,
+  DEFAULT_TICKET_STATUSES,
+  ADMIN_SECTIONS,
+  PRODUCT_SECTIONS,
+  TICKET_AUTOSAVE_DELAY_MS,
+  TICKET_SORT_LABELS,
+  els,
+  fullDateFormatter,
+  router,
+  shortDateFormatter,
+  state
+} from "./state.js";
+import { request } from "./api.js";
+import {
+  attachmentList,
+  bindAttachmentDropZone,
+  bindAttachmentPasteZone,
+  formatBytes,
+  selectedCommentFiles,
+  selectedTicketFiles,
+  ticketAttachmentField
+} from "./attachments.js";
 
 defineComponents();
-
-const DEFAULT_ADMIN_SECTION = "accounts";
-const ADMIN_SECTIONS = [DEFAULT_ADMIN_SECTION, "tokens", "webhooks", "email", "maintenance", "audit"];
-const DEFAULT_PRODUCT_SECTION = "members";
-const PRODUCT_SECTIONS = [DEFAULT_PRODUCT_SECTION, "webhooks", "deliveries"];
-const DEFAULT_TICKET_STATUSES = ["new", "assigned"];
-const TICKET_AUTOSAVE_DELAY_MS = 450;
-const TICKET_SORT_LABELS = {
-  updated_at: "Updated",
-  created_at: "Created",
-  priority: "Priority",
-  status: "Status",
-  title: "Title"
-};
-const router = createRouter({
-  adminSections: ADMIN_SECTIONS,
-  defaultAdminSection: DEFAULT_ADMIN_SECTION,
-  productSections: PRODUCT_SECTIONS,
-  defaultProductSection: DEFAULT_PRODUCT_SECTION
-});
-
-const state = {
-  tickets: [],
-  ticketCounts: { all: 0 },
-  products: [],
-  users: [],
-  members: [],
-  webhooks: [],
-  globalWebhooks: [],
-  emailNotifications: [],
-  auditEvents: [],
-  maintenance: null,
-  emailStats: null,
-  emailEnabled: false,
-  notificationDelaySeconds: 0,
-  deliveries: [],
-  tokens: [],
-  branding: {
-    name: "Pappice",
-    subtitle: "customer support",
-    mark: "P",
-    color: "#5bb974"
-  },
-  user: null,
-  accountLink: null,
-  csrf: "",
-  view: "tickets",
-  adminSection: DEFAULT_ADMIN_SECTION,
-  productSection: DEFAULT_PRODUCT_SECTION,
-  productMode: "index",
-  productDetailId: null,
-  ticketProductId: null,
-  selectedId: null,
-  selectedTicket: null,
-  renderedTicketDetailId: null,
-  sort: {
-    key: "updated_at",
-    dir: "desc"
-  },
-  meta: {
-    statuses: [],
-    priorities: [],
-    roles: [],
-    productRoles: [],
-    webhookEvents: [],
-    uploads: {
-      max_size_bytes: 10 * 1024 * 1024,
-      max_files: 5,
-      allowed_types: []
-    }
-  },
-  filters: {
-    q: "",
-    statuses: [...DEFAULT_TICKET_STATUSES],
-    assignee: "",
-    statusCustomized: false,
-    unread: false
-  },
-  emailPage: {
-    q: "",
-    status: "",
-    limit: 25,
-    offset: 0,
-    total: 0
-  },
-  auditPage: {
-    q: "",
-    limit: 25,
-    offset: 0,
-    total: 0
-  }
-};
-
-const els = {
-  appAlert: document.querySelector("#appAlert"),
-  appAlertText: document.querySelector("#appAlertText"),
-  appAlertClose: document.querySelector("#appAlertClose"),
-  brandMark: document.querySelector("#brandMark"),
-  brandName: document.querySelector("#brandName"),
-  brandSubtitle: document.querySelector("#brandSubtitle"),
-  topNav: document.querySelector("#topNav"),
-  ticketsTab: document.querySelector("#ticketsTab"),
-  ticketsUnreadBadge: document.querySelector("#ticketsUnreadBadge"),
-  productTab: document.querySelector("#productTab"),
-  adminTab: document.querySelector("#adminTab"),
-  profileMenu: document.querySelector("#profileMenu"),
-  profileButton: document.querySelector("#profileButton"),
-  profileAvatar: document.querySelector("#profileAvatar"),
-  profileName: document.querySelector("#profileName"),
-  profileRole: document.querySelector("#profileRole"),
-  profileMenuName: document.querySelector("#profileMenuName"),
-  profileEmail: document.querySelector("#profileEmail"),
-  profilePopover: document.querySelector("#profilePopover"),
-  profileEditButton: document.querySelector("#profileEditButton"),
-  changePasswordButton: document.querySelector("#changePasswordButton"),
-  logoutButton: document.querySelector("#logoutButton"),
-  newTicketButton: document.querySelector("#newTicketButton"),
-  authView: document.querySelector("#authView"),
-  authError: document.querySelector("#authError"),
-  setupForm: document.querySelector("#setupForm"),
-  loginForm: document.querySelector("#loginForm"),
-  accountLinkForm: document.querySelector("#accountLinkForm"),
-  accountLinkTitle: document.querySelector("#accountLinkTitle"),
-  accountLinkHelp: document.querySelector("#accountLinkHelp"),
-  accountLinkUser: document.querySelector("#accountLinkUser"),
-  accountLinkSubmit: document.querySelector("#accountLinkSubmit"),
-  appView: document.querySelector("#appView"),
-  ticketView: document.querySelector("#ticketView"),
-  adminView: document.querySelector("#adminView"),
-  adminSectionButtons: Array.from(document.querySelectorAll("[data-admin-section]")),
-  adminSectionPanels: Array.from(document.querySelectorAll("[data-admin-panel]")),
-  productView: document.querySelector("#productView"),
-  productSectionButtons: Array.from(document.querySelectorAll("[data-product-section]")),
-  productSectionPanels: Array.from(document.querySelectorAll("[data-product-panel]")),
-  productIndexPanel: document.querySelector("#productIndexPanel"),
-  productIndexList: document.querySelector("#productIndexList"),
-  productDetailView: document.querySelector("#productDetailView"),
-  productContextTitle: document.querySelector("#productContextTitle"),
-  productContextMeta: document.querySelector("#productContextMeta"),
-  deleteProductButton: document.querySelector("#deleteProductButton"),
-  ticketList: document.querySelector("#ticketList"),
-  ticketDetailPane: document.querySelector("#ticketDetailPane"),
-  searchInput: document.querySelector("#searchInput"),
-  ticketFilterButton: document.querySelector("#ticketFilterButton"),
-  ticketFilterBadge: document.querySelector("#ticketFilterBadge"),
-  ticketFilterPopover: document.querySelector("#ticketFilterPopover"),
-  clearTicketFiltersButton: document.querySelector("#clearTicketFiltersButton"),
-  productFilter: document.querySelector("#productFilter"),
-  assigneeFilter: document.querySelector("#assigneeFilter"),
-  unreadFilter: document.querySelector("#unreadFilter"),
-  ticketSortButton: document.querySelector("#ticketSortButton"),
-  ticketSortPopover: document.querySelector("#ticketSortPopover"),
-  ticketSortLabel: document.querySelector("#ticketSortLabel"),
-  ticketSortSelect: document.querySelector("#ticketSortSelect"),
-  statusFilterList: document.querySelector("#statusFilterList"),
-  addProductButton: document.querySelector("#addProductButton"),
-  addUserButton: document.querySelector("#addUserButton"),
-  userList: document.querySelector("#userList"),
-  createTokenButton: document.querySelector("#createTokenButton"),
-  tokenResult: document.querySelector("#tokenResult"),
-  tokenList: document.querySelector("#tokenList"),
-  addMemberButton: document.querySelector("#addMemberButton"),
-  memberList: document.querySelector("#memberList"),
-  addWebhookButton: document.querySelector("#addWebhookButton"),
-  webhookList: document.querySelector("#webhookList"),
-  addGlobalWebhookButton: document.querySelector("#addGlobalWebhookButton"),
-  globalWebhookList: document.querySelector("#globalWebhookList"),
-  sendTestEmailButton: document.querySelector("#sendTestEmailButton"),
-  emailSearchInput: document.querySelector("#emailSearchInput"),
-  emailStatusFilter: document.querySelector("#emailStatusFilter"),
-  emailOverview: document.querySelector("#emailOverview"),
-  emailList: document.querySelector("#emailList"),
-  emailPager: document.querySelector("#emailPager"),
-  maintenanceOverview: document.querySelector("#maintenanceOverview"),
-  auditSearchInput: document.querySelector("#auditSearchInput"),
-  auditList: document.querySelector("#auditList"),
-  auditPager: document.querySelector("#auditPager"),
-  deliveryList: document.querySelector("#deliveryList"),
-  modalHost: document.querySelector("#modalHost")
-};
-
-const shortDateFormatter = new Intl.DateTimeFormat(undefined, {
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  month: "short"
-});
-
-const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short"
-});
 
 let appAlertTimer = 0;
 
@@ -262,39 +93,6 @@ function contrastColor(hex) {
   const blue = parseInt(expanded.slice(5, 7), 16);
   const brightness = (red * 299 + green * 587 + blue * 114) / 1000;
   return brightness > 145 ? "#102417" : "#ffffff";
-}
-
-async function request(path, options = {}) {
-  const method = String(options.method || "GET").toUpperCase();
-  const bodyIsFormData = options.body instanceof FormData;
-  const headers = { ...(options.headers || {}) };
-  if (!bodyIsFormData && !headers["Content-Type"]) {
-    headers["Content-Type"] = "application/json";
-  }
-  if (state.csrf && ["POST", "PATCH", "PUT", "DELETE"].includes(method)) {
-    headers["X-Pappice-CSRF"] = state.csrf;
-  }
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    headers,
-    ...options
-  });
-  const text = await response.text();
-  let payload = {};
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { error: text };
-    }
-  }
-  if (!response.ok) {
-    const error = new Error(payload.error || response.statusText || "Request failed");
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
-  return payload;
 }
 
 async function boot() {
@@ -1437,205 +1235,6 @@ function ticketSelectField(label, name, value, options, controlOptions = {}) {
   return ticketControlField(label, ticketSelectControl(name, value, options, controlOptions));
 }
 
-function ticketAttachmentField(label, name) {
-  const control = document.createElement("input");
-  control.type = "file";
-  control.name = name;
-  control.multiple = true;
-  control.className = "attachment-input";
-  control.dataset.ticketControl = "true";
-  const allowed = state.meta.uploads?.allowed_types || [];
-  if (allowed.length > 0 && !allowed.includes("*") && !allowed.includes("*/*")) {
-    control.accept = allowed.join(",");
-  }
-  const preview = el("div", { className: "attachment-preview empty" });
-  const trigger = el("button", { className: "attachment-trigger", type: "button" }, [
-    attachmentIcon()
-  ]);
-  trigger.setAttribute("aria-label", "Attach files");
-  trigger.title = "Attach files";
-  const picker = el("div", { className: "attachment-picker" }, [
-    control,
-    trigger,
-    preview
-  ]);
-  let filesBeforeBrowse = null;
-  let syncingFiles = false;
-  trigger.addEventListener("click", () => {
-    filesBeforeBrowse = Array.from(control.files || []);
-    control.click();
-  });
-  control.addEventListener("change", () => {
-    if (syncingFiles) {
-      renderAttachmentPreview(control, preview);
-      return;
-    }
-    if (filesBeforeBrowse) {
-      const previous = filesBeforeBrowse;
-      filesBeforeBrowse = null;
-      if (previous.length > 0) {
-        syncingFiles = true;
-        setAttachmentFiles(control, mergeAttachmentFiles(previous, Array.from(control.files || [])));
-        syncingFiles = false;
-        return;
-      }
-    }
-    renderAttachmentPreview(control, preview);
-  });
-  bindAttachmentDropZone(picker, control, "dragging");
-  return el("div", { className: "ticket-form-field attachment-field" }, [
-    el("span", {}, label),
-    picker
-  ]);
-}
-
-function attachmentIcon() {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "attachment-trigger-icon");
-  svg.setAttribute("width", "100%");
-  svg.setAttribute("height", "100%");
-  svg.setAttribute("viewBox", "-8 0 32 32");
-  svg.setAttribute("fill", "currentColor");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("focusable", "false");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "m 228,157 v 20 c 0,3.313 -2.687,6 -6,6 -3.313,0 -6,-2.687 -6,-6 v -18 c 0,-2.209 1.791,-4 4,-4 2.209,0 4,1.791 4,4 v 18 c 0,1.104 -0.896,2 -2,2 -1.104,0 -2,-0.896 -2,-2 v -16 h -2 v 16 c 0,2.209 1.791,4 4,4 2.209,0 4,-1.791 4,-4 v -18 c 0,-3.313 -2.687,-6 -6,-6 -3.313,0 -6,2.687 -6,6 v 19 c 0.493,3.945 3.921,7 8,7 4.079,0 7.507,-3.055 8,-7 v -21 h -2");
-  path.setAttribute("transform", "matrix(0.77810864 0.82467535 -0.81977676 0.78275824 -26.45409 -298.86851)");
-  svg.append(path);
-  return svg;
-}
-
-function renderAttachmentPreview(input, preview) {
-  cleanupAttachmentPreview(preview);
-  const files = Array.from(input.files || []);
-  preview.classList.toggle("empty", files.length === 0);
-  preview.replaceChildren();
-  if (files.length === 0) return;
-  const urls = [];
-  files.forEach((file, index) => {
-    const filename = file.name || "Attachment";
-    const url = URL.createObjectURL(file);
-    urls.push(url);
-    const imagePreview = isStagedImageFile(file);
-    const remove = el("button", { className: "attachment-remove", type: "button", "aria-label": `Remove ${file.name}` }, "x");
-    remove.addEventListener("click", () => {
-      const next = Array.from(input.files || []).filter((_, fileIndex) => fileIndex !== index);
-      setAttachmentFiles(input, next);
-    });
-    const linkContent = [
-      el("span", { className: "attachment-chip-label" }, filename)
-    ];
-    if (imagePreview) {
-      linkContent.unshift(el("img", { className: "attachment-chip-thumb", src: url, alt: "" }));
-    }
-    preview.append(el("span", { className: imagePreview ? "attachment-preview-chip has-preview" : "attachment-preview-chip", title: `Download ${filename}` }, [
-      el("a", { className: "attachment-chip-name", href: url, download: filename }, linkContent),
-      remove
-    ]));
-  });
-  preview.attachmentPreviewURLs = urls;
-}
-
-function isStagedImageFile(file) {
-  return String(file?.type || "").toLowerCase().startsWith("image/");
-}
-
-function cleanupAttachmentPreview(preview) {
-  for (const url of preview.attachmentPreviewURLs || []) {
-    URL.revokeObjectURL(url);
-  }
-  preview.attachmentPreviewURLs = [];
-}
-
-function mergeAttachmentFiles(...groups) {
-  const seen = new Set();
-  const files = [];
-  for (const file of groups.flat()) {
-    const key = [file.name, file.size, file.lastModified, file.type].join("\0");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    files.push(file);
-  }
-  return files;
-}
-
-function appendAttachmentFiles(input, files) {
-  setAttachmentFiles(input, mergeAttachmentFiles(Array.from(input.files || []), Array.from(files || [])));
-}
-
-const handledAttachmentDropEvents = new WeakSet();
-
-function bindAttachmentDropZone(target, input, activeClass = "attachment-drop-active") {
-  let cleanupTimer = 0;
-  const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
-  const deactivate = () => {
-    window.clearTimeout(cleanupTimer);
-    cleanupTimer = 0;
-    target.classList.remove(activeClass);
-  };
-  const scheduleCleanup = () => {
-    window.clearTimeout(cleanupTimer);
-    cleanupTimer = window.setTimeout(deactivate, 5000);
-  };
-  const activate = (event) => {
-    if (!hasFiles(event)) return false;
-    event.preventDefault();
-    target.classList.add(activeClass);
-    scheduleCleanup();
-    return true;
-  };
-  target.addEventListener("dragenter", (event) => {
-    activate(event);
-  });
-  target.addEventListener("dragover", (event) => {
-    if (!activate(event)) return;
-    event.dataTransfer.dropEffect = "copy";
-  });
-  target.addEventListener("dragleave", (event) => {
-    if (!hasFiles(event)) return;
-    event.preventDefault();
-    if (event.relatedTarget && target.contains(event.relatedTarget)) return;
-    deactivate();
-  });
-  target.addEventListener("drop", (event) => {
-    if (!hasFiles(event)) return;
-    event.preventDefault();
-    deactivate();
-    if (handledAttachmentDropEvents.has(event)) return;
-    handledAttachmentDropEvents.add(event);
-    if (event.dataTransfer?.files?.length) appendAttachmentFiles(input, event.dataTransfer.files);
-  });
-}
-
-function bindAttachmentPasteZone(target, input) {
-  target.addEventListener("paste", (event) => {
-    const files = clipboardAttachmentFiles(event.clipboardData);
-    if (files.length === 0) return;
-    event.preventDefault();
-    appendAttachmentFiles(input, files);
-  });
-}
-
-function clipboardAttachmentFiles(clipboardData) {
-  const files = [];
-  for (const item of Array.from(clipboardData?.items || [])) {
-    if (item.kind !== "file") continue;
-    const file = item.getAsFile();
-    if (file) files.push(file);
-  }
-  if (files.length > 0) return files;
-  return Array.from(clipboardData?.files || []);
-}
-
-function setAttachmentFiles(input, files) {
-  const maxFiles = Number(state.meta.uploads?.max_files || 0);
-  const selected = maxFiles > 0 ? files.slice(0, maxFiles) : files;
-  const transfer = new DataTransfer();
-  for (const file of selected) transfer.items.add(file);
-  input.files = transfer.files;
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 function ticketSelectControl(name, value, options, controlOptions = {}) {
   const control = document.createElement("select");
   control.name = name;
@@ -1670,17 +1269,6 @@ function sideSection(title, content) {
     el("h4", { className: "section-title" }, title),
     content
   ]);
-}
-
-function detailMeta(ticket) {
-  const meta = el("div", { className: "detail-meta" });
-  meta.append(
-    badge(ticket.status, `status-${ticket.status}`),
-    el("span", {}, ticket.key || `#${ticket.id}`),
-    el("span", {}, `Requester ${ticket.requester || "unknown"}`),
-    el("span", {}, `Created ${relativeTime(ticket.created_at)}`)
-  );
-  return meta;
 }
 
 function requesterBlock(ticket) {
@@ -1782,7 +1370,6 @@ function renderProductIndex() {
       type: "button",
       "data-product-open": String(product.id)
     }, "Open");
-    open.addEventListener("click", () => openProductDetail(product.id).catch(showError));
     row.append(
       el("div", { className: "admin-row-main" }, [
         el("strong", {}, product.name || product.key || `Product ${product.id}`),
@@ -2407,24 +1994,6 @@ async function sendTicketComment(ticket, composer) {
   await loadTickets();
 }
 
-function selectedTicketFiles(form) {
-  if (!form) return [];
-  const files = [];
-  form.querySelectorAll("input[type='file']").forEach((input) => {
-    files.push(...Array.from(input.files || []));
-  });
-  return files;
-}
-
-function selectedCommentFiles(composer) {
-  if (!composer) return [];
-  const files = [];
-  composer.querySelectorAll("input[type='file']").forEach((input) => {
-    files.push(...Array.from(input.files || []));
-  });
-  return files;
-}
-
 function bindTicketCreateState({ root, submitButton }) {
   const product = root.querySelector("[name='product_id']");
   const priority = root.querySelector("[name='priority']");
@@ -2654,56 +2223,6 @@ function commentVisibilityControl(select) {
   select.addEventListener("change", update);
   update();
   return control;
-}
-
-function attachmentList(attachments) {
-  if (!attachments || attachments.length === 0) return el("div", { className: "attachment-list empty" });
-  const list = el("div", { className: "attachment-list" });
-  const previews = attachments.filter(isPreviewableImageAttachment);
-  if (previews.length > 0) {
-    list.append(el("div", { className: "attachment-preview-grid" }, previews.map(imageAttachmentPreview)));
-  }
-  for (const attachment of attachments) {
-    list.append(el("a", {
-      className: "attachment-link",
-      href: `/api/attachments/${attachment.id}`,
-      download: attachment.filename
-    }, [
-      el("span", { className: "attachment-name" }, attachment.filename || "Attachment"),
-      el("span", { className: "attachment-size" }, formatBytes(attachment.size_bytes || 0))
-    ]));
-  }
-  return list;
-}
-
-function isPreviewableImageAttachment(attachment) {
-  return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(String(attachment.content_type || "").toLowerCase());
-}
-
-function imageAttachmentPreview(attachment) {
-  const url = `/api/attachments/${attachment.id}`;
-  const filename = attachment.filename || "Attached image";
-  return el("a", {
-    className: "attachment-image-link",
-    href: url,
-    download: filename,
-    title: filename
-  }, [
-    el("img", {
-      className: "attachment-image-preview",
-      src: `${url}?preview=1`,
-      alt: filename,
-      loading: "lazy",
-      decoding: "async"
-    })
-  ]);
-}
-
-function formatBytes(value) {
-  const bytes = Number(value || 0);
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function updateUser(id, patch) {
@@ -3389,7 +2908,7 @@ function bindEvents() {
   router.listen((route) => applyRoute(route).catch(showError));
 
   els.ticketsTab.addEventListener("click", () => switchView("tickets"));
-  els.productTab.addEventListener("click", () => openProductsIndex());
+  els.productTab.addEventListener("click", () => openProductsIndex().catch(showError));
   els.adminTab.addEventListener("click", () => switchView("admin"));
   for (const button of els.adminSectionButtons) {
     button.addEventListener("click", () => switchAdminSection(button.getAttribute("data-admin-section")).catch(showError));
@@ -3450,6 +2969,11 @@ function bindEvents() {
   });
   els.auditSearchInput.addEventListener("input", runAuditSearch);
   els.addProductButton.addEventListener("click", () => openProductModal());
+  els.productIndexList.addEventListener("click", (event) => {
+    const open = event.target.closest?.("[data-product-open]");
+    if (!open) return;
+    openProductDetail(Number(open.getAttribute("data-product-open"))).catch(showError);
+  });
   els.deleteProductButton.addEventListener("click", () => {
     deleteCurrentProduct().catch(showError);
   });
@@ -3499,10 +3023,11 @@ function switchView(view, options = {}) {
   if (view === "product" && options.load !== false) loadProductAdmin().catch(showError);
 }
 
-function openProductsIndex() {
+async function openProductsIndex() {
   state.productMode = "index";
   state.productDetailId = null;
-  switchView("product");
+  switchView("product", { load: false });
+  await loadProductAdmin();
 }
 
 async function deleteCurrentProduct() {

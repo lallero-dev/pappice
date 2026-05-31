@@ -139,18 +139,6 @@ export function badge(value, className) {
   return el("span", { className: `badge ${className}` }, labelize(value));
 }
 
-export function fillOptions(select, values, emptyLabel) {
-  select.replaceChildren();
-  if (emptyLabel) select.append(new Option(emptyLabel, ""));
-  for (const value of values) select.append(new Option(labelize(value), value));
-}
-
-export function fillSelect(select, options, emptyLabel) {
-  select.replaceChildren();
-  if (emptyLabel) select.append(new Option(emptyLabel, ""));
-  for (const option of options) select.append(new Option(option.label, option.value));
-}
-
 export function labelize(value) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }

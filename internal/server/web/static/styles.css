@@ -1007,14 +1007,6 @@ button:focus-visible {
   margin: 0;
 }
 
-.detail-meta {
-  color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 12px;
-}
-
 .ticket-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
@@ -1848,17 +1840,6 @@ button:focus-visible {
 .attachment-size {
   color: var(--muted);
   flex: 0 0 auto;
-}
-
-.ticket-savebar {
-  background: #ffffff;
-  border-top: 1px solid var(--border-soft);
-  bottom: 0;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding: 10px 16px;
-  position: sticky;
 }
 
 .muted {

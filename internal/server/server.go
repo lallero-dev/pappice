@@ -4,14 +4,8 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
-	"io"
-	"io/fs"
-	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -156,112 +150,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *Server) routes() {
-	staticFiles, err := fs.Sub(assets, "web/static")
-	if err != nil {
-		panic(err)
-	}
-
-	s.mux.HandleFunc("/", s.handleIndex)
-	s.mux.HandleFunc("/account/", s.handleAccountIndex)
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFiles))))
-
-	s.mux.HandleFunc("/api/health", s.handleHealth)
-	s.mux.HandleFunc("/api/session", s.handleSession)
-	s.mux.HandleFunc("/api/me", s.handleMe)
-	s.mux.HandleFunc("/api/me/password", s.handleMePassword)
-	s.mux.HandleFunc("/api/setup", s.handleSetup)
-	s.mux.HandleFunc("/api/login", s.handleLogin)
-	s.mux.HandleFunc("/api/logout", s.handleLogout)
-	s.mux.HandleFunc("/api/account-links/", s.handleAccountLinkByToken)
-	s.mux.HandleFunc("/api/products", s.handleProducts)
-	s.mux.HandleFunc("/api/products/", s.handleProductByID)
-	s.mux.HandleFunc("/api/tickets", s.handleTickets)
-	s.mux.HandleFunc("/api/tickets/", s.handleTicketPath)
-	s.mux.HandleFunc("/api/attachments/", s.handleAttachmentByID)
-	s.mux.HandleFunc("/api/users", s.handleUsers)
-	s.mux.HandleFunc("/api/users/", s.handleUserByID)
-	s.mux.HandleFunc("/api/tokens", s.handleTokens)
-	s.mux.HandleFunc("/api/tokens/", s.handleTokenByID)
-	s.mux.HandleFunc("/api/webhooks", s.handleWebhooks)
-	s.mux.HandleFunc("/api/webhooks/", s.handleWebhookByID)
-	s.mux.HandleFunc("/api/webhook-deliveries", s.handleWebhookDeliveries)
-	s.mux.HandleFunc("/api/email-notifications", s.handleEmailNotifications)
-	s.mux.HandleFunc("/api/email-notifications/", s.handleEmailNotificationByID)
-	s.mux.HandleFunc("/api/audit-events", s.handleAuditEvents)
-	s.mux.HandleFunc("/api/admin/maintenance", s.handleAdminMaintenance)
-}
-
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if !isAppIndexPath(r.URL.Path) {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		methodNotAllowed(w, http.MethodGet, http.MethodHead)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if r.Method == http.MethodHead {
-		return
-	}
-	content, err := assets.ReadFile("web/index.html")
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "index asset not found")
-		return
-	}
-	_, _ = w.Write(content)
-}
-
-func isAppIndexPath(path string) bool {
-	if len(path) > 1 {
-		path = strings.TrimRight(path, "/")
-	}
-	switch path {
-	case "/", "/tickets", "/admin", "/products":
-		return true
-	}
-	if strings.HasPrefix(path, "/admin/") {
-		return slices.Contains(appAdminSections, strings.TrimPrefix(path, "/admin/"))
-	}
-	if strings.HasPrefix(path, "/products/") {
-		parts := strings.Split(strings.Trim(strings.TrimPrefix(path, "/products/"), "/"), "/")
-		if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
-			return false
-		}
-		parsed, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil || parsed < 1 {
-			return false
-		}
-		if len(parts) == 1 {
-			return true
-		}
-		return slices.Contains(appProductSections, parts[1])
-	}
-	return false
-}
-
-func (s *Server) handleAccountIndex(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.URL.Path, "/account/setup/") && !strings.HasPrefix(r.URL.Path, "/account/reset/") {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		methodNotAllowed(w, http.MethodGet, http.MethodHead)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if r.Method == http.MethodHead {
-		return
-	}
-	content, err := assets.ReadFile("web/index.html")
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "index asset not found")
-		return
-	}
-	_, _ = w.Write(content)
-}
-
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
@@ -280,125 +168,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"email_enabled":  s.options.EmailNotifications,
 		"uploads":        s.publicUploadConfig(),
 	})
-}
-
-func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireAdmin(w, r); !ok {
-		return
-	}
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w, http.MethodGet)
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]any{
-		"version":                        s.options.Version,
-		"started_at":                     s.started,
-		"database_path":                  s.store.Path(),
-		"upload_path":                    s.options.UploadDir,
-		"domain_event_retention_seconds": int(s.options.DomainEventRetention.Seconds()),
-		"backup":                         backupStatus(s.options.BackupDir),
-		"uploads":                        s.publicUploadConfig(),
-		"email": map[string]any{
-			"enabled":                    s.options.EmailNotifications,
-			"public_url":                 strings.TrimSpace(s.options.PublicURL),
-			"notification_delay_seconds": int(s.options.NotificationDelay.Seconds()),
-			"stats":                      s.store.EmailNotificationStats(),
-		},
-	})
-}
-
-func backupStatus(dir string) map[string]any {
-	status := map[string]any{
-		"path": strings.TrimSpace(dir),
-	}
-	if status["path"] == "" {
-		status["path"] = defaultBackupDir
-	}
-	entries, err := os.ReadDir(status["path"].(string))
-	if err != nil {
-		if os.IsNotExist(err) {
-			status["latest_name"] = ""
-			return status
-		}
-		status["error"] = err.Error()
-		return status
-	}
-
-	var newestName string
-	var newestPath string
-	var newestTime time.Time
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		candidatePath := filepath.Join(status["path"].(string), entry.Name())
-		if _, err := os.Stat(filepath.Join(candidatePath, "pappice.db")); err != nil {
-			continue
-		}
-		if newestName == "" || info.ModTime().After(newestTime) {
-			newestName = entry.Name()
-			newestPath = candidatePath
-			newestTime = info.ModTime()
-		}
-	}
-	status["latest_name"] = newestName
-	if newestName != "" {
-		status["latest_path"] = newestPath
-		status["latest_at"] = newestTime.UTC()
-	}
-	return status
-}
-
-func normalizeBranding(branding Branding) Branding {
-	branding.Name = strings.TrimSpace(branding.Name)
-	if branding.Name == "" {
-		branding.Name = defaultBrandName
-	}
-	branding.Subtitle = strings.TrimSpace(branding.Subtitle)
-	if branding.Subtitle == "" {
-		branding.Subtitle = defaultBrandSubtitle
-	}
-	branding.Mark = normalizeBrandMark(branding.Mark, branding.Name)
-	branding.Color = strings.TrimSpace(branding.Color)
-	if !isHexColor(branding.Color) {
-		branding.Color = defaultBrandColor
-	}
-	return branding
-}
-
-func normalizeBrandMark(mark, name string) string {
-	mark = strings.TrimSpace(mark)
-	if mark == "" {
-		for _, char := range name {
-			return strings.ToUpper(string(char))
-		}
-		return "P"
-	}
-	runes := []rune(mark)
-	if len(runes) > 3 {
-		runes = runes[:3]
-	}
-	return string(runes)
-}
-
-func isHexColor(value string) bool {
-	if len(value) != 4 && len(value) != 7 {
-		return false
-	}
-	if value[0] != '#' {
-		return false
-	}
-	for _, char := range value[1:] {
-		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -854,44 +623,8 @@ func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, au
 			"priorities": store.Priorities(),
 		})
 	case http.MethodPost:
-		if !s.canCreateTicket(auth.User, productID) {
-			respondError(w, http.StatusForbidden, "product write access is required")
-			return
-		}
-		var input store.CreateTicket
-		var uploads []storedUpload
-		if isMultipartRequest(r) {
-			if !s.parseMultipartForm(w, r) {
-				return
-			}
-			defer cleanupMultipartForm(r)
-			var err error
-			input, err = multipartCreateTicketInput(r, productID)
-			if err != nil {
-				respondStoreError(w, err)
-				return
-			}
-			var ok bool
-			uploads, ok = s.saveRequestAttachments(w, r)
-			if !ok {
-				return
-			}
-		} else {
-			if !decodeJSON(w, r, &input) {
-				return
-			}
-			input.ProductID = productID
-		}
-		_, ok := s.prepareTicketInput(w, auth.User, productID, &input)
+		ticket, ok := s.createTicketFromRequest(w, r, auth, productID)
 		if !ok {
-			cleanupStoredUploads(uploads)
-			return
-		}
-		input.Actor = store.EventActorFromUser(auth.User)
-		ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
-		if err != nil {
-			cleanupStoredUploads(uploads)
-			respondStoreError(w, err)
 			return
 		}
 		s.dispatchEventsSoon()
@@ -918,44 +651,8 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 		})
 		respondJSON(w, http.StatusOK, map[string]any{"tickets": tickets})
 	case http.MethodPost:
-		var input store.CreateTicket
-		var uploads []storedUpload
-		if isMultipartRequest(r) {
-			if !s.parseMultipartForm(w, r) {
-				return
-			}
-			defer cleanupMultipartForm(r)
-			var err error
-			input, err = multipartCreateTicketInput(r, 0)
-			if err != nil {
-				respondStoreError(w, err)
-				return
-			}
-		} else {
-			if !decodeJSON(w, r, &input) {
-				return
-			}
-		}
-		if !s.canCreateTicket(auth.User, input.ProductID) {
-			respondError(w, http.StatusForbidden, "product write access is required")
-			return
-		}
-		_, ok := s.prepareTicketInput(w, auth.User, input.ProductID, &input)
+		ticket, ok := s.createTicketFromRequest(w, r, auth, 0)
 		if !ok {
-			return
-		}
-		if isMultipartRequest(r) {
-			var ok bool
-			uploads, ok = s.saveRequestAttachments(w, r)
-			if !ok {
-				return
-			}
-		}
-		input.Actor = store.EventActorFromUser(auth.User)
-		ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
-		if err != nil {
-			cleanupStoredUploads(uploads)
-			respondStoreError(w, err)
 			return
 		}
 		s.dispatchEventsSoon()
@@ -963,6 +660,60 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
+}
+
+func (s *Server) createTicketFromRequest(w http.ResponseWriter, r *http.Request, auth authContext, fallbackProductID int64) (store.Ticket, bool) {
+	if fallbackProductID > 0 && !s.canCreateTicket(auth.User, fallbackProductID) {
+		respondError(w, http.StatusForbidden, "product write access is required")
+		return store.Ticket{}, false
+	}
+
+	var input store.CreateTicket
+	multipart := isMultipartRequest(r)
+	if multipart {
+		if !s.parseMultipartForm(w, r) {
+			return store.Ticket{}, false
+		}
+		defer cleanupMultipartForm(r)
+		var err error
+		input, err = multipartCreateTicketInput(r, fallbackProductID)
+		if err != nil {
+			respondStoreError(w, err)
+			return store.Ticket{}, false
+		}
+	} else {
+		if !decodeJSON(w, r, &input) {
+			return store.Ticket{}, false
+		}
+		if fallbackProductID > 0 {
+			input.ProductID = fallbackProductID
+		}
+	}
+
+	if fallbackProductID == 0 && !s.canCreateTicket(auth.User, input.ProductID) {
+		respondError(w, http.StatusForbidden, "product write access is required")
+		return store.Ticket{}, false
+	}
+	if _, ok := s.prepareTicketInput(w, auth.User, input.ProductID, &input); !ok {
+		return store.Ticket{}, false
+	}
+
+	var uploads []storedUpload
+	if multipart {
+		var ok bool
+		uploads, ok = s.saveRequestAttachments(w, r)
+		if !ok {
+			return store.Ticket{}, false
+		}
+	}
+	input.Actor = store.EventActorFromUser(auth.User)
+	ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
+	if err != nil {
+		cleanupStoredUploads(uploads)
+		respondStoreError(w, err)
+		return store.Ticket{}, false
+	}
+	return ticket, true
 }
 
 func (s *Server) handleTicketPath(w http.ResponseWriter, r *http.Request) {
@@ -1344,29 +1095,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
-		respondJSON(w, http.StatusOK, map[string]any{
-			"webhooks": publicWebhooks(s.store.ListWebhooks(nil)),
-			"events":   store.Events(),
-		})
-	case http.MethodPost:
-		var input store.CreateWebhook
-		if !decodeJSON(w, r, &input) {
-			return
-		}
-		input.ProductID = nil
-		input.Event = s.eventContext(r, auth.User)
-		hook, err := s.store.CreateWebhook(input)
-		if err != nil {
-			respondStoreError(w, err)
-			return
-		}
-		s.dispatchEventsSoon()
-		respondJSON(w, http.StatusCreated, map[string]any{"webhook": store.ToPublicWebhook(hook), "secret": hook.Secret})
-	default:
-		methodNotAllowed(w, http.MethodGet, http.MethodPost)
-	}
+	s.handleWebhookCollection(w, r, auth, nil)
 }
 
 func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
@@ -1374,10 +1103,14 @@ func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, a
 		respondError(w, http.StatusForbidden, "product owner access is required")
 		return
 	}
+	s.handleWebhookCollection(w, r, auth, &productID)
+}
+
+func (s *Server) handleWebhookCollection(w http.ResponseWriter, r *http.Request, auth authContext, productID *int64) {
 	switch r.Method {
 	case http.MethodGet:
 		respondJSON(w, http.StatusOK, map[string]any{
-			"webhooks": publicWebhooks(s.store.ListWebhooks(&productID)),
+			"webhooks": publicWebhooks(s.store.ListWebhooks(productID)),
 			"events":   store.Events(),
 		})
 	case http.MethodPost:
@@ -1385,7 +1118,7 @@ func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, a
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		input.ProductID = &productID
+		input.ProductID = productID
 		input.Event = s.eventContext(r, auth.User)
 		hook, err := s.store.CreateWebhook(input)
 		if err != nil {
@@ -2020,251 +1753,4 @@ func (s *Server) dispatchEventsSoon() {
 
 func (s *Server) accountLinkEmailRequested(user store.User, token string) bool {
 	return s.options.EmailNotifications && store.AccountLinkEmailRequested(user, token)
-}
-
-func queryStatuses(query url.Values) []string {
-	statuses := make([]string, 0, len(query["status"]))
-	for _, value := range query["status"] {
-		for _, status := range strings.Split(value, ",") {
-			status = strings.TrimSpace(status)
-			if status != "" {
-				statuses = append(statuses, status)
-			}
-		}
-	}
-	return statuses
-}
-
-func queryUnread(query url.Values) bool {
-	value := strings.ToLower(strings.TrimSpace(query.Get("unread")))
-	return value == "1" || value == "true" || value == "yes"
-}
-
-func queryIncludeUnreadOutsideStatus(query url.Values) bool {
-	value := strings.ToLower(strings.TrimSpace(query.Get("include_unread_outside_status")))
-	return value == "1" || value == "true" || value == "yes"
-}
-
-func paginationParams(r *http.Request, defaultLimit, maxLimit int) (int, int) {
-	query := r.URL.Query()
-	limit, err := strconv.Atoi(query.Get("limit"))
-	if err != nil || limit < 1 {
-		limit = defaultLimit
-	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
-	offset, err := strconv.Atoi(query.Get("offset"))
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-	return limit, offset
-}
-
-func publicWebhooks(hooks []store.Webhook) []store.PublicWebhook {
-	public := make([]store.PublicWebhook, 0, len(hooks))
-	for _, hook := range hooks {
-		public = append(public, store.ToPublicWebhook(hook))
-	}
-	return public
-}
-
-type accountLinkResponse struct {
-	URL          string    `json:"url"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	EmailQueued  bool      `json:"email_queued"`
-	EmailEnabled bool      `json:"email_enabled"`
-}
-
-type userAccountLinkPayload struct {
-	store.PublicUser
-	AccountLink accountLinkResponse `json:"account_link"`
-}
-
-func userAccountLinkResponse(user store.User, url string, expiresAt time.Time, emailQueued, emailEnabled bool) userAccountLinkPayload {
-	return userAccountLinkPayload{
-		PublicUser: store.ToPublicUser(user),
-		AccountLink: accountLinkResponse{
-			URL:          url,
-			ExpiresAt:    expiresAt,
-			EmailQueued:  emailQueued,
-			EmailEnabled: emailEnabled,
-		},
-	}
-}
-
-func (s *Server) ticketURL(token string) string {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return ""
-	}
-	base := strings.TrimRight(s.options.PublicURL, "/")
-	if base == "" {
-		return "/"
-	}
-	return base + "/"
-}
-
-func (s *Server) accountLinkURL(purpose, token string) string {
-	purpose = strings.TrimSpace(purpose)
-	token = strings.TrimSpace(token)
-	if purpose == "" || token == "" {
-		return ""
-	}
-	base := strings.TrimRight(s.options.PublicURL, "/")
-	path := "/account/" + purpose + "/" + token
-	if base == "" {
-		return path
-	}
-	return base + path
-}
-
-func nullableUser(user store.User, ok bool) any {
-	if !ok {
-		return nil
-	}
-	return store.ToPublicUser(user)
-}
-
-func nullableString(value string, ok bool) any {
-	if !ok {
-		return nil
-	}
-	return value
-}
-
-func isAdmin(user store.User) bool {
-	return user.Role == "admin"
-}
-
-func isStaff(user store.User) bool {
-	return user.Role == "admin" || user.Role == "staff" || user.Role == "user"
-}
-
-func isCustomer(user store.User) bool {
-	return user.Role == "customer" || user.Role == "client"
-}
-
-func isUnsafeMethod(method string) bool {
-	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut || method == http.MethodDelete
-}
-
-func sameOrigin(r *http.Request) bool {
-	if r.TLS == nil {
-		return false
-	}
-	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
-		return originMatches(origin, r.Host)
-	}
-	if referer := strings.TrimSpace(r.Header.Get("Referer")); referer != "" {
-		return originMatches(referer, r.Host)
-	}
-	return false
-}
-
-func originMatches(raw, host string) bool {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	return parsed.Scheme == "https" && strings.EqualFold(parsed.Host, host)
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err == nil {
-		return host
-	}
-	return strings.TrimSpace(r.RemoteAddr)
-}
-
-func parseTrailingID(w http.ResponseWriter, path, prefix string) (int64, bool) {
-	raw := strings.Trim(strings.TrimPrefix(path, prefix), "/")
-	if raw == "" || strings.Contains(raw, "/") {
-		respondError(w, http.StatusNotFound, "not found")
-		return 0, false
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id < 1 {
-		respondError(w, http.StatusBadRequest, "invalid id")
-		return 0, false
-	}
-	return id, true
-}
-
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	if r.Body == nil {
-		respondError(w, http.StatusBadRequest, "request body is required")
-		return false
-	}
-	defer r.Body.Close()
-
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(dst); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid JSON body")
-		return false
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		respondError(w, http.StatusBadRequest, "invalid JSON body")
-		return false
-	}
-	return true
-}
-
-func respondStoreError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		respondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, store.ErrConflict):
-		respondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, store.ErrPasswordResetRequired):
-		respondError(w, http.StatusUnauthorized, err.Error())
-	case errors.Is(err, store.ErrValidation):
-		respondError(w, http.StatusBadRequest, err.Error())
-	default:
-		respondError(w, http.StatusInternalServerError, "internal server error")
-	}
-}
-
-func respondJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func respondError(w http.ResponseWriter, status int, message string) {
-	respondJSON(w, status, map[string]string{"error": message})
-}
-
-func respondRateLimited(w http.ResponseWriter) {
-	w.Header().Set("Retry-After", "60")
-	respondError(w, http.StatusTooManyRequests, "too many attempts; try again later")
-}
-
-func methodNotAllowed(w http.ResponseWriter, methods ...string) {
-	w.Header().Set("Allow", strings.Join(methods, ", "))
-	respondError(w, http.StatusMethodNotAllowed, "method not allowed")
-}
-
-func defaultString(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "same-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
-		if r.TLS != nil {
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		}
-		next.ServeHTTP(w, r)
-	})
 }
