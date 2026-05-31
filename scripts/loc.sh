@@ -61,7 +61,7 @@ category_for() {
     deploy/*|.env.example|.gitignore|go.mod|go.sum|package.json)
       echo "ops-config"
       ;;
-    README.md|BACKLOG.md|LICENSE|VERSION)
+    README.md|LICENSE|VERSION)
       echo "docs"
       ;;
     *)

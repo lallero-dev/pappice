@@ -13,8 +13,6 @@ build, and no inbound email processing.
 
 ## Project Status
 
-Current target: `v0.4.0-alpha` (see [VERSION](./VERSION)).
-
 Pappice is intended for small-team self-hosting and public audit. It is not yet
 externally security audited, and the API/schema should be considered unstable
 until a non-alpha release. Alpha builds may require recreating the SQLite
@@ -95,15 +93,6 @@ pappice serve -h
 
 `pappice doctor` validates paths, TLS, public URL, SMTP, upload limits, rate
 limits, and development-only webhook settings before starting the server.
-
-## Alpha Schema Updates
-
-Fresh databases are created with the current schema. For an existing alpha
-database, run the included one-off migration script when needed:
-
-```sh
-scripts/migrate-domain-events.sh /path/to/pappice.db
-```
 
 ## Branding
 

@@ -542,65 +542,7 @@ func (s *Store) init() error {
 		return err
 	}
 	_, err := s.db.Exec(schemaSQL)
-	if err != nil {
-		return err
-	}
-	return s.migrate()
-}
-
-func (s *Store) migrate() error {
-	// Fresh alpha databases are created directly from schemaSQL. Keep this hook
-	// for forward-only migrations once a released schema exists.
-	if err := s.ensureColumn("audit_events", "domain_event_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	_, err := s.db.Exec(`
-CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_events_domain_event ON audit_events(domain_event_id) WHERE domain_event_id > 0;
-CREATE TABLE IF NOT EXISTS webhook_notifications (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	webhook_id INTEGER REFERENCES webhooks(id) ON DELETE CASCADE,
-	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-	ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
-	event TEXT NOT NULL,
-	payload_json TEXT NOT NULL,
-	status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')) DEFAULT 'pending',
-	attempts INTEGER NOT NULL DEFAULT 0,
-	next_attempt_at TEXT NOT NULL,
-	locked_until TEXT,
-	last_error TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL,
-	sent_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_webhook_notifications_pending ON webhook_notifications(status, next_attempt_at, locked_until);
-CREATE INDEX IF NOT EXISTS idx_webhook_notifications_webhook ON webhook_notifications(webhook_id, created_at);
-`)
 	return err
-}
-
-func (s *Store) ensureColumn(table, column, definition string) error {
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return err
-		}
-		if strings.EqualFold(name, column) {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
-	return nil
 }
 
 type scanner interface {
