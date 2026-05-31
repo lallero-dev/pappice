@@ -114,7 +114,7 @@ sudo journalctl -u pappice-backup.service -n 50
 
 ```sh
 git fetch --tags
-git checkout v0.3.0-alpha
+git checkout v0.4.0-alpha
 scripts/build-release.sh
 sudo systemctl start pappice-backup.service
 sudo install -o root -g root -m 0755 dist/pappice /usr/local/bin/pappice
