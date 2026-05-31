@@ -175,6 +175,8 @@ func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	t.Setenv("PAPPICE_ADDR", "127.0.0.1:9000")
 	t.Setenv("PAPPICE_DB", "env.db")
 	t.Setenv("PAPPICE_SMTP_PASSWORD", "configured-secret")
+	t.Setenv("PAPPICE_NOTIFICATION_DELAY", "45s")
+	t.Setenv("PAPPICE_DOMAIN_EVENT_RETENTION", "720h")
 
 	var output bytes.Buffer
 	cfg, code, ok := parseRuntimeConfig("pappice serve", []string{"-addr", "127.0.0.1:9999"}, &output)
@@ -189,6 +191,12 @@ func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	}
 	if cfg.SMTPPassword != "configured-secret" {
 		t.Fatalf("env smtp password was not applied")
+	}
+	if cfg.NotificationDelay != 45*time.Second {
+		t.Fatalf("env notification delay = %s", cfg.NotificationDelay)
+	}
+	if cfg.DomainEventRetention != 720*time.Hour {
+		t.Fatalf("env domain event retention = %s", cfg.DomainEventRetention)
 	}
 }
 

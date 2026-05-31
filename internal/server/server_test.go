@@ -605,11 +605,12 @@ func TestAdminMaintenanceEndpoint(t *testing.T) {
 		t.Fatalf("write backup db marker: %v", err)
 	}
 	_, server, client := newTestServer(t, Options{
-		EmailNotifications: true,
-		PublicURL:          "https://tracker.example.test",
-		UploadDir:          filepath.Join(t.TempDir(), "uploads"),
-		BackupDir:          backupDir,
-		Version:            "test-version",
+		EmailNotifications:   true,
+		PublicURL:            "https://tracker.example.test",
+		UploadDir:            filepath.Join(t.TempDir(), "uploads"),
+		BackupDir:            backupDir,
+		DomainEventRetention: 48 * time.Hour,
+		Version:              "test-version",
 	})
 	adminCookie, _ := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
@@ -620,6 +621,7 @@ func TestAdminMaintenanceEndpoint(t *testing.T) {
 		!bytes.Contains(body, []byte(`"upload_path"`)) ||
 		!bytes.Contains(body, []byte(`"path":"`+backupDir+`"`)) ||
 		!bytes.Contains(body, []byte(`"latest_name":"20260101T120000Z"`)) ||
+		!bytes.Contains(body, []byte(`"domain_event_retention_seconds":172800`)) ||
 		!bytes.Contains(body, []byte(`"enabled":true`)) ||
 		!bytes.Contains(body, []byte(`"public_url":"https://tracker.example.test"`)) {
 		t.Fatalf("maintenance response = %s", body)
@@ -1312,6 +1314,101 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/webhooks/"+itoa(hookID), nil, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
+}
+
+func TestWebhookNotificationsUseNotificationDelay(t *testing.T) {
+	tracker, server, client := newTestServer(t, Options{
+		AllowInsecureWebhooks: true,
+		AllowPrivateWebhooks:  true,
+		NotificationDelay:     time.Hour,
+	})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+
+	var webhookHits atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		webhookHits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/products/"+itoa(productID)+"/webhooks", map[string]any{
+		"name":   "delayed-product-hook",
+		"url":    target.URL,
+		"events": []string{"ticket.created"},
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"product_id": productID,
+		"title":      "Delayed webhook ticket",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	time.Sleep(50 * time.Millisecond)
+	if webhookHits.Load() != 0 {
+		t.Fatalf("webhook was delivered before notification delay")
+	}
+	claimed, err := tracker.ClaimWebhookNotifications(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim webhook notifications: %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("claimed delayed webhook notification too early: %#v", claimed)
+	}
+}
+
+func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+	app := NewServer(tracker, Options{
+		AllowInsecureWebhooks: true,
+		AllowPrivateWebhooks:  true,
+		NotificationDelay:     -time.Second,
+	})
+	server := httptest.NewTLSServer(app)
+	t.Cleanup(server.Close)
+	client := server.Client()
+	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+
+	var webhookHits atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		webhookHits.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/products/"+itoa(productID)+"/webhooks", map[string]any{
+		"name":   "projection-hook",
+		"url":    target.URL,
+		"events": []string{"ticket.created"},
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"product_id": productID,
+		"title":      "Projection ticket",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	waitUntil(t, func() bool { return webhookHits.Load() == 1 })
+
+	if err := app.dispatchPendingEvents(nil, 10); err != nil {
+		t.Fatalf("dispatch pending events again: %v", err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if webhookHits.Load() != 1 {
+		t.Fatalf("duplicate webhook deliveries = %d", webhookHits.Load())
+	}
 }
 
 func TestRegisteredCustomerTicketFlow(t *testing.T) {

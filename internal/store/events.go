@@ -229,13 +229,71 @@ func (s *Store) ClaimDomainEvents(limit int, leaseFor time.Duration) ([]DomainEv
 	return events, nil
 }
 
+func (s *Store) ApplyDomainEventProjection(eventID int64, projection DomainEventProjection) error {
+	if eventID < 1 {
+		return ErrNotFound
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	status, err := domainEventStatusTx(tx, eventID)
+	if err != nil {
+		return err
+	}
+	if status == "processed" {
+		return tx.Commit()
+	}
+	if projection.Audit != nil {
+		audit := *projection.Audit
+		audit.DomainEventID = eventID
+		if _, err := insertAuditEventTx(tx, audit, now); err != nil && !errors.Is(err, ErrConflict) {
+			return err
+		}
+	}
+	if _, err := enqueueEmailNotificationsTx(tx, projection.EmailNotifications, now); err != nil {
+		return err
+	}
+	if _, err := enqueueWebhookNotificationsTx(tx, projection.WebhookNotifications, now); err != nil {
+		return err
+	}
+	if err := markDomainEventProcessedTx(tx, eventID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func domainEventStatusTx(tx *sql.Tx, id int64) (string, error) {
+	var status string
+	err := tx.QueryRow(`SELECT status FROM domain_events WHERE id = ?`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return status, err
+}
+
 func (s *Store) MarkDomainEventProcessed(id int64) error {
 	now := time.Now().UTC()
-	result, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := markDomainEventProcessedTx(tx, id, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func markDomainEventProcessedTx(tx *sql.Tx, id int64, now time.Time) error {
+	result, err := tx.Exec(`
 		UPDATE domain_events
 		SET status = 'processed', locked_until = NULL, last_error = '', processed_at = ?, updated_at = ?
 		WHERE id = ?`,
-		formatTime(now), formatTime(now), id,
+		formatTime(now.UTC()), formatTime(now.UTC()), id,
 	)
 	if err != nil {
 		return err
@@ -265,6 +323,32 @@ func (s *Store) MarkDomainEventFailed(id int64, err error) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) PruneProcessedDomainEvents(olderThan time.Time, limit int) (int64, error) {
+	if olderThan.IsZero() {
+		return 0, fmt.Errorf("%w: cutoff time is required", ErrValidation)
+	}
+	if limit < 1 || limit > 1000 {
+		limit = 500
+	}
+	result, err := s.db.Exec(`
+		DELETE FROM domain_events
+		WHERE id IN (
+			SELECT id
+			FROM domain_events
+			WHERE status = 'processed'
+			  AND processed_at IS NOT NULL
+			  AND processed_at < ?
+			ORDER BY processed_at
+			LIMIT ?
+		)`,
+		formatTime(olderThan.UTC()), limit,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func insertDomainEventTx(tx *sql.Tx, input CreateDomainEvent, now time.Time) (int64, error) {

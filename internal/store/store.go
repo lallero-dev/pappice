@@ -224,6 +224,12 @@ type CreateAuditEvent struct {
 	DetailsJSON   string
 }
 
+type DomainEventProjection struct {
+	Audit                *CreateAuditEvent
+	EmailNotifications   []CreateEmailNotification
+	WebhookNotifications []CreateWebhookNotification
+}
+
 type AuditEventFilter struct {
 	Query  string
 	Limit  int
@@ -366,6 +372,31 @@ type WebhookDelivery struct {
 	Error      string    `json:"error,omitempty"`
 	DurationMS int64     `json:"duration_ms"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type WebhookNotification struct {
+	ID            int64      `json:"id"`
+	WebhookID     int64      `json:"webhook_id"`
+	ProductID     *int64     `json:"product_id,omitempty"`
+	TicketID      int64      `json:"ticket_id,omitempty"`
+	Event         string     `json:"event"`
+	PayloadJSON   string     `json:"payload_json,omitempty"`
+	Status        string     `json:"status"`
+	Attempts      int        `json:"attempts"`
+	NextAttemptAt time.Time  `json:"next_attempt_at"`
+	LockedUntil   *time.Time `json:"locked_until,omitempty"`
+	LastError     string     `json:"last_error,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	SentAt        *time.Time `json:"sent_at,omitempty"`
+}
+
+type CreateWebhookNotification struct {
+	WebhookID   int64
+	ProductID   *int64
+	TicketID    int64
+	Event       string
+	PayloadJSON string
+	SendAfter   time.Time
 }
 
 type EmailRecipient struct {
@@ -522,7 +553,26 @@ func (s *Store) migrate() error {
 	if err := s.ensureColumn("audit_events", "domain_event_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_events_domain_event ON audit_events(domain_event_id) WHERE domain_event_id > 0`)
+	_, err := s.db.Exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_events_domain_event ON audit_events(domain_event_id) WHERE domain_event_id > 0;
+CREATE TABLE IF NOT EXISTS webhook_notifications (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	webhook_id INTEGER REFERENCES webhooks(id) ON DELETE CASCADE,
+	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+	ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+	event TEXT NOT NULL,
+	payload_json TEXT NOT NULL,
+	status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')) DEFAULT 'pending',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL,
+	locked_until TEXT,
+	last_error TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_notifications_pending ON webhook_notifications(status, next_attempt_at, locked_until);
+CREATE INDEX IF NOT EXISTS idx_webhook_notifications_webhook ON webhook_notifications(webhook_id, created_at);
+`)
 	return err
 }
 
@@ -897,6 +947,22 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 	created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS webhook_notifications (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	webhook_id INTEGER REFERENCES webhooks(id) ON DELETE CASCADE,
+	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+	ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+	event TEXT NOT NULL,
+	payload_json TEXT NOT NULL,
+	status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')) DEFAULT 'pending',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL,
+	locked_until TEXT,
+	last_error TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	sent_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS email_notifications (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
@@ -949,6 +1015,8 @@ CREATE INDEX IF NOT EXISTS idx_attachments_ticket ON attachments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_comment ON attachments(comment_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_storage ON attachments(storage_key);
 CREATE INDEX IF NOT EXISTS idx_webhooks_product ON webhooks(product_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_notifications_pending ON webhook_notifications(status, next_attempt_at, locked_until);
+CREATE INDEX IF NOT EXISTS idx_webhook_notifications_webhook ON webhook_notifications(webhook_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_account_links_user_purpose ON account_links(user_id, purpose, used_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_user_id, created_at);

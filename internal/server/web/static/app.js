@@ -45,7 +45,7 @@ const state = {
   maintenance: null,
   emailStats: null,
   emailEnabled: false,
-  emailBatchDelaySeconds: 0,
+  notificationDelaySeconds: 0,
   deliveries: [],
   tokens: [],
   branding: {
@@ -726,7 +726,7 @@ async function loadEmailNotifications() {
   state.emailPage.offset = Number(payload.offset || 0);
   state.emailStats = payload.stats || null;
   state.emailEnabled = Boolean(payload.enabled);
-  state.emailBatchDelaySeconds = Number(payload.batch_delay_seconds || 0);
+  state.notificationDelaySeconds = Number(payload.notification_delay_seconds || 0);
   renderEmailNotifications();
 }
 
@@ -1998,7 +1998,7 @@ function renderEmailOverview() {
     emailStat("Sending", stats.sending || 0),
     emailStat("Failed", stats.failed || 0),
     emailStat("Sent", stats.sent || 0),
-    emailStat("Batch delay", formatSeconds(state.emailBatchDelaySeconds)),
+    emailStat("Notification delay", formatSeconds(state.notificationDelaySeconds)),
     emailStat("Last sent", stats.last_sent_at ? relativeTime(stats.last_sent_at) : "-")
   );
 }
@@ -2016,10 +2016,11 @@ function renderMaintenance() {
     maintenanceItem("Uploads", info.upload_path || "-"),
     maintenanceItem("Backups", backup.path || "-"),
     maintenanceItem("Last backup", backup.latest_at ? `${relativeTime(backup.latest_at)} / ${backup.latest_name || "latest"}` : "No backups found"),
+    maintenanceItem("Event retention", Number(info.domain_event_retention_seconds || 0) > 0 ? formatSeconds(Number(info.domain_event_retention_seconds || 0)) : "Disabled"),
     maintenanceItem("Upload limit", `${formatBytes(uploads.max_size_bytes || 0)} / ${uploads.max_files || 0} files`),
     maintenanceItem("Email", email.enabled ? "Enabled" : "Disabled"),
     maintenanceItem("Public URL", email.public_url || "-"),
-    maintenanceItem("Email delay", formatSeconds(Number(email.batch_delay_seconds || 0)))
+    maintenanceItem("Notification delay", formatSeconds(Number(email.notification_delay_seconds || 0)))
   );
 }
 

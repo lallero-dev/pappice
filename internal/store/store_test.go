@@ -345,6 +345,144 @@ func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if processed.Status != "processed" || processed.ProcessedAt == nil || processed.LockedUntil != nil {
 		t.Fatalf("processed event = %#v", processed)
 	}
+	pruned, err := tracker.PruneProcessedDomainEvents(time.Now().UTC().Add(time.Second), 100)
+	if err != nil {
+		t.Fatalf("prune processed domain events: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("pruned events = %d, want 1", pruned)
+	}
+	if _, err := tracker.GetDomainEvent(claimed[0].ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("pruned event error = %v, want ErrNotFound", err)
+	}
+	if events := tracker.ListDomainEvents(10); len(events) != 3 {
+		t.Fatalf("prune removed non-processed events: %#v", events)
+	}
+}
+
+func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Username: "Admin", DisplayName: "Alice Admin", Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	productID := tracker.ListProducts(admin)[0].ID
+	hook, err := tracker.CreateWebhook(CreateWebhook{
+		ProductID: &productID,
+		Name:      "Ticket receiver",
+		URL:       "https://hooks.example.test/tickets",
+		Events:    []string{"ticket.created"},
+	})
+	if err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+	event, err := tracker.CreateDomainEvent(CreateDomainEvent{
+		Type:      "ticket.created",
+		ProductID: productID,
+		TicketID:  77,
+		Actor:     EventActorFromUser(admin),
+	})
+	if err != nil {
+		t.Fatalf("create domain event: %v", err)
+	}
+	projection := DomainEventProjection{
+		Audit: &CreateAuditEvent{
+			ActorUserID:   admin.ID,
+			ActorUsername: admin.Username,
+			Action:        "ticket.created",
+			TargetType:    "ticket",
+			TargetID:      77,
+			TargetName:    "PME-77",
+		},
+		EmailNotifications: []CreateEmailNotification{{
+			ProductID:      productID,
+			RecipientEmail: "staff@example.test",
+			RecipientName:  "Staff",
+			Event:          "ticket.created",
+			Subject:        "Ticket created",
+			BodyText:       "A ticket was created.",
+			SendAfter:      time.Now().UTC().Add(-time.Second),
+		}},
+		WebhookNotifications: []CreateWebhookNotification{{
+			WebhookID:   hook.ID,
+			ProductID:   &productID,
+			Event:       "ticket.created",
+			PayloadJSON: `{"event":"ticket.created"}`,
+			SendAfter:   time.Now().UTC().Add(-time.Second),
+		}},
+	}
+	if err := tracker.ApplyDomainEventProjection(event.ID, projection); err != nil {
+		t.Fatalf("apply projection: %v", err)
+	}
+	processed, err := tracker.GetDomainEvent(event.ID)
+	if err != nil {
+		t.Fatalf("get processed event: %v", err)
+	}
+	if processed.Status != "processed" || processed.ProcessedAt == nil {
+		t.Fatalf("processed event = %#v", processed)
+	}
+	audits := tracker.ListAuditEvents(10)
+	if len(audits) != 1 || audits[0].DomainEventID != event.ID {
+		t.Fatalf("audits = %#v", audits)
+	}
+	emails := tracker.ListEmailNotifications(10)
+	if len(emails) != 1 || emails[0].Event != "ticket.created" {
+		t.Fatalf("emails = %#v", emails)
+	}
+	webhooks, err := tracker.ClaimWebhookNotifications(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim webhooks: %v", err)
+	}
+	if len(webhooks) != 1 || webhooks[0].WebhookID != hook.ID {
+		t.Fatalf("webhooks = %#v", webhooks)
+	}
+	if err := tracker.ApplyDomainEventProjection(event.ID, projection); err != nil {
+		t.Fatalf("reapply processed projection: %v", err)
+	}
+	if audits := tracker.ListAuditEvents(10); len(audits) != 1 {
+		t.Fatalf("reapply duplicated audit events: %#v", audits)
+	}
+	if emails := tracker.ListEmailNotifications(10); len(emails) != 1 {
+		t.Fatalf("reapply duplicated email notifications: %#v", emails)
+	}
+	if webhooks, err := tracker.ClaimWebhookNotifications(10, time.Minute); err != nil || len(webhooks) != 0 {
+		t.Fatalf("reapply duplicated webhook notifications: %#v err=%v", webhooks, err)
+	}
+
+	failed, err := tracker.CreateDomainEvent(CreateDomainEvent{Type: "ticket.created", ProductID: productID, Actor: EventActorFromUser(admin)})
+	if err != nil {
+		t.Fatalf("create failed projection event: %v", err)
+	}
+	err = tracker.ApplyDomainEventProjection(failed.ID, DomainEventProjection{
+		Audit: &CreateAuditEvent{
+			ActorUserID:   admin.ID,
+			ActorUsername: admin.Username,
+			Action:        "ticket.created",
+			TargetType:    "ticket",
+			TargetName:    "bad projection",
+		},
+		EmailNotifications: []CreateEmailNotification{{
+			RecipientEmail: "staff@example.test",
+			Event:          "ticket.created",
+			BodyText:       "Missing subject should fail.",
+		}},
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("bad projection error = %v, want ErrValidation", err)
+	}
+	unprocessed, err := tracker.GetDomainEvent(failed.ID)
+	if err != nil {
+		t.Fatalf("get failed projection event: %v", err)
+	}
+	if unprocessed.Status == "processed" {
+		t.Fatalf("failed projection was processed: %#v", unprocessed)
+	}
+	if audits := tracker.ListAuditEvents(10); len(audits) != 1 {
+		t.Fatalf("failed projection left audit row: %#v", audits)
+	}
 }
 
 func TestAppMutationsWriteDomainEventsTransactionally(t *testing.T) {
@@ -928,6 +1066,53 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	deliveries := tracker.ListDeliveries(10)
 	if len(deliveries) != 1 || deliveries[0].StatusCode != 204 {
 		t.Fatalf("deliveries = %#v", deliveries)
+	}
+	delayedWebhook, err := tracker.EnqueueWebhookNotifications([]CreateWebhookNotification{{
+		WebhookID:   hook.ID,
+		ProductID:   &product.ID,
+		Event:       "ticket.created",
+		PayloadJSON: `{"event":"ticket.created"}`,
+		SendAfter:   time.Now().UTC().Add(time.Hour),
+	}})
+	if err != nil {
+		t.Fatalf("enqueue delayed webhook notification: %v", err)
+	}
+	if len(delayedWebhook) != 1 || delayedWebhook[0].Status != "pending" {
+		t.Fatalf("delayed webhook notification = %#v", delayedWebhook)
+	}
+	claimedWebhooks, err := tracker.ClaimWebhookNotifications(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim delayed webhook notification: %v", err)
+	}
+	if len(claimedWebhooks) != 0 {
+		t.Fatalf("claimed delayed webhook too early: %#v", claimedWebhooks)
+	}
+	dueWebhook, err := tracker.EnqueueWebhookNotifications([]CreateWebhookNotification{{
+		WebhookID:   hook.ID,
+		ProductID:   &product.ID,
+		Event:       "ticket.created",
+		PayloadJSON: `{"event":"ticket.created"}`,
+		SendAfter:   time.Now().UTC().Add(-time.Second),
+	}})
+	if err != nil {
+		t.Fatalf("enqueue due webhook notification: %v", err)
+	}
+	claimedWebhooks, err = tracker.ClaimWebhookNotifications(10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim due webhook notification: %v", err)
+	}
+	if len(claimedWebhooks) != 1 || claimedWebhooks[0].ID != dueWebhook[0].ID || claimedWebhooks[0].Status != "sending" || claimedWebhooks[0].Attempts != 1 {
+		t.Fatalf("claimed due webhook = %#v", claimedWebhooks)
+	}
+	if err := tracker.MarkWebhookNotificationFailed(claimedWebhooks[0].ID, errors.New("temporary webhook failure"), 1); err != nil {
+		t.Fatalf("mark webhook notification failed: %v", err)
+	}
+	failedWebhook, err := tracker.GetWebhookNotification(claimedWebhooks[0].ID)
+	if err != nil {
+		t.Fatalf("get failed webhook notification: %v", err)
+	}
+	if failedWebhook.Status != "failed" || failedWebhook.LastError != "temporary webhook failure" {
+		t.Fatalf("failed webhook notification = %#v", failedWebhook)
 	}
 
 	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: product.ID, Title: "Numbered support ticket"})

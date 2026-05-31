@@ -40,6 +40,25 @@ CREATE TABLE IF NOT EXISTS domain_events (
 CREATE INDEX IF NOT EXISTS idx_domain_events_pending ON domain_events(status, locked_until, created_at);
 CREATE INDEX IF NOT EXISTS idx_domain_events_ticket ON domain_events(ticket_id, id);
 
+CREATE TABLE IF NOT EXISTS webhook_notifications (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	webhook_id INTEGER REFERENCES webhooks(id) ON DELETE CASCADE,
+	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+	ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+	event TEXT NOT NULL,
+	payload_json TEXT NOT NULL,
+	status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')) DEFAULT 'pending',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL,
+	locked_until TEXT,
+	last_error TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	sent_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_notifications_pending ON webhook_notifications(status, next_attempt_at, locked_until);
+CREATE INDEX IF NOT EXISTS idx_webhook_notifications_webhook ON webhook_notifications(webhook_id, created_at);
+
 COMMIT;
 SQL
 
@@ -50,4 +69,4 @@ if sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type = 'table' AND n
   sqlite3 "$db_path" "CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_events_domain_event ON audit_events(domain_event_id) WHERE domain_event_id > 0;"
 fi
 
-echo "domain event outbox is ready in $db_path"
+echo "event and notification outboxes are ready in $db_path"

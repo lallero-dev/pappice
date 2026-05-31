@@ -1132,7 +1132,7 @@ function startApp({ appPort, appURL, binaryPath, certPath, dbPath, keyPath, smtp
     "-smtp-port", String(smtpPort),
     "-smtp-from", "no-reply@example.test",
     "-smtp-tls-mode", "none",
-    "-email-batch-delay", "1h",
+    "-notification-delay", "1h",
     "-session-ttl", "2h"
   ], {
     cwd: repoRoot,

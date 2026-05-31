@@ -76,6 +76,8 @@ Important values:
 - `PAPPICE_DB`: SQLite database path, default `./pappice.db`
 - `PAPPICE_TLS_CERT` / `PAPPICE_TLS_KEY`: HTTPS certificate and key
 - `PAPPICE_PUBLIC_URL`: public HTTPS URL used in emails
+- `PAPPICE_NOTIFICATION_DELAY`: ticket notification delay, default `30s`
+- `PAPPICE_DOMAIN_EVENT_RETENTION`: processed event retention, default `720h`; `0` disables pruning
 - `PAPPICE_SESSION_TTL`: browser session lifetime, default `336h`
 - `PAPPICE_BRAND_NAME`: display name for the deployed instance
 - `PAPPICE_UPLOAD_DIR`: directory for ticket attachments
@@ -164,9 +166,10 @@ PAPPICE_SMTP_FROM=no-reply@example.com
 PAPPICE_SMTP_TLS_MODE=starttls
 ```
 
-Ticket notifications are queued in SQLite and coalesced for
-`PAPPICE_EMAIL_BATCH_DELAY` before sending. Admins can inspect the outbox, send a
-test email, and retry failures from the admin page.
+Ticket notifications are queued in SQLite. Email and webhook notifications wait
+for `PAPPICE_NOTIFICATION_DELAY` before delivery; pending email updates are also
+coalesced. Admins can inspect the email outbox, send a test email, and retry
+failures from the admin page.
 
 ## Webhooks And API
 

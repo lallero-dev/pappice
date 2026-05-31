@@ -24,18 +24,17 @@ import (
 var assets embed.FS
 
 const (
-	sessionCookieName      = "pappice_session"
-	defaultEmailBatchDelay = 20 * time.Second
-	accountLinkExpiry      = 24 * time.Hour
-	defaultSessionTTL      = 14 * 24 * time.Hour
-	defaultBrandName       = "Pappice"
-	defaultBrandSubtitle   = "customer support"
-	defaultBrandColor      = "#5bb974"
-	defaultUploadDir       = "pappice-uploads"
-	defaultBackupDir       = "pappice-backups"
-	defaultMaxUploadSize   = 10 << 20
-	defaultMaxUploadFiles  = 5
-	defaultVersion         = "dev"
+	sessionCookieName     = "pappice_session"
+	accountLinkExpiry     = 24 * time.Hour
+	defaultSessionTTL     = 14 * 24 * time.Hour
+	defaultBrandName      = "Pappice"
+	defaultBrandSubtitle  = "customer support"
+	defaultBrandColor     = "#5bb974"
+	defaultUploadDir      = "pappice-uploads"
+	defaultBackupDir      = "pappice-backups"
+	defaultMaxUploadSize  = 10 << 20
+	defaultMaxUploadFiles = 5
+	defaultVersion        = "dev"
 )
 
 var (
@@ -52,8 +51,9 @@ type Options struct {
 	AllowInsecureWebhooks bool
 	AllowPrivateWebhooks  bool
 	Branding              Branding
+	DomainEventRetention  time.Duration
 	EmailNotifications    bool
-	EmailBatchDelay       time.Duration
+	NotificationDelay     time.Duration
 	PublicURL             string
 	SessionTTL            time.Duration
 	Version               string
@@ -122,9 +122,6 @@ func NewServer(tracker *store.Store, opts ...Options) *Server {
 	options := Options{}
 	if len(opts) > 0 {
 		options = opts[0]
-	}
-	if options.EmailBatchDelay <= 0 {
-		options.EmailBatchDelay = defaultEmailBatchDelay
 	}
 	if options.SessionTTL <= 0 {
 		options.SessionTTL = defaultSessionTTL
@@ -294,17 +291,18 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"version":       s.options.Version,
-		"started_at":    s.started,
-		"database_path": s.store.Path(),
-		"upload_path":   s.options.UploadDir,
-		"backup":        backupStatus(s.options.BackupDir),
-		"uploads":       s.publicUploadConfig(),
+		"version":                        s.options.Version,
+		"started_at":                     s.started,
+		"database_path":                  s.store.Path(),
+		"upload_path":                    s.options.UploadDir,
+		"domain_event_retention_seconds": int(s.options.DomainEventRetention.Seconds()),
+		"backup":                         backupStatus(s.options.BackupDir),
+		"uploads":                        s.publicUploadConfig(),
 		"email": map[string]any{
-			"enabled":             s.options.EmailNotifications,
-			"public_url":          strings.TrimSpace(s.options.PublicURL),
-			"batch_delay_seconds": int(s.options.EmailBatchDelay.Seconds()),
-			"stats":               s.store.EmailNotificationStats(),
+			"enabled":                    s.options.EmailNotifications,
+			"public_url":                 strings.TrimSpace(s.options.PublicURL),
+			"notification_delay_seconds": int(s.options.NotificationDelay.Seconds()),
+			"stats":                      s.store.EmailNotificationStats(),
 		},
 	})
 }
@@ -1527,13 +1525,13 @@ func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request
 		Offset: offset,
 	})
 	respondJSON(w, http.StatusOK, map[string]any{
-		"notifications":       page.Notifications,
-		"total":               page.Total,
-		"limit":               page.Limit,
-		"offset":              page.Offset,
-		"enabled":             s.options.EmailNotifications,
-		"batch_delay_seconds": int(s.options.EmailBatchDelay.Seconds()),
-		"stats":               s.store.EmailNotificationStats(),
+		"notifications":              page.Notifications,
+		"total":                      page.Total,
+		"limit":                      page.Limit,
+		"offset":                     page.Offset,
+		"enabled":                    s.options.EmailNotifications,
+		"notification_delay_seconds": int(s.options.NotificationDelay.Seconds()),
+		"stats":                      s.store.EmailNotificationStats(),
 	})
 }
 

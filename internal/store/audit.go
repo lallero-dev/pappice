@@ -8,6 +8,22 @@ import (
 )
 
 func (s *Store) RecordAuditEvent(input CreateAuditEvent) (AuditEvent, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	defer tx.Rollback()
+	event, err := insertAuditEventTx(tx, input, time.Now().UTC())
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuditEvent{}, err
+	}
+	return event, nil
+}
+
+func insertAuditEventTx(tx *sql.Tx, input CreateAuditEvent, now time.Time) (AuditEvent, error) {
 	action := strings.TrimSpace(input.Action)
 	targetType := strings.TrimSpace(input.TargetType)
 	if action == "" || targetType == "" {
@@ -23,12 +39,12 @@ func (s *Store) RecordAuditEvent(input CreateAuditEvent) (AuditEvent, error) {
 		TargetName:    strings.TrimSpace(input.TargetName),
 		IP:            strings.TrimSpace(input.IP),
 		DetailsJSON:   strings.TrimSpace(input.DetailsJSON),
-		CreatedAt:     time.Now().UTC(),
+		CreatedAt:     now.UTC(),
 	}
 	if event.ActorUsername == "" {
 		event.ActorUsername = "system"
 	}
-	result, err := s.db.Exec(`
+	result, err := tx.Exec(`
 		INSERT INTO audit_events (domain_event_id, actor_user_id, actor_username, action, target_type, target_id, target_name, ip, details_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.DomainEventID, nullZero(event.ActorUserID), event.ActorUsername, event.Action, event.TargetType, nullZero(event.TargetID),

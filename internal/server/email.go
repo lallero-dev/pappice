@@ -9,10 +9,11 @@ import (
 	"pappice/internal/store"
 )
 
-func (s *Server) enqueueTicketEmails(event string, ticket store.Ticket, actor store.User) error {
+func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, actor store.User, sendAfter time.Time) []store.CreateEmailNotification {
 	if !s.options.EmailNotifications {
 		return nil
 	}
+	sendAfter = normalizeNotificationSendAfter(sendAfter)
 	recipients := s.store.TicketEmailRecipients(event, ticket, actor)
 	if len(recipients) == 0 {
 		return nil
@@ -31,20 +32,20 @@ func (s *Server) enqueueTicketEmails(event string, ticket store.Ticket, actor st
 			Subject:        subject,
 			BodyText:       textBody,
 			BodyHTML:       htmlBody,
-			SendAfter:      time.Now().UTC().Add(s.options.EmailBatchDelay),
+			SendAfter:      sendAfter,
 			Coalesce:       true,
 		})
 	}
-	_, err := s.store.EnqueueEmailNotifications(inputs)
-	return err
+	return inputs
 }
 
-func (s *Server) enqueueRequesterEmail(event string, ticket store.Ticket, actorName string) error {
+func (s *Server) requesterEmailNotifications(event string, ticket store.Ticket, actorName string, sendAfter time.Time) []store.CreateEmailNotification {
 	if !s.options.EmailNotifications || strings.TrimSpace(ticket.RequesterEmail) == "" || strings.TrimSpace(ticket.CustomerToken) == "" {
 		return nil
 	}
+	sendAfter = normalizeNotificationSendAfter(sendAfter)
 	subject, textBody, htmlBody := s.requesterEmailContent(event, ticket, actorName)
-	_, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
+	return []store.CreateEmailNotification{{
 		ProductID:      ticket.ProductID,
 		TicketID:       ticket.ID,
 		UserID:         0,
@@ -54,18 +55,24 @@ func (s *Server) enqueueRequesterEmail(event string, ticket store.Ticket, actorN
 		Subject:        subject,
 		BodyText:       textBody,
 		BodyHTML:       htmlBody,
-		SendAfter:      time.Now().UTC().Add(s.options.EmailBatchDelay),
+		SendAfter:      sendAfter,
 		Coalesce:       true,
-	}})
-	return err
+	}}
 }
 
-func (s *Server) enqueueAccountLinkEmail(event string, user store.User, token string, expiresAt time.Time) error {
+func normalizeNotificationSendAfter(sendAfter time.Time) time.Time {
+	if sendAfter.IsZero() {
+		return time.Now().UTC()
+	}
+	return sendAfter.UTC()
+}
+
+func (s *Server) accountLinkEmailNotifications(event string, user store.User, token string, expiresAt time.Time) []store.CreateEmailNotification {
 	if !s.options.EmailNotifications || strings.TrimSpace(user.Email) == "" || strings.TrimSpace(token) == "" {
 		return nil
 	}
 	subject, textBody, htmlBody := s.accountLinkEmailContent(event, user, token, expiresAt)
-	_, err := s.store.EnqueueEmailNotifications([]store.CreateEmailNotification{{
+	return []store.CreateEmailNotification{{
 		UserID:         user.ID,
 		RecipientEmail: user.Email,
 		RecipientName:  defaultString(user.DisplayName, user.Username),
@@ -74,8 +81,7 @@ func (s *Server) enqueueAccountLinkEmail(event string, user store.User, token st
 		BodyText:       textBody,
 		BodyHTML:       htmlBody,
 		Coalesce:       true,
-	}})
-	return err
+	}}
 }
 
 func (s *Server) accountLinkEmailContent(event string, user store.User, token string, expiresAt time.Time) (string, string, string) {

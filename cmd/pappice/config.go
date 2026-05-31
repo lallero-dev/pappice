@@ -23,6 +23,7 @@ type appConfig struct {
 	BrandSubtitle         string
 	BrandMark             string
 	BrandColor            string
+	DomainEventRetention  time.Duration
 	EmailNotifications    bool
 	SMTPHost              string
 	SMTPPort              int
@@ -30,7 +31,7 @@ type appConfig struct {
 	SMTPPassword          string
 	SMTPFrom              string
 	SMTPTLSMode           string
-	EmailBatchDelay       time.Duration
+	NotificationDelay     time.Duration
 	SessionTTL            time.Duration
 	UploadDir             string
 	BackupDir             string
@@ -65,7 +66,8 @@ func defaultAppConfig() appConfig {
 		Addr:                  "127.0.0.1:8388",
 		DBPath:                "pappice.db",
 		SMTPTLSMode:           "starttls",
-		EmailBatchDelay:       20 * time.Second,
+		DomainEventRetention:  30 * 24 * time.Hour,
+		NotificationDelay:     30 * time.Second,
 		SessionTTL:            14 * 24 * time.Hour,
 		UploadDir:             "pappice-uploads",
 		BackupDir:             "pappice-backups",
@@ -96,6 +98,7 @@ func newConfigFlagSet(name string, cfg *appConfig, output io.Writer) *flag.FlagS
 	fs.StringVar(&cfg.BrandSubtitle, "brand-subtitle", cfg.BrandSubtitle, "short subtitle shown under the brand name")
 	fs.StringVar(&cfg.BrandMark, "brand-mark", cfg.BrandMark, "short mark shown in the header")
 	fs.StringVar(&cfg.BrandColor, "brand-color", cfg.BrandColor, "hex color for the brand mark")
+	fs.DurationVar(&cfg.DomainEventRetention, "domain-event-retention", cfg.DomainEventRetention, "processed domain event retention; set 0 to disable pruning")
 	fs.BoolVar(&cfg.EmailNotifications, "email-notifications", cfg.EmailNotifications, "enable email notification enqueueing and delivery")
 	fs.StringVar(&cfg.SMTPHost, "smtp-host", cfg.SMTPHost, "SMTP host for email notifications")
 	fs.IntVar(&cfg.SMTPPort, "smtp-port", cfg.SMTPPort, "SMTP port for email notifications")
@@ -103,7 +106,7 @@ func newConfigFlagSet(name string, cfg *appConfig, output io.Writer) *flag.FlagS
 	fs.StringVar(&cfg.SMTPPassword, "smtp-password", cfg.SMTPPassword, "SMTP password")
 	fs.StringVar(&cfg.SMTPFrom, "smtp-from", cfg.SMTPFrom, "sender address for email notifications")
 	fs.StringVar(&cfg.SMTPTLSMode, "smtp-tls-mode", cfg.SMTPTLSMode, "SMTP TLS mode: starttls, tls, or none")
-	fs.DurationVar(&cfg.EmailBatchDelay, "email-batch-delay", cfg.EmailBatchDelay, "delay before sending coalesced ticket notification emails")
+	fs.DurationVar(&cfg.NotificationDelay, "notification-delay", cfg.NotificationDelay, "delay before sending ticket notifications through email and webhooks")
 	fs.DurationVar(&cfg.SessionTTL, "session-ttl", cfg.SessionTTL, "browser session lifetime")
 	fs.StringVar(&cfg.UploadDir, "upload-dir", cfg.UploadDir, "directory for ticket attachment files")
 	fs.StringVar(&cfg.BackupDir, "backup-dir", cfg.BackupDir, "directory where backup snapshots are stored")
@@ -159,6 +162,9 @@ func applyEnv(cfg *appConfig, flags map[string]bool) {
 	if !flags["brand-color"] {
 		cfg.BrandColor = envOr("PAPPICE_BRAND_COLOR", cfg.BrandColor)
 	}
+	if !flags["domain-event-retention"] {
+		cfg.DomainEventRetention = envDuration("PAPPICE_DOMAIN_EVENT_RETENTION", cfg.DomainEventRetention)
+	}
 	if !flags["email-notifications"] {
 		cfg.EmailNotifications = envBoolOr("PAPPICE_EMAIL_NOTIFICATIONS", cfg.EmailNotifications)
 	}
@@ -180,8 +186,8 @@ func applyEnv(cfg *appConfig, flags map[string]bool) {
 	if !flags["smtp-tls-mode"] {
 		cfg.SMTPTLSMode = envOr("PAPPICE_SMTP_TLS_MODE", cfg.SMTPTLSMode)
 	}
-	if !flags["email-batch-delay"] {
-		cfg.EmailBatchDelay = envDuration("PAPPICE_EMAIL_BATCH_DELAY", cfg.EmailBatchDelay)
+	if !flags["notification-delay"] {
+		cfg.NotificationDelay = envDuration("PAPPICE_NOTIFICATION_DELAY", cfg.NotificationDelay)
 	}
 	if !flags["session-ttl"] {
 		cfg.SessionTTL = envDuration("PAPPICE_SESSION_TTL", cfg.SessionTTL)
@@ -240,8 +246,9 @@ func (cfg appConfig) serverOptions(emailEnabled bool) server.Options {
 			Mark:     cfg.BrandMark,
 			Color:    cfg.BrandColor,
 		},
+		DomainEventRetention: cfg.DomainEventRetention,
 		EmailNotifications:   emailEnabled,
-		EmailBatchDelay:      cfg.EmailBatchDelay,
+		NotificationDelay:    cfg.NotificationDelay,
 		PublicURL:            cfg.PublicURL,
 		SessionTTL:           cfg.SessionTTL,
 		Version:              version,

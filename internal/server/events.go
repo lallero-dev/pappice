@@ -14,6 +14,8 @@ type eventLogger interface {
 	Printf(format string, args ...any)
 }
 
+const domainEventPruneInterval = time.Hour
+
 func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration, logger eventLogger) {
 	if interval <= 0 {
 		interval = 5 * time.Second
@@ -21,8 +23,11 @@ func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration,
 	if err := s.dispatchPendingEvents(ctx, 25); err != nil && logger != nil {
 		logger.Printf("domain event dispatch: %v", err)
 	}
+	s.pruneProcessedDomainEvents(logger)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	pruneTicker := time.NewTicker(domainEventPruneInterval)
+	defer pruneTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -31,7 +36,33 @@ func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration,
 			if err := s.dispatchPendingEvents(ctx, 25); err != nil && logger != nil {
 				logger.Printf("domain event dispatch: %v", err)
 			}
+		case <-pruneTicker.C:
+			s.pruneProcessedDomainEvents(logger)
 		}
+	}
+}
+
+func (s *Server) pruneProcessedDomainEvents(logger eventLogger) {
+	if s.options.DomainEventRetention <= 0 {
+		return
+	}
+	cutoff := time.Now().UTC().Add(-s.options.DomainEventRetention)
+	var total int64
+	for {
+		pruned, err := s.store.PruneProcessedDomainEvents(cutoff, 500)
+		if err != nil {
+			if logger != nil {
+				logger.Printf("domain event prune: %v", err)
+			}
+			return
+		}
+		total += pruned
+		if pruned < 500 {
+			break
+		}
+	}
+	if total > 0 && logger != nil {
+		logger.Printf("domain event prune: removed %d processed event(s)", total)
 	}
 }
 
@@ -55,31 +86,43 @@ func (s *Server) dispatchPendingEvents(ctx context.Context, limit int) error {
 			}
 			continue
 		}
-		if err := s.dispatchDomainEvent(ctx, event); err != nil {
+		projection, err := s.domainEventProjection(event)
+		if err != nil {
 			_ = s.store.MarkDomainEventFailed(event.ID, err)
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		if err := s.store.MarkDomainEventProcessed(event.ID); err != nil && firstErr == nil {
-			firstErr = err
+		if err := s.store.ApplyDomainEventProjection(event.ID, projection); err != nil {
+			_ = s.store.MarkDomainEventFailed(event.ID, err)
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
+	}
+	if err := s.dispatchPendingWebhookNotifications(ctx, limit); err != nil && firstErr == nil {
+		firstErr = err
 	}
 	return firstErr
 }
 
-func (s *Server) dispatchDomainEvent(_ context.Context, event store.DomainEvent) error {
-	if err := s.recordAuditEvent(event); err != nil {
-		return err
+func (s *Server) domainEventProjection(event store.DomainEvent) (store.DomainEventProjection, error) {
+	projection := store.DomainEventProjection{}
+	if audit, ok := s.auditEventInput(event); ok {
+		projection.Audit = &audit
 	}
 	if isTicketNotificationEvent(event.Type) {
-		return s.dispatchTicketDomainEvent(event)
+		if err := s.projectTicketDomainEvent(event, &projection); err != nil {
+			return store.DomainEventProjection{}, err
+		}
+		return projection, nil
 	}
-	return s.dispatchAppDomainEvent(event)
+	s.projectAppDomainEvent(event, &projection)
+	return projection, nil
 }
 
-func (s *Server) dispatchTicketDomainEvent(event store.DomainEvent) error {
+func (s *Server) projectTicketDomainEvent(event store.DomainEvent, projection *store.DomainEventProjection) error {
 	ticket, err := s.store.GetTicket(event.TicketID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
@@ -89,17 +132,64 @@ func (s *Server) dispatchTicketDomainEvent(event store.DomainEvent) error {
 	}
 	actor := event.Actor()
 	payload := ticketEventPayload(event)
-	if err := s.enqueueTicketEventEmails(event.Type, ticket, actor, payload); err != nil {
-		return err
-	}
-	s.emitTicketWebhook(event.Type, ticket, actor)
+	sendAfter := event.CreatedAt.Add(s.options.NotificationDelay)
+	projection.EmailNotifications = append(projection.EmailNotifications, s.ticketEventEmails(event.Type, ticket, actor, payload, sendAfter)...)
+	projection.WebhookNotifications = append(projection.WebhookNotifications, s.ticketWebhookNotifications(event.Type, ticket, actor, event.CreatedAt, sendAfter)...)
 	return nil
 }
 
-func (s *Server) dispatchAppDomainEvent(event store.DomainEvent) error {
+func (s *Server) dispatchPendingWebhookNotifications(ctx context.Context, limit int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	notifications, err := s.store.ClaimWebhookNotifications(limit, time.Minute)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, notification := range notifications {
+		if err := ctx.Err(); err != nil {
+			_ = s.store.MarkWebhookNotificationFailed(notification.ID, err, 5)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		hook, err := s.store.GetWebhook(notification.WebhookID)
+		if errors.Is(err, store.ErrNotFound) {
+			_ = s.store.MarkWebhookNotificationSent(notification.ID)
+			continue
+		}
+		if err != nil {
+			_ = s.store.MarkWebhookNotificationFailed(notification.ID, err, 5)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		delivery := s.deliverWebhook(hook, notification.Event, notification.TicketID, []byte(notification.PayloadJSON))
+		if strings.TrimSpace(delivery.Error) != "" {
+			err := errors.New(delivery.Error)
+			_ = s.store.MarkWebhookNotificationFailed(notification.ID, err, 5)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := s.store.MarkWebhookNotificationSent(notification.ID); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s *Server) projectAppDomainEvent(event store.DomainEvent, projection *store.DomainEventProjection) {
 	payload := appEventPayloadFromEvent(event)
 	if payload.AccountLink == nil {
-		return nil
+		return
 	}
 	user := store.User{
 		ID:          payload.AccountLink.UserID,
@@ -107,18 +197,7 @@ func (s *Server) dispatchAppDomainEvent(event store.DomainEvent) error {
 		DisplayName: payload.AccountLink.DisplayName,
 		Email:       payload.AccountLink.Email,
 	}
-	return s.enqueueAccountLinkEmail(payload.AccountLink.Event, user, payload.AccountLink.Token, payload.AccountLink.ExpiresAt)
-}
-
-func (s *Server) recordAuditEvent(event store.DomainEvent) error {
-	input, ok := s.auditEventInput(event)
-	if !ok {
-		return nil
-	}
-	if _, err := s.store.RecordAuditEvent(input); err != nil && !errors.Is(err, store.ErrConflict) {
-		return err
-	}
-	return nil
+	projection.EmailNotifications = append(projection.EmailNotifications, s.accountLinkEmailNotifications(payload.AccountLink.Event, user, payload.AccountLink.Token, payload.AccountLink.ExpiresAt)...)
 }
 
 func (s *Server) auditEventInput(event store.DomainEvent) (store.CreateAuditEvent, bool) {
@@ -191,39 +270,34 @@ func appEventPayloadFromEvent(event store.DomainEvent) store.AppEventPayload {
 	return payload
 }
 
-func (s *Server) enqueueTicketEventEmails(event string, ticket store.Ticket, actor store.User, payload store.TicketEventPayload) error {
+func (s *Server) ticketEventEmails(event string, ticket store.Ticket, actor store.User, payload store.TicketEventPayload, sendAfter time.Time) []store.CreateEmailNotification {
+	inputs := make([]store.CreateEmailNotification, 0)
 	switch event {
 	case "ticket.created":
-		if err := s.enqueueTicketEmails(event, ticket, actor); err != nil {
-			return err
-		}
+		inputs = append(inputs, s.ticketEmailNotifications(event, ticket, actor, sendAfter)...)
 		if payload.RequesterCreatedCopy {
-			return s.enqueueRequesterEmail(event, ticket, "Pappice Support")
+			inputs = append(inputs, s.requesterEmailNotifications(event, ticket, "Pappice Support", sendAfter)...)
 		}
 	case "ticket.updated":
 		if payload.HasPatch {
-			if err := s.enqueueTicketEmails(event, ticket, actor); err != nil {
-				return err
-			}
+			inputs = append(inputs, s.ticketEmailNotifications(event, ticket, actor, sendAfter)...)
 		}
 		if payload.StatusChanged && payload.TerminalStatus && !s.isSupportTicketRequester(actor, ticket) {
-			return s.enqueueRequesterEmail(event, ticket, defaultString(actor.DisplayName, actor.Username))
+			inputs = append(inputs, s.requesterEmailNotifications(event, ticket, defaultString(actor.DisplayName, actor.Username), sendAfter)...)
 		}
 	case "ticket.assigned":
 		if payload.AssignmentChanged && payload.OnlyAssigneePatch && !payload.PublicComment {
-			return s.enqueueTicketEmails(event, ticket, actor)
+			inputs = append(inputs, s.ticketEmailNotifications(event, ticket, actor, sendAfter)...)
 		}
 	case "ticket.commented":
 		if payload.PublicComment && !payload.HasPatch {
-			if err := s.enqueueTicketEmails(event, ticket, actor); err != nil {
-				return err
-			}
+			inputs = append(inputs, s.ticketEmailNotifications(event, ticket, actor, sendAfter)...)
 		}
 		if payload.PublicComment && !s.isSupportTicketRequester(actor, ticket) {
-			return s.enqueueRequesterEmail(event, ticket, defaultString(actor.DisplayName, actor.Username))
+			inputs = append(inputs, s.requesterEmailNotifications(event, ticket, defaultString(actor.DisplayName, actor.Username), sendAfter)...)
 		}
 	}
-	return nil
+	return inputs
 }
 
 func detailsJSON(details map[string]any) string {

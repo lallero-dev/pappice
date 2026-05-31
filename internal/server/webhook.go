@@ -33,17 +33,29 @@ func (s *Server) newWebhookClient() *http.Client {
 	}
 }
 
-func (s *Server) emitTicketWebhook(event string, ticket store.Ticket, actor store.User) {
+func (s *Server) ticketWebhookNotifications(event string, ticket store.Ticket, actor store.User, createdAt time.Time, sendAfter time.Time) []store.CreateWebhookNotification {
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
 	payload := map[string]any{
 		"event":      event,
-		"created_at": time.Now().UTC(),
+		"created_at": createdAt.UTC(),
 		"actor":      store.ToPublicUser(actor),
 		"ticket":     ticket,
 	}
 	body, _ := json.Marshal(payload)
+	inputs := make([]store.CreateWebhookNotification, 0)
 	for _, hook := range s.store.ListWebhooksForEvent(event, ticket.ProductID) {
-		go s.deliverWebhook(hook, event, ticket.ID, body)
+		inputs = append(inputs, store.CreateWebhookNotification{
+			WebhookID:   hook.ID,
+			ProductID:   hook.ProductID,
+			TicketID:    ticket.ID,
+			Event:       event,
+			PayloadJSON: string(body),
+			SendAfter:   normalizeNotificationSendAfter(sendAfter),
+		})
 	}
+	return inputs
 }
 
 func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64, body []byte) store.WebhookDelivery {
