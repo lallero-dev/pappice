@@ -509,7 +509,12 @@ button:focus-visible {
   align-items: center;
   display: inline-flex;
   gap: 7px;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  justify-content: center;
+  justify-self: stretch;
   white-space: nowrap;
+  width: 100%;
 }
 
 .button-icon {
@@ -607,10 +612,11 @@ button:focus-visible {
 }
 
 .ticket-list-topbar {
-  align-items: center;
+  align-items: stretch;
   display: grid;
   gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
 }
 
 .ticket-list-toolbar .filter-control {
@@ -618,6 +624,8 @@ button:focus-visible {
 }
 
 .ticket-search-control {
+  grid-column: 1;
+  grid-row: 2;
   min-width: 0;
 }
 
@@ -625,11 +633,14 @@ button:focus-visible {
   align-items: center;
   display: flex;
   gap: 5px;
+  grid-column: 2;
+  grid-row: 2;
   justify-content: flex-end;
+  position: relative;
 }
 
 .toolbar-menu {
-  position: relative;
+  position: static;
 }
 
 .toolbar-icon,
@@ -661,6 +672,15 @@ button:focus-visible {
 .toolbar-menu-button {
   padding: 7px 10px;
   white-space: nowrap;
+}
+
+#ticketSortButton {
+  padding: 7px;
+  width: 36px;
+}
+
+#ticketSortLabel {
+  display: none;
 }
 
 .toolbar-icon-button:hover,
@@ -2569,10 +2589,6 @@ button:focus-visible {
 
   .ticket-toolbar-actions > .toolbar-menu > button {
     width: 38px;
-  }
-
-  #ticketSortLabel {
-    display: none;
   }
 
   .email-overview {
