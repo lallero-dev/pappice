@@ -962,6 +962,16 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		input.Event = s.eventContext(r, auth.User)
+		if strings.TrimSpace(input.Password) != "" {
+			created, err := s.store.CreateUser(input)
+			if err != nil {
+				respondStoreError(w, err)
+				return
+			}
+			s.dispatchEventsSoon()
+			respondJSON(w, http.StatusCreated, store.ToPublicUser(created))
+			return
+		}
 		created, link, token, err := s.store.CreateUserWithSetupLink(input, accountLinkExpiry)
 		if err != nil {
 			respondStoreError(w, err)

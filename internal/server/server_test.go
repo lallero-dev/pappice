@@ -733,6 +733,32 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	}
 }
 
+func TestAdminCreatesUserWithManualPassword(t *testing.T) {
+	tracker, server, client := newTestServer(t, Options{
+		EmailNotifications: true,
+		PublicURL:          "https://tracker.example.test",
+	})
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
+		"username":     "manual",
+		"display_name": "Manual Customer",
+		"email":        "manual@example.test",
+		"role":         "customer",
+		"password":     "manual horse battery",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	if bytes.Contains(body, []byte("account_link")) ||
+		bytes.Contains(body, []byte("manual horse battery")) ||
+		!bytes.Contains(body, []byte(`"password_reset_required":false`)) {
+		t.Fatalf("manual password create response = %s", body)
+	}
+	if notifications := tracker.ListEmailNotifications(10); len(notifications) != 0 {
+		t.Fatalf("manual password create queued email notifications: %#v", notifications)
+	}
+	loginUser(t, client, server.URL, "manual", "manual horse battery")
+}
+
 func TestProfileAndPasswordChangeFlow(t *testing.T) {
 	_, server, client := newTestServer(t)
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
@@ -2222,11 +2248,15 @@ func loginUser(t *testing.T, client *http.Client, baseURL, username, password st
 
 func createUser(t *testing.T, client *http.Client, baseURL string, cookie *http.Cookie, csrf string, payload map[string]any) int64 {
 	t.Helper()
-	password, hasPassword := payload["password"].(string)
 	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/users", payload, cookie, csrf, baseURL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	id := decodeInt64(t, body, "id")
-	if hasPassword && strings.TrimSpace(password) != "" {
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatalf("decode create user response: %v", err)
+	}
+	if _, ok := response["account_link"]; ok {
+		password, _ := payload["password"].(string)
 		link := decodeNestedString(t, body, "account_link", "url")
 		token := accountLinkTokenFromURL(t, link)
 		resp, body = doJSON(t, client, http.MethodPost, baseURL+"/api/account-links/"+token, map[string]any{

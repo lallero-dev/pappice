@@ -26,7 +26,7 @@ database.
 - Public replies, internal notes, unread state, assignees, priorities,
   filtering, and sorting.
 - Drag/drop and pasted attachments, with inline image previews.
-- Admin-created accounts with one-time setup/reset links.
+- Admin-created accounts with one-time setup/reset links or manual passwords.
 - SMTP-backed no-reply notifications with a durable SQLite outbox.
 - API tokens, webhooks, admin audit events, and a maintenance overview.
 

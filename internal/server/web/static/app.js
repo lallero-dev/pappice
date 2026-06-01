@@ -2350,18 +2350,34 @@ function openUserModal(user = null) {
       { name: "display_name", label: "Display name", autocomplete: "off" }
     ] },
     { name: "email", label: "Email", type: "email", autocomplete: "email" },
-    { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "staff" }
+    { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "staff" },
+    { group: [
+      { name: "password", label: "Manual password (optional)", type: "password", minlength: 8, autocomplete: "new-password" },
+      { name: "password_confirm", label: "Confirm manual password", type: "password", minlength: 8, autocomplete: "new-password" }
+    ] }
   ];
 
   els.modalHost.open({
     title: "New Account",
-    submitText: "Create & Send Setup",
+    submitText: "Create Account",
     values: { role: "staff" },
     fields,
     onSubmit: async (data) => {
+      if (data.password || data.password_confirm) {
+        if (data.password !== data.password_confirm) {
+          throw new Error("Manual passwords do not match");
+        }
+      } else {
+        delete data.password;
+      }
+      delete data.password_confirm;
       const created = await request("/api/users", { method: "POST", body: JSON.stringify(data) });
       await loadUsers();
-      window.setTimeout(() => openAccountLinkResult(created, "setup"), 0);
+      if (created.account_link) {
+        window.setTimeout(() => openAccountLinkResult(created, "setup"), 0);
+      } else {
+        showAppAlert("Account created.");
+      }
     }
   });
 }
