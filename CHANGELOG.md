@@ -2,12 +2,15 @@
 
 ## Unreleased
 
+## v0.7.0-alpha - 2026-06-09
+
 - Linkify URLs in ticket conversations while keeping messages stored as plain
   text.
 - Improve chat rendering for long words, image previews, and conversation
   icons.
 - Remove legacy username migration support after the only early production
   instance was upgraded.
+- Document Pappice as a chat-style ticketing system and add this changelog.
 
 ## v0.6.0-alpha - 2026-06-09
 
