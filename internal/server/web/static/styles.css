@@ -553,8 +553,11 @@ button:focus-visible {
   border-radius: 999px;
   color: var(--text);
   display: inline-flex;
+  flex: 1 1 112px;
   gap: 6px;
+  justify-content: space-between;
   min-height: 32px;
+  min-width: 112px;
   padding: 5px 8px;
   text-align: left;
   white-space: nowrap;
