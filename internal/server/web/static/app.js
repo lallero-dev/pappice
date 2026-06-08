@@ -2241,8 +2241,9 @@ function commentComposer(ticket) {
 }
 
 function commentVisibilityControl(select) {
+  const icon = el("span", { className: "visibility-icon", "aria-hidden": "true" });
   const control = el("label", { className: "comment-visibility-control" }, [
-    el("span", { className: "visibility-icon", "aria-hidden": "true" }),
+    icon,
     select
   ]);
   const update = () => {
@@ -2250,12 +2251,43 @@ function commentVisibilityControl(select) {
     control.classList.toggle("visibility-public", !internal);
     control.classList.toggle("visibility-internal", internal);
     const label = internal ? "Internal note" : "Public reply";
+    icon.replaceChildren(visibilityIcon(internal ? "internal" : "public"));
     control.title = label;
     select.title = label;
   };
   select.addEventListener("change", update);
   update();
   return control;
+}
+
+function visibilityIcon(type) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("focusable", "false");
+  if (type === "internal") {
+    svg.append(
+      svgPath("M7 10V8a5 5 0 0 1 10 0v2", { "stroke-linecap": "round" }),
+      svgPath("M6.5 10h11a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 17.5 20h-11A1.5 1.5 0 0 1 5 18.5v-7A1.5 1.5 0 0 1 6.5 10Z"),
+      svgPath("M12 14v2", { "stroke-linecap": "round" })
+    );
+    return svg;
+  }
+  svg.append(
+    svgPath("M5 6.8A3.8 3.8 0 0 1 8.8 3h6.4A3.8 3.8 0 0 1 19 6.8v4.4a3.8 3.8 0 0 1-3.8 3.8h-3.6L7 18v-3.2a3.8 3.8 0 0 1-2-3.4V6.8Z", { "stroke-linejoin": "round" }),
+    svgPath("M8.5 8h7M8.5 11.5H13", { "stroke-linecap": "round" })
+  );
+  return svg;
+}
+
+function svgPath(d, attrs = {}) {
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", d);
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linejoin", "round");
+  for (const [name, value] of Object.entries(attrs)) path.setAttribute(name, value);
+  return path;
 }
 
 async function updateUser(id, patch) {

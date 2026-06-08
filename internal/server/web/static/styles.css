@@ -1677,64 +1677,19 @@ button:focus-visible {
 }
 
 .visibility-icon {
-  display: inline-block;
-  height: 16px;
-  position: relative;
-  width: 16px;
-}
-
-.visibility-public .visibility-icon {
-  border: 2px solid currentColor;
-  border-radius: 999px;
-}
-
-.visibility-public .visibility-icon::before,
-.visibility-public .visibility-icon::after {
-  background: currentColor;
-  content: "";
-  left: 3px;
-  position: absolute;
-  right: 3px;
-}
-
-.visibility-public .visibility-icon::before {
-  height: 2px;
-  top: 5px;
-}
-
-.visibility-public .visibility-icon::after {
-  bottom: 3px;
-  top: 3px;
-  width: 2px;
-  left: 5px;
-  right: auto;
+  display: block;
+  height: 19px;
+  width: 19px;
 }
 
 .visibility-internal {
   color: #7a4b00;
 }
 
-.visibility-internal .visibility-icon::before {
-  border: 2px solid currentColor;
-  border-bottom: 0;
-  border-radius: 8px 8px 0 0;
-  content: "";
-  height: 8px;
-  left: 3px;
-  position: absolute;
-  top: 0;
-  width: 10px;
-}
-
-.visibility-internal .visibility-icon::after {
-  background: currentColor;
-  border-radius: 3px;
-  bottom: 0;
-  content: "";
-  height: 10px;
-  left: 1px;
-  position: absolute;
-  right: 1px;
+.visibility-icon svg {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 .comment-input {
