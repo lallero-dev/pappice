@@ -439,19 +439,11 @@ button:disabled {
 
 .shell {
   display: grid;
-  gap: 10px;
+  gap: 0;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
-  padding: 10px;
-}
-
-.workspace,
-.ticket-pane {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
 }
 
 label,
@@ -497,6 +489,7 @@ button:focus-visible {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  padding: 10px;
 }
 
 .filter-control {
@@ -2641,6 +2634,7 @@ button:focus-visible {
 
   .admin-view {
     overflow: hidden;
+    padding: 0;
   }
 
   .admin-sidebar {
