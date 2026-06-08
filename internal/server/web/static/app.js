@@ -336,6 +336,9 @@ function toggleTicketPopover(popover, button) {
   closeTicketPopovers();
   popover.hidden = !open;
   button.setAttribute("aria-expanded", String(open));
+  if (open && els.ticketPopoverBackdrop) {
+    els.ticketPopoverBackdrop.hidden = false;
+  }
 }
 
 function closeTicketPopovers() {
@@ -346,6 +349,9 @@ function closeTicketPopovers() {
     if (!popover || !button) continue;
     popover.hidden = true;
     button.setAttribute("aria-expanded", "false");
+  }
+  if (els.ticketPopoverBackdrop) {
+    els.ticketPopoverBackdrop.hidden = true;
   }
 }
 
@@ -2925,9 +2931,13 @@ function bindEvents() {
   });
   els.ticketFilterPopover.addEventListener("click", (event) => event.stopPropagation());
   els.ticketSortPopover.addEventListener("click", (event) => event.stopPropagation());
+  els.ticketPopoverBackdrop.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeTicketPopovers();
+  });
   document.addEventListener("click", (event) => {
     if (!els.profileMenu.hidden && !els.profileMenu.contains(event.target)) closeProfileMenu();
-    if (!event.target.closest?.(".toolbar-menu")) closeTicketPopovers();
   });
   document.addEventListener("keydown", handleGlobalKeydown);
   router.listen((route) => applyRoute(route).catch(showError));

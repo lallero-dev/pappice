@@ -146,6 +146,7 @@ export const els = {
   ticketFilterButton: document.querySelector("#ticketFilterButton"),
   ticketFilterBadge: document.querySelector("#ticketFilterBadge"),
   ticketFilterPopover: document.querySelector("#ticketFilterPopover"),
+  ticketPopoverBackdrop: document.querySelector("#ticketPopoverBackdrop"),
   clearTicketFiltersButton: document.querySelector("#clearTicketFiltersButton"),
   productFilter: document.querySelector("#productFilter"),
   assigneeFilter: document.querySelector("#assigneeFilter"),

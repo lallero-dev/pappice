@@ -720,7 +720,7 @@ button:focus-visible {
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: var(--shadow);
+  box-shadow: 0 18px 42px rgb(15 23 42 / 18%), 0 2px 8px rgb(15 23 42 / 10%);
   display: grid;
   gap: 12px;
   min-width: 260px;
@@ -728,7 +728,15 @@ button:focus-visible {
   position: absolute;
   right: 0;
   top: calc(100% + 7px);
-  z-index: 25;
+  z-index: 50;
+}
+
+.ticket-popover-backdrop {
+  background: transparent;
+  cursor: default;
+  inset: 0;
+  position: fixed;
+  z-index: 40;
 }
 
 .filter-popover {
@@ -2418,7 +2426,13 @@ button:focus-visible {
     position: fixed;
     right: 0;
     top: auto;
-    z-index: 45;
+    z-index: 50;
+  }
+
+  .ticket-popover-backdrop {
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+    background: rgb(18 31 45 / 36%);
   }
 
   .ticket-detail-grid {
