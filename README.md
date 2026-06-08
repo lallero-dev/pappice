@@ -4,9 +4,10 @@
 
 # Pappice
 
-Pappice is a small self-hosted customer support ticketing system for small
-teams. It is one Go binary with SQLite storage, embedded web assets, registered
-customers, staff tools, no-reply email notifications, webhooks, and an audit log.
+Pappice is a small self-hosted, chat-style customer support ticketing system for
+small teams. It is one Go binary with SQLite storage, embedded web assets,
+registered customers, staff tools, no-reply email notifications, webhooks, and
+an audit log.
 
 The project is intentionally simple: no external database, no separate frontend
 build, and no inbound email processing.
@@ -22,8 +23,8 @@ until a non-alpha release. Alpha builds may require explicit SQLite migrations.
 - Products group tickets by service, customer, or team.
 - Customers and staff use the same UI with role-based actions.
 - Ticket workflow: New, Assigned, Resolved, Rejected.
-- Public replies, internal notes, unread state, assignees, priorities,
-  filtering, and sorting.
+- Chat-style conversations with public replies, internal notes, unread state,
+  assignees, priorities, filtering, and sorting.
 - Drag/drop and pasted attachments, with inline image previews.
 - Admin-created accounts with one-time setup/reset links or manual passwords.
 - SMTP-backed no-reply notifications with a durable SQLite outbox.
