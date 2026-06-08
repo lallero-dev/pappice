@@ -40,7 +40,7 @@ type migration struct {
 }
 
 var orderedMigrations = []migration{
-	{Version: 1, Name: "email_identity", Up: migrateEmailIdentity},
+	{Version: 1, Name: "baseline_schema", Up: migrateBaselineSchema},
 }
 
 func CurrentSchemaVersion() int {
@@ -307,90 +307,20 @@ func applyPendingMigrations(db *sql.DB, pending []MigrationInfo) ([]MigrationInf
 	return applied, nil
 }
 
-func migrateEmailIdentity(tx *sql.Tx) error {
+func migrateBaselineSchema(tx *sql.Tx) error {
 	hasUsers, err := tableExists(tx, "users")
 	if err != nil {
 		return err
 	}
 	if !hasUsers {
-		return fmt.Errorf("%w: users table is missing", ErrValidation)
+		return nil
 	}
 	hasUsername, err := tableHasColumn(tx, "users", "username")
-	if err != nil || !hasUsername {
+	if err != nil {
 		return err
 	}
-
-	var missingEmail int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE email IS NULL OR trim(email) = ''`).Scan(&missingEmail); err != nil {
-		return err
-	}
-	if missingEmail > 0 {
-		return fmt.Errorf("%w: every user needs an email before removing usernames", ErrValidation)
-	}
-
-	var duplicateEmail int
-	if err := tx.QueryRow(`
-		SELECT COUNT(*)
-		FROM (
-			SELECT lower(trim(email)) AS email
-			FROM users
-			GROUP BY lower(trim(email))
-			HAVING COUNT(*) > 1
-		)`).Scan(&duplicateEmail); err != nil {
-		return err
-	}
-	if duplicateEmail > 0 {
-		return fmt.Errorf("%w: user emails must be unique before removing usernames", ErrValidation)
-	}
-
-	identityUpdates := []struct {
-		table     string
-		statement string
-	}{
-		{"tickets", `UPDATE tickets SET assignee = (SELECT lower(trim(email)) FROM users WHERE lower(username) = lower(tickets.assignee)) WHERE assignee <> '' AND EXISTS (SELECT 1 FROM users WHERE lower(username) = lower(tickets.assignee))`},
-		{"tickets", `UPDATE tickets SET reporter = (SELECT lower(trim(email)) FROM users WHERE lower(username) = lower(tickets.reporter)) WHERE reporter <> '' AND EXISTS (SELECT 1 FROM users WHERE lower(username) = lower(tickets.reporter))`},
-		{"comments", `UPDATE comments SET author = (SELECT COALESCE(NULLIF(display_name, ''), lower(trim(email))) FROM users WHERE lower(username) = lower(comments.author)) WHERE author_user_id IS NULL AND EXISTS (SELECT 1 FROM users WHERE lower(username) = lower(comments.author))`},
-		{"audit_events", `UPDATE audit_events SET actor_username = (SELECT lower(trim(email)) FROM users WHERE lower(username) = lower(audit_events.actor_username)) WHERE actor_username <> '' AND EXISTS (SELECT 1 FROM users WHERE lower(username) = lower(audit_events.actor_username))`},
-		{"domain_events", `UPDATE domain_events SET actor_username = (SELECT lower(trim(email)) FROM users WHERE lower(username) = lower(domain_events.actor_username)) WHERE actor_username <> '' AND EXISTS (SELECT 1 FROM users WHERE lower(username) = lower(domain_events.actor_username))`},
-		{"domain_events", `UPDATE domain_events SET actor_email = (SELECT lower(trim(email)) FROM users WHERE lower(username) = lower(domain_events.actor_email)) WHERE actor_email <> '' AND EXISTS (SELECT 1 FROM users WHERE lower(username) = lower(domain_events.actor_email))`},
-	}
-	for _, update := range identityUpdates {
-		exists, err := tableExists(tx, update.table)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			continue
-		}
-		if _, err := tx.Exec(update.statement); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(`
-		CREATE TABLE users_new (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			display_name TEXT NOT NULL,
-			email TEXT NOT NULL UNIQUE,
-			role TEXT NOT NULL,
-			password_hash TEXT NOT NULL,
-			disabled INTEGER NOT NULL DEFAULT 0,
-			password_reset_required INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		)`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`
-		INSERT INTO users_new (id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at)
-		SELECT id, display_name, lower(trim(email)), role, password_hash, disabled, password_reset_required, created_at, updated_at
-		FROM users`); err != nil {
-		return normalizeSQLError(err)
-	}
-	if _, err := tx.Exec(`DROP TABLE users`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`ALTER TABLE users_new RENAME TO users`); err != nil {
-		return err
+	if hasUsername {
+		return fmt.Errorf("%w: unsupported pre-v0.6 username schema", ErrMigrationRequired)
 	}
 	return nil
 }

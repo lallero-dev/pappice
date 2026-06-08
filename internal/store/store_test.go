@@ -8,8 +8,6 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"pappice/internal/security"
 )
 
 func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
@@ -175,15 +173,11 @@ func TestStoreValidation(t *testing.T) {
 	}
 }
 
-func TestExplicitMigrationRemovesUsersUsernameColumn(t *testing.T) {
+func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("open legacy db: %v", err)
-	}
-	hash, err := security.HashPassword("correct horse")
-	if err != nil {
-		t.Fatalf("hash password: %v", err)
 	}
 	_, err = db.Exec(`
 		CREATE TABLE users (
@@ -198,52 +192,9 @@ func TestExplicitMigrationRemovesUsersUsernameColumn(t *testing.T) {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
-		CREATE TABLE products (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			key TEXT NOT NULL UNIQUE,
-			name TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		);
-		CREATE TABLE tickets (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-			number INTEGER NOT NULL,
-			title TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL,
-			severity TEXT NOT NULL,
-			priority TEXT NOT NULL,
-			assignee TEXT NOT NULL DEFAULT '',
-			reporter TEXT NOT NULL DEFAULT '',
-			source TEXT NOT NULL DEFAULT 'staff',
-			requester_name TEXT NOT NULL DEFAULT '',
-			requester_email TEXT NOT NULL DEFAULT '',
-			customer_token TEXT,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
-			closed_at TEXT,
-			UNIQUE (product_id, number)
-		);
-		CREATE TABLE comments (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-			author TEXT NOT NULL,
-			author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-			body TEXT NOT NULL,
-			visibility TEXT NOT NULL DEFAULT 'public',
-			created_at TEXT NOT NULL
-		);
 		INSERT INTO users (id, username, display_name, email, role, password_hash, created_at, updated_at)
-		VALUES (1, 'alice', 'Alice Agent', 'alice@example.test', 'staff', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-		INSERT INTO products (id, key, name, created_at, updated_at)
-		VALUES (1, 'PME', 'Inbox', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-		INSERT INTO tickets (id, product_id, number, title, status, severity, priority, assignee, reporter, created_at, updated_at)
-		VALUES (1, 1, 1, 'Legacy ticket', 'assigned', 'support', 'normal', 'alice', 'alice', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-		INSERT INTO comments (ticket_id, author, body, visibility, created_at)
-		VALUES (1, 'alice', 'legacy author', 'public', '2026-01-01T00:00:00Z');
-	`, hash)
+		VALUES (1, 'alice', 'Alice Agent', 'alice@example.test', 'staff', 'hash', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+	`)
 	if err != nil {
 		t.Fatalf("seed legacy db: %v", err)
 	}
@@ -258,54 +209,22 @@ func TestExplicitMigrationRemovesUsersUsernameColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect migration: %v", err)
 	}
-	if status.CurrentVersion != 0 || len(status.Pending) != 1 || status.Pending[0].Name != "email_identity" {
+	if status.CurrentVersion != 0 || len(status.Pending) != 1 || status.Pending[0].Name != "baseline_schema" {
 		t.Fatalf("migration status = %#v", status)
 	}
-	dryRun, err := Migrate(path, MigrationOptions{DryRun: true})
-	if err != nil {
-		t.Fatalf("dry-run migration: %v", err)
+	if _, err := Migrate(path, MigrationOptions{DryRun: true}); !errors.Is(err, ErrMigrationRequired) {
+		t.Fatalf("dry-run migration error = %v, want ErrMigrationRequired", err)
 	}
-	if !dryRun.DryRun || len(dryRun.Applied) != 1 {
-		t.Fatalf("dry-run result = %#v", dryRun)
+	if _, err := Migrate(path, MigrationOptions{}); !errors.Is(err, ErrMigrationRequired) {
+		t.Fatalf("migration error = %v, want ErrMigrationRequired", err)
 	}
-	legacyDB, err := sql.Open("sqlite", path)
+	db, err = sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatalf("reopen legacy db: %v", err)
 	}
-	if hasUsername, err := tableHasColumn(legacyDB, "users", "username"); err != nil || !hasUsername {
-		t.Fatalf("dry-run changed original username column = %v err=%v, want true", hasUsername, err)
-	}
-	if err := legacyDB.Close(); err != nil {
-		t.Fatalf("close legacy db after dry-run: %v", err)
-	}
-
-	result, err := Migrate(path, MigrationOptions{})
-	if err != nil {
-		t.Fatalf("migrate store: %v", err)
-	}
-	if result.DryRun || len(result.Applied) != 1 {
-		t.Fatalf("migration result = %#v", result)
-	}
-	tracker, err := Open(path)
-	if err != nil {
-		t.Fatalf("open migrated store: %v", err)
-	}
-	defer tracker.Close()
-	if hasUsername, err := tableHasColumn(tracker.db, "users", "username"); err != nil || hasUsername {
-		t.Fatalf("username column after migration = %v err=%v, want false", hasUsername, err)
-	}
-	if _, err := tracker.Authenticate("alice@example.test", "correct horse"); err != nil {
-		t.Fatalf("authenticate migrated account: %v", err)
-	}
-	ticket, err := tracker.GetTicket(1)
-	if err != nil {
-		t.Fatalf("get migrated ticket: %v", err)
-	}
-	if ticket.Assignee != "alice@example.test" || ticket.Reporter != "alice@example.test" {
-		t.Fatalf("migrated identities = assignee %q reporter %q", ticket.Assignee, ticket.Reporter)
-	}
-	if len(ticket.Comments) != 1 || ticket.Comments[0].Author != "Alice Agent" {
-		t.Fatalf("migrated comments = %#v", ticket.Comments)
+	defer db.Close()
+	if exists, err := tableExists(db, "schema_migrations"); err != nil || exists {
+		t.Fatalf("schema_migrations exists after rejected migration = %v err=%v, want false", exists, err)
 	}
 }
 
