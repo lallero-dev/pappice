@@ -245,10 +245,9 @@ function isPreviewableImageAttachment(attachment) {
 function imageAttachmentPreview(attachment) {
   const url = `/api/attachments/${attachment.id}`;
   const filename = attachment.filename || "Attached image";
-  return el("a", {
+  const button = el("button", {
     className: "attachment-image-link",
-    href: url,
-    download: filename,
+    type: "button",
     title: filename
   }, [
     el("img", {
@@ -259,6 +258,50 @@ function imageAttachmentPreview(attachment) {
       decoding: "async"
     })
   ]);
+  button.addEventListener("click", () => openImagePreview({ src: `${url}?preview=1`, filename }));
+  return button;
+}
+
+let imagePreviewDialog = null;
+
+function openImagePreview({ src, filename }) {
+  const dialog = getImagePreviewDialog();
+  const image = dialog.querySelector(".image-preview-modal-image");
+  const title = dialog.querySelector(".image-preview-modal-title");
+  image.src = src;
+  image.alt = filename;
+  title.textContent = filename;
+  if (!dialog.open) dialog.showModal();
+}
+
+function getImagePreviewDialog() {
+  if (imagePreviewDialog) return imagePreviewDialog;
+  const close = el("button", {
+    className: "image-preview-modal-close",
+    type: "button",
+    "aria-label": "Close image preview"
+  }, "x");
+  const dialog = el("dialog", { className: "image-preview-modal", "aria-label": "Image preview" }, [
+    el("div", { className: "image-preview-modal-shell" }, [
+      el("header", { className: "image-preview-modal-header" }, [
+        el("strong", { className: "image-preview-modal-title" }, ""),
+        close
+      ]),
+      el("img", { className: "image-preview-modal-image", alt: "" })
+    ])
+  ]);
+  close.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.addEventListener("close", () => {
+    const image = dialog.querySelector(".image-preview-modal-image");
+    image.removeAttribute("src");
+    image.alt = "";
+  });
+  document.body.append(dialog);
+  imagePreviewDialog = dialog;
+  return dialog;
 }
 
 export function formatBytes(value) {

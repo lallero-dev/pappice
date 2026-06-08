@@ -1828,9 +1828,20 @@ button:focus-visible {
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
+  cursor: zoom-in;
   display: block;
+  font: inherit;
   max-width: 100%;
   overflow: hidden;
+  padding: 0;
+  text-align: left;
+}
+
+.attachment-image-link:hover,
+.attachment-image-link:focus-visible {
+  border-color: #9fc5e8;
+  box-shadow: 0 8px 20px rgba(20, 61, 96, 0.14);
+  outline: none;
 }
 
 .attachment-image-preview {
@@ -1867,6 +1878,78 @@ button:focus-visible {
 .attachment-size {
   color: var(--muted);
   flex: 0 0 auto;
+}
+
+.image-preview-modal {
+  background: transparent;
+  border: 0;
+  color: #f8fafc;
+  max-height: min(92vh, 900px);
+  max-width: min(92vw, 1100px);
+  padding: 0;
+}
+
+.image-preview-modal::backdrop {
+  background: rgba(9, 22, 34, 0.72);
+  backdrop-filter: blur(5px);
+}
+
+.image-preview-modal-shell {
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(226, 232, 240, 0.18);
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(92vh, 900px);
+  min-width: min(90vw, 520px);
+  overflow: hidden;
+}
+
+.image-preview-modal-header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.image-preview-modal-title {
+  font-size: 14px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-preview-modal-close {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.image-preview-modal-close:hover,
+.image-preview-modal-close:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  outline: none;
+}
+
+.image-preview-modal-image {
+  background: rgba(15, 23, 42, 0.42);
+  display: block;
+  max-height: calc(92vh - 54px);
+  max-width: min(92vw, 1100px);
+  object-fit: contain;
+  width: 100%;
 }
 
 .muted {
