@@ -1760,6 +1760,29 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 		t.Fatalf("customer-controlled fields were not normalized: %#v", created)
 	}
 
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(customerTicketID), map[string]any{
+		"assignee": "support",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte(`"assignee":"support"`)) {
+		t.Fatalf("admin assignment response = %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(customerTicketID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte(`"assignee":"support"`)) || bytes.Contains(body, []byte(`"assignee":`)) {
+		t.Fatalf("customer ticket detail leaked assignee: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?assignee=support", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee":`)) {
+		t.Fatalf("customer assignee filter should be ignored and sanitized: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?q=support", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee":`)) {
+		t.Fatalf("customer search leaked assignee matches: %s", body)
+	}
+
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"product_id":  otherProductID,
 		"title":       "Wrong product",

@@ -1589,6 +1589,9 @@ func (s *Server) ticketForUser(user store.User, ticket store.Ticket) store.Ticke
 }
 
 func (s *Server) listTicketsForQuery(user store.User, query url.Values, filter store.Filter) []store.Ticket {
+	if isCustomer(user) {
+		filter.Assignee = ""
+	}
 	statuses := append([]string(nil), filter.Statuses...)
 	if queryIncludeUnreadOutsideStatus(query) && len(statuses) > 0 && !queryUnread(query) {
 		filter.Statuses = nil
@@ -1610,10 +1613,24 @@ func (s *Server) ticketsForUser(user store.User, tickets []store.Ticket) []store
 		if !s.canEditTicket(user, ticket.ProductID) {
 			ticket.Comments = publicComments(ticket.Comments)
 		}
+		if !s.canViewTicketAssignee(user, ticket.ProductID) {
+			ticket.Assignee = ""
+		}
 		result = append(result, ticket)
 	}
 	s.annotateUnread(user, result)
 	return result
+}
+
+func (s *Server) canViewTicketAssignee(user store.User, productID int64) bool {
+	if isCustomer(user) {
+		return false
+	}
+	if isAdmin(user) {
+		return true
+	}
+	role, ok := s.store.ProductRole(user.ID, productID)
+	return ok && role != "customer"
 }
 
 func (s *Server) annotateUnread(user store.User, tickets []store.Ticket) {

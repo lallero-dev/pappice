@@ -389,7 +389,7 @@ async function loadTickets({ renderDetail = true } = {}) {
   }
   const params = new URLSearchParams();
   if (state.filters.q) params.set("q", state.filters.q);
-  if (state.filters.assignee) params.set("assignee", state.filters.assignee);
+  if (canUseAssigneeFilter() && state.filters.assignee) params.set("assignee", state.filters.assignee);
   if (state.filters.unread) params.set("unread", "1");
   for (const status of state.filters.statuses) params.append("status", status);
   if (usesDefaultStatusView()) params.set("include_unread_outside_status", "1");
@@ -626,6 +626,15 @@ function toggleStatusFilter(status) {
 }
 
 function renderAssigneeFilter() {
+  const section = els.assigneeFilter?.closest(".popover-section");
+  if (!canUseAssigneeFilter()) {
+    state.filters.assignee = "";
+    if (section) section.hidden = true;
+    if (els.assigneeFilter) els.assigneeFilter.replaceChildren(new Option("Anyone", ""));
+    renderTicketFilterButton();
+    return;
+  }
+  if (section) section.hidden = false;
   const current = state.filters.assignee;
   const options = assigneeOptions(current);
   options[0] = { value: "", label: "Anyone" };
@@ -678,7 +687,7 @@ function hasActiveTicketFilters() {
   return Boolean(
     state.filters.q ||
     state.ticketProductId ||
-    state.filters.assignee ||
+    (canUseAssigneeFilter() && state.filters.assignee) ||
     state.filters.unread ||
     state.filters.statusCustomized ||
     !sameStatuses(state.filters.statuses, defaultStatusFilters())
@@ -688,7 +697,7 @@ function hasActiveTicketFilters() {
 function activeTicketFilterCount() {
   let count = 0;
   if (state.ticketProductId) count += 1;
-  if (state.filters.assignee) count += 1;
+  if (canUseAssigneeFilter() && state.filters.assignee) count += 1;
   if (state.filters.unread) count += 1;
   if (state.filters.statusCustomized || !sameStatuses(state.filters.statuses, defaultStatusFilters())) count += 1;
   return count;
@@ -1038,7 +1047,7 @@ function ticketSideSections(ticket, editable) {
     factBlock("Created", relativeTime(ticket.created_at)),
     factBlock("Updated", relativeTime(ticket.updated_at))
   ];
-  if (!canEditTicket(ticket)) facts.splice(1, 0, factBlock("Assignee", ticket.assignee || "Unassigned"));
+  if (!canEditTicket(ticket) && !isCustomer()) facts.splice(1, 0, factBlock("Assignee", ticket.assignee || "Unassigned"));
   sections.push(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
   if (isAdmin()) {
     sections.push(sideSection("Danger zone", ticketDangerActions(ticket)));
@@ -3135,6 +3144,10 @@ function isAdmin() {
 
 function isCustomer() {
   return state.user?.role === "customer";
+}
+
+function canUseAssigneeFilter() {
+  return !isCustomer();
 }
 
 function productRole(productId) {

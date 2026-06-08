@@ -162,12 +162,20 @@ func (s *Store) listTickets(filter Filter, user User) []Ticket {
 		args = append(args, filter.Assignee)
 	}
 	if filter.Query != "" {
-		conditions = append(conditions, `(
-			lower(i.title) LIKE ? OR lower(i.description) LIKE ? OR lower(p.key) LIKE ? OR lower(p.name) LIKE ? OR
-			lower(i.assignee) LIKE ? OR lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ?
-		)`)
 		q := "%" + filter.Query + "%"
-		args = append(args, q, q, q, q, q, q, q, q)
+		if role == "customer" {
+			conditions = append(conditions, `(
+				lower(i.title) LIKE ? OR lower(i.description) LIKE ? OR lower(p.key) LIKE ? OR lower(p.name) LIKE ? OR
+				lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ?
+			)`)
+			args = append(args, q, q, q, q, q, q, q)
+		} else {
+			conditions = append(conditions, `(
+				lower(i.title) LIKE ? OR lower(i.description) LIKE ? OR lower(p.key) LIKE ? OR lower(p.name) LIKE ? OR
+				lower(i.assignee) LIKE ? OR lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ?
+			)`)
+			args = append(args, q, q, q, q, q, q, q, q)
+		}
 	}
 
 	query := `

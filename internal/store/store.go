@@ -34,7 +34,7 @@ type Ticket struct {
 	Status         string       `json:"status"`
 	Severity       string       `json:"-"`
 	Priority       string       `json:"priority"`
-	Assignee       string       `json:"assignee"`
+	Assignee       string       `json:"assignee,omitempty"`
 	Reporter       string       `json:"requester"`
 	Source         string       `json:"source"`
 	RequesterName  string       `json:"requester_name,omitempty"`
