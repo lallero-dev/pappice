@@ -32,6 +32,7 @@ import {
   selectedTicketFiles,
   ticketAttachmentField
 } from "./attachments.js";
+import { richTextNodes } from "./rich-text.js";
 
 defineComponents();
 
@@ -2107,7 +2108,7 @@ function comments(ticket) {
         el("span", { className: "comment-time" }, message.label),
         message.visibility === "internal" ? el("span", { className: "message-flag internal-flag" }, "Internal") : el("span")
       ]),
-      el("p", {}, message.body),
+      el("p", {}, richTextNodes(message.body)),
       attachmentList(message.attachments || [])
     );
     row.append(avatar, item);

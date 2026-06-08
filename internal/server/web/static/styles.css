@@ -1423,6 +1423,13 @@ button:focus-visible {
   word-break: break-word;
 }
 
+.message-link {
+  color: #1b5f9e;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .comment-form {
   background: #f8fafc;
   border: 1px solid #cfd9e3;
