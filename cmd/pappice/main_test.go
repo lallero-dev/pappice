@@ -117,6 +117,7 @@ func TestSplitCommand(t *testing.T) {
 		{[]string{"pappice", "serve", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
 		{[]string{"pappice", "-addr", ":8080"}, "-addr", []string{":8080"}},
 		{[]string{"pappice", "doctor"}, "doctor", nil},
+		{[]string{"pappice", "db", "status"}, "db", []string{"status"}},
 		{[]string{"pappice", "version"}, "version", nil},
 		{[]string{"pappice", "-h"}, "help", nil},
 	}
@@ -136,6 +137,51 @@ func TestRootFlagsAreNotServeAliases(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unknown command "-addr"`) {
 		t.Fatalf("flat flags did not report unknown command: %s", stderr.String())
+	}
+}
+
+func TestDBCommandStatusAndMigrate(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pappice.db")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pappice", "db", "status", "-db", dbPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("db status exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Status: empty") {
+		t.Fatalf("db status output = %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"pappice", "db", "migrate", "-db", dbPath, "-dry-run"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("db migrate dry-run exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Dry-run succeeded") {
+		t.Fatalf("db migrate dry-run output = %s", stdout.String())
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not create source db, stat err = %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"pappice", "db", "migrate", "-db", dbPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("db migrate exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Migration succeeded") || !strings.Contains(stdout.String(), "Initialized current schema") {
+		t.Fatalf("db migrate output = %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"pappice", "db", "status", "-db", dbPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("db status current exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Status: current") {
+		t.Fatalf("db status current output = %s", stdout.String())
 	}
 }
 

@@ -193,7 +193,6 @@ func (s *Server) projectAppDomainEvent(event store.DomainEvent, projection *stor
 	}
 	user := store.User{
 		ID:          payload.AccountLink.UserID,
-		Username:    payload.AccountLink.Username,
 		DisplayName: payload.AccountLink.DisplayName,
 		Email:       payload.AccountLink.Email,
 	}
@@ -283,7 +282,7 @@ func (s *Server) ticketEventEmails(event string, ticket store.Ticket, actor stor
 			inputs = append(inputs, s.ticketEmailNotifications(event, ticket, actor, sendAfter)...)
 		}
 		if payload.StatusChanged && payload.TerminalStatus && !s.isSupportTicketRequester(actor, ticket) {
-			inputs = append(inputs, s.requesterEmailNotifications(event, ticket, defaultString(actor.DisplayName, actor.Username), sendAfter)...)
+			inputs = append(inputs, s.requesterEmailNotifications(event, ticket, defaultString(actor.DisplayName, actor.Email), sendAfter)...)
 		}
 	case "ticket.assigned":
 		if payload.AssignmentChanged && payload.OnlyAssigneePatch && !payload.PublicComment {
@@ -294,7 +293,7 @@ func (s *Server) ticketEventEmails(event string, ticket store.Ticket, actor stor
 			inputs = append(inputs, s.ticketEmailNotifications(event, ticket, actor, sendAfter)...)
 		}
 		if payload.PublicComment && !s.isSupportTicketRequester(actor, ticket) {
-			inputs = append(inputs, s.requesterEmailNotifications(event, ticket, defaultString(actor.DisplayName, actor.Username), sendAfter)...)
+			inputs = append(inputs, s.requesterEmailNotifications(event, ticket, defaultString(actor.DisplayName, actor.Email), sendAfter)...)
 		}
 	}
 	return inputs

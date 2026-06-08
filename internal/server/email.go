@@ -27,7 +27,7 @@ func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, act
 			TicketID:       ticket.ID,
 			UserID:         recipient.UserID,
 			RecipientEmail: recipient.Email,
-			RecipientName:  defaultString(recipient.DisplayName, recipient.Username),
+			RecipientName:  defaultString(recipient.DisplayName, recipient.Email),
 			Event:          event,
 			Subject:        subject,
 			BodyText:       textBody,
@@ -75,7 +75,7 @@ func (s *Server) accountLinkEmailNotifications(event string, user store.User, to
 	return []store.CreateEmailNotification{{
 		UserID:         user.ID,
 		RecipientEmail: user.Email,
-		RecipientName:  defaultString(user.DisplayName, user.Username),
+		RecipientName:  defaultString(user.DisplayName, user.Email),
 		Event:          event,
 		Subject:        subject,
 		BodyText:       textBody,
@@ -98,8 +98,8 @@ func (s *Server) accountLinkEmailContent(event string, user store.User, token st
 		Title:  subject,
 		Intro:  intro,
 		Fields: []emailField{
-			{Label: "Account", Value: defaultString(user.DisplayName, user.Username)},
-			{Label: "Username", Value: user.Username},
+			{Label: "Account", Value: defaultString(user.DisplayName, user.Email)},
+			{Label: "Email", Value: user.Email},
 			{Label: "Expires", Value: expiresAt.Format("2006-01-02 15:04 MST")},
 		},
 		ActionLabel: action,
@@ -152,7 +152,7 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 }
 
 func (s *Server) ticketEmailContent(event string, product store.Product, ticket store.Ticket, actor store.User) (string, string, string) {
-	actorName := defaultString(actor.DisplayName, actor.Username)
+	actorName := defaultString(actor.DisplayName, actor.Email)
 	action := ticketEventAction(event)
 	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, ticketEmailSubjectAction(event), ticket.Title)
 	productLabel := defaultString(product.Name, ticket.ProductName)

@@ -63,16 +63,12 @@
         <p class="auth-error" id="authError" role="alert" hidden></p>
         <p class="auth-note">Create the first administrator account. Customers and staff can be invited after setup.</p>
         <label>
-          Username
-          <input name="username" required minlength="3" maxlength="48" autocomplete="username">
+          Email
+          <input name="email" type="email" required autocomplete="email">
         </label>
         <label>
           Display name
           <input name="display_name" autocomplete="name">
-        </label>
-        <label>
-          Email
-          <input name="email" type="email" autocomplete="email">
         </label>
         <label>
           Password
@@ -84,8 +80,8 @@
       <form class="auth-panel" id="loginForm">
         <h1>Sign In</h1>
         <label>
-          Username
-          <input name="username" required autocomplete="username">
+          Email
+          <input name="email" type="email" required autocomplete="email">
         </label>
         <label>
           Password

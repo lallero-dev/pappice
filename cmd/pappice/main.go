@@ -32,6 +32,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "serve":
 		return runServe(commandArgs, stderr)
+	case "db":
+		return runDB(commandArgs, stdout, stderr)
 	case "doctor":
 		return runDoctor(commandArgs, stdout, stderr)
 	case "version":
@@ -51,7 +53,7 @@ func splitCommand(args []string) (string, []string) {
 	switch first {
 	case "-h", "--help", "help":
 		return "help", args[2:]
-	case "serve", "doctor", "version":
+	case "serve", "db", "doctor", "version":
 		return first, args[2:]
 	default:
 		return first, args[2:]
@@ -63,10 +65,11 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  pappice serve [flags]     Start the web server")
+	fmt.Fprintln(w, "  pappice db <command>      Inspect or migrate the SQLite database")
 	fmt.Fprintln(w, "  pappice doctor [flags]    Validate local runtime configuration")
 	fmt.Fprintln(w, "  pappice version           Print the build version")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run \"pappice serve -h\" or \"pappice doctor -h\" for configuration flags.")
+	fmt.Fprintln(w, "Run \"pappice serve -h\", \"pappice db -h\", or \"pappice doctor -h\" for configuration flags.")
 }
 
 func runServe(args []string, stderr io.Writer) int {

@@ -14,14 +14,12 @@ const repoRoot = resolve(scriptDir, "..");
 const chromiumPath = process.env.PAPPICE_E2E_CHROMIUM || process.env.CHROMIUM || "/usr/bin/chromium";
 
 const admin = {
-  username: "admin",
   displayName: "Paolo Admin",
   email: "admin@example.test",
   password: "correct horse battery"
 };
 
 const customer = {
-  username: "customer",
   displayName: "Customer One",
   email: "customer@example.test",
   password: "customer horse battery"
@@ -118,9 +116,8 @@ async function setupFirstAdmin(cdp) {
       return form && !form.hidden;
     }, "first-run setup form");
     const form = document.querySelector("#setupForm");
-    setValue(form.querySelector("[name='username']"), input.username);
-    setValue(form.querySelector("[name='display_name']"), input.displayName);
     setValue(form.querySelector("[name='email']"), input.email);
+    setValue(form.querySelector("[name='display_name']"), input.displayName);
     setValue(form.querySelector("[name='password']"), input.password);
     form.requestSubmit();
     await waitFor(() => {
@@ -155,16 +152,15 @@ async function createCustomerAccount(cdp) {
       return view && !view.hidden;
     }, "admin view");
     await waitFor(() => window.location.pathname === "/admin/accounts", "admin accounts route");
-    await waitFor(() => document.querySelector("#userList")?.textContent.includes("admin"), "accounts admin section");
+    await waitFor(() => document.querySelector("#userList .admin-row"), "accounts admin section");
 
     document.querySelector("#addUserButton").click();
     const root = await waitFor(() => {
       const rootNode = modalRoot();
       return rootNode?.querySelector("dialog[open]") ? rootNode : null;
     }, "new account modal");
-    setValue(root.querySelector("[name='username']"), input.username);
-    setValue(root.querySelector("[name='display_name']"), input.displayName);
     setValue(root.querySelector("[name='email']"), input.email);
+    setValue(root.querySelector("[name='display_name']"), input.displayName);
     setValue(root.querySelector("[name='role']"), "customer");
     root.querySelector("form").requestSubmit();
 
@@ -177,7 +173,7 @@ async function createCustomerAccount(cdp) {
     await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "setup link modal closed");
     const row = await waitFor(() => {
       return [...document.querySelectorAll("#userList .admin-row")]
-        .find((item) => item.textContent.includes(input.username));
+        .find((item) => item.textContent.includes(input.email));
     }, "customer account row");
     const rowButtons = [...row.querySelectorAll("button")].map((button) => button.textContent.trim());
     if (rowButtons.includes("Reset") || rowButtons.includes("Delete")) {
@@ -186,7 +182,7 @@ async function createCustomerAccount(cdp) {
     row.querySelector("button").click();
     const editRoot = await waitFor(() => {
       const rootNode = modalRoot();
-      return rootNode?.querySelector("dialog[open] h2")?.textContent.includes(input.username) ? rootNode : null;
+      return rootNode?.querySelector("dialog[open] h2")?.textContent.includes(input.displayName) ? rootNode : null;
     }, "edit account modal");
     const reset = editRoot.querySelector("[data-account-action='reset']");
     const remove = editRoot.querySelector("[data-account-action='delete']");
@@ -208,7 +204,7 @@ async function createCustomerAccount(cdp) {
 }
 
 async function addCustomerToProduct(cdp, productID) {
-  await runInPage(cdp, async ({ productID: selectedProductID, customerUsername }) => {
+  await runInPage(cdp, async ({ productID: selectedProductID, customerEmail }) => {
     const { modalRoot, setValue, waitFor } = pageTools();
     const productFilter = document.querySelector("#productFilter");
     const selectedProductLabel = [...productFilter.options].find((option) => option.value === selectedProductID)?.textContent || "";
@@ -254,8 +250,8 @@ async function addCustomerToProduct(cdp, productID) {
       return rootNode?.querySelector("dialog[open]") ? rootNode : null;
     }, "add member modal");
     const userSelect = root.querySelector("[name='user_id']");
-    const userOption = [...userSelect.options].find((option) => option.textContent.includes(customerUsername));
-    if (!userOption) throw new Error(`customer ${customerUsername} missing from member account select`);
+    const userOption = [...userSelect.options].find((option) => option.textContent.includes(customerEmail));
+    if (!userOption) throw new Error(`customer ${customerEmail} missing from member account select`);
     const customerUserID = userOption.value;
     setValue(userSelect, userOption.value);
     setValue(root.querySelector("[name='role']"), "customer");
@@ -345,7 +341,7 @@ async function addCustomerToProduct(cdp, productID) {
     }, "rotated webhook secret shown once");
     document.querySelector("#modalHost").close();
     await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "webhook rotate modal closed");
-  }, { productID, customerUsername: customer.username });
+  }, { productID, customerEmail: customer.email });
 }
 
 async function verifyProductRouteReload(cdp, productID) {
@@ -669,13 +665,13 @@ async function loginAsAdmin(cdp) {
       const candidate = document.querySelector("#loginForm");
       return candidate && !candidate.hidden ? candidate : null;
     }, "login form");
-    setValue(form.querySelector("[name='username']"), input.username);
+    setValue(form.querySelector("[name='email']"), input.email);
     setValue(form.querySelector("[name='password']"), "wrong password");
     form.requestSubmit();
     await waitFor(() => {
       return form.contains(document.querySelector("#authError")) && !document.querySelector("#authError")?.hidden;
     }, "inline login error");
-    setValue(form.querySelector("[name='username']"), input.username);
+    setValue(form.querySelector("[name='email']"), input.email);
     setValue(form.querySelector("[name='password']"), input.password);
     form.requestSubmit();
     await waitFor(() => {

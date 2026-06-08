@@ -19,6 +19,8 @@ var (
 	ErrValidation            = errors.New("validation failed")
 	ErrConflict              = errors.New("conflict")
 	ErrPasswordResetRequired = errors.New("password setup or reset is required")
+	ErrMigrationRequired     = errors.New("database migration required")
+	ErrSchemaTooNew          = errors.New("database schema is newer than this app")
 )
 
 type Ticket struct {
@@ -120,7 +122,6 @@ type Filter struct {
 
 type User struct {
 	ID                    int64     `json:"id"`
-	Username              string    `json:"username"`
 	DisplayName           string    `json:"display_name"`
 	Email                 string    `json:"email"`
 	Role                  string    `json:"role"`
@@ -133,7 +134,6 @@ type User struct {
 
 type PublicUser struct {
 	ID                    int64     `json:"id"`
-	Username              string    `json:"username"`
 	DisplayName           string    `json:"display_name"`
 	Email                 string    `json:"email"`
 	Role                  string    `json:"role"`
@@ -165,7 +165,6 @@ type CreateAttachment struct {
 }
 
 type CreateUser struct {
-	Username    string       `json:"username"`
 	DisplayName string       `json:"display_name"`
 	Email       string       `json:"email"`
 	Password    string       `json:"password"`
@@ -301,7 +300,7 @@ type UpdateProduct struct {
 type ProductMember struct {
 	ProductID   int64     `json:"product_id"`
 	UserID      int64     `json:"user_id"`
-	Username    string    `json:"username"`
+	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -402,7 +401,6 @@ type CreateWebhookNotification struct {
 
 type EmailRecipient struct {
 	UserID      int64  `json:"user_id"`
-	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
 	Role        string `json:"role"`
@@ -490,24 +488,16 @@ func normalizePage(limit, offset, defaultLimit, maxLimit int) (int, int) {
 	return limit, offset
 }
 
-var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,46}[a-z0-9]$`)
 var productKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}$`)
 
 func Open(path string) (*Store, error) {
 	if path == "" {
 		path = "pappice.db"
 	}
-	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, err
-		}
-	}
-
-	db, err := sql.Open("sqlite", path)
+	db, err := openSQLite(path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 
 	s := &Store{db: db, path: path}
 	if err := s.init(); err != nil {
@@ -532,16 +522,57 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) init() error {
-	if _, err := s.db.Exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;`); err != nil {
+	if err := configureSQLite(s.db); err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`PRAGMA synchronous = NORMAL;`); err != nil {
+	status, err := inspectMigrationStatus(s.db, s.path)
+	if err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`PRAGMA journal_mode = WAL;`); err != nil && !strings.Contains(err.Error(), "memory") {
+	if status.Empty {
+		return installCurrentSchema(s.db)
+	}
+	if status.CurrentVersion > CurrentSchemaVersion() {
+		return fmt.Errorf("%w: database is at version %d, app supports %d", ErrSchemaTooNew, status.CurrentVersion, CurrentSchemaVersion())
+	}
+	if len(status.Pending) > 0 {
+		return fmt.Errorf("%w: run \"pappice db migrate --dry-run\" and then \"pappice db migrate\"", ErrMigrationRequired)
+	}
+	return validateCurrentSchema(s.db)
+}
+
+func openSQLite(path string) (*sql.DB, error) {
+	if path == "" {
+		path = "pappice.db"
+	}
+	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, err
+		}
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	return db, nil
+}
+
+func configureSQLite(db *sql.DB) error {
+	if err := configureSQLiteConnection(db); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(schemaSQL)
+	if _, err := db.Exec(`PRAGMA synchronous = NORMAL;`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`PRAGMA journal_mode = WAL;`); err != nil && !strings.Contains(err.Error(), "memory") {
+		return err
+	}
+	return nil
+}
+
+func configureSQLiteConnection(db *sql.DB) error {
+	_, err := db.Exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;`)
 	return err
 }
 
@@ -569,10 +600,6 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func normalizeUsername(username string) string {
-	return strings.ToLower(strings.TrimSpace(username))
 }
 
 func normalizeGlobalRole(role string) string {
@@ -607,6 +634,17 @@ func normalizeEmail(value string) (string, error) {
 		return "", fmt.Errorf("%w: invalid email address", ErrValidation)
 	}
 	return strings.ToLower(address.Address), nil
+}
+
+func normalizeRequiredEmail(value string) (string, error) {
+	email, err := normalizeEmail(value)
+	if err != nil {
+		return "", err
+	}
+	if email == "" {
+		return "", fmt.Errorf("%w: email is required", ErrValidation)
+	}
+	return email, nil
 }
 
 func isValid(allowed map[string]struct{}, value string) bool {
@@ -740,11 +778,16 @@ func parseNullTime(value sql.NullString) *time.Time {
 }
 
 const schemaSQL = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+	version INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	applied_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS users (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	username TEXT NOT NULL UNIQUE,
 	display_name TEXT NOT NULL,
-	email TEXT,
+	email TEXT NOT NULL UNIQUE,
 	role TEXT NOT NULL,
 	password_hash TEXT NOT NULL,
 	disabled INTEGER NOT NULL DEFAULT 0,
@@ -946,7 +989,6 @@ CREATE TABLE IF NOT EXISTS domain_events (
 	processed_at TEXT
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL AND email <> '';
 CREATE INDEX IF NOT EXISTS idx_tickets_product_updated ON tickets(product_id, updated_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_customer_token ON tickets(customer_token) WHERE customer_token IS NOT NULL AND customer_token <> '';
 CREATE INDEX IF NOT EXISTS idx_tickets_requester_email ON tickets(requester_email);

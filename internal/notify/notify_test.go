@@ -34,7 +34,6 @@ func TestWorkerSendsClaimedEmail(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	user, err := tracker.CreateFirstAdmin(store.CreateUser{
-		Username: "Admin",
 		Password: "correct horse",
 		Email:    "admin@example.test",
 	})
@@ -85,7 +84,6 @@ func TestWorkerMarksFailedEmail(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	user, err := tracker.CreateFirstAdmin(store.CreateUser{
-		Username: "Admin",
 		Password: "correct horse",
 		Email:    "admin@example.test",
 	})

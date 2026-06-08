@@ -72,7 +72,7 @@ func TestTicketEmailContentUsesReadableLayout(t *testing.T) {
 		Assignee:    "dev",
 		Reporter:    "customer",
 	}
-	actor := store.User{Username: "paolo", DisplayName: "Paolo"}
+	actor := store.User{DisplayName: "Paolo", Email: "paolo@example.test"}
 
 	subject, textBody, htmlBody := server.ticketEmailContent("ticket.assigned", product, ticket, actor)
 

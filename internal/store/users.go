@@ -51,7 +51,7 @@ func (s *Store) CreateFirstAdmin(input CreateUser) (User, error) {
 	ctx := input.Event
 	if ctx.Enabled {
 		ctx.Actor = EventActorFromUser(user)
-		if err := insertAppEventTx(tx, time.Now().UTC(), ctx, "setup.completed", "user", user.ID, user.Username, nil, nil); err != nil {
+		if err := insertAppEventTx(tx, time.Now().UTC(), ctx, "setup.completed", "user", user.ID, user.Email, nil, nil); err != nil {
 			return User{}, err
 		}
 	}
@@ -71,7 +71,7 @@ func (s *Store) CreateUser(input CreateUser) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Username, map[string]any{
+	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Email, map[string]any{
 		"role":            user.Role,
 		"email":           user.Email != "",
 		"email_requested": false,
@@ -98,7 +98,7 @@ func (s *Store) CreateUserWithSetupLink(input CreateUser, expiresFor time.Durati
 	if err != nil {
 		return User{}, AccountLink{}, "", err
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Username, map[string]any{
+	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Email, map[string]any{
 		"role":            user.Role,
 		"email":           user.Email != "",
 		"email_requested": AccountLinkEmailRequested(user, token),
@@ -112,7 +112,7 @@ func (s *Store) CreateUserWithSetupLink(input CreateUser, expiresFor time.Durati
 }
 
 func (s *Store) ListUsers() []User {
-	rows, err := s.db.Query(`SELECT id, username, display_name, email, role, disabled, password_reset_required, created_at, updated_at FROM users ORDER BY username`)
+	rows, err := s.db.Query(`SELECT id, display_name, email, role, disabled, password_reset_required, created_at, updated_at FROM users ORDER BY email, display_name`)
 	if err != nil {
 		return nil
 	}
@@ -144,10 +144,10 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	oldDisabled := user.Disabled
 
 	if patch.DisplayName != nil {
-		user.DisplayName = defaultString(*patch.DisplayName, user.Username)
+		user.DisplayName = defaultString(*patch.DisplayName, user.Email)
 	}
 	if patch.Email != nil {
-		email, err := normalizeEmail(*patch.Email)
+		email, err := normalizeRequiredEmail(*patch.Email)
 		if err != nil {
 			return User{}, err
 		}
@@ -175,10 +175,15 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 
 	if _, err := tx.Exec(
 		`UPDATE users SET display_name = ?, email = ?, role = ?, password_hash = ?, disabled = ?, password_reset_required = ?, updated_at = ? WHERE id = ?`,
-		user.DisplayName, nullEmptyString(user.Email), user.Role, user.PasswordHash, boolInt(user.Disabled),
+		user.DisplayName, user.Email, user.Role, user.PasswordHash, boolInt(user.Disabled),
 		boolInt(user.PasswordResetRequired), formatTime(user.UpdatedAt), user.ID,
 	); err != nil {
 		return User{}, normalizeSQLError(err)
+	}
+	if patch.Email != nil && before.Email != user.Email {
+		if err := updateUserIdentityReferencesTx(tx, before, user.Email); err != nil {
+			return User{}, err
+		}
 	}
 	if patch.Password != nil {
 		if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, user.ID); err != nil {
@@ -188,7 +193,7 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	if (oldRole == "admin" || !oldDisabled) && !hasActiveAdminTx(tx) {
 		return User{}, fmt.Errorf("%w: at least one active admin is required", ErrValidation)
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), patch.Event, "user.updated", "user", user.ID, user.Username, userPatchEventDetails(before, user, patch), nil); err != nil {
+	if err := insertAppEventTx(tx, time.Now().UTC(), patch.Event, "user.updated", "user", user.ID, user.Email, userPatchEventDetails(before, user, patch), nil); err != nil {
 		return User{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -214,17 +219,20 @@ func (s *Store) DeleteUser(id int64, event ...EventContext) error {
 	if user.Role == "admin" && !hasActiveAdminTx(tx) {
 		return fmt.Errorf("%w: at least one active admin is required", ErrValidation)
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "user.deleted", "user", user.ID, user.Username, map[string]any{"role": user.Role}, nil); err != nil {
+	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "user.deleted", "user", user.ID, user.Email, map[string]any{"role": user.Role}, nil); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *Store) Authenticate(username, password string) (User, error) {
-	username = normalizeUsername(username)
-	user, err := s.userByUsername(username, true)
+func (s *Store) Authenticate(email, password string) (User, error) {
+	email, err := normalizeRequiredEmail(email)
 	if err != nil {
-		return User{}, fmt.Errorf("%w: invalid username or password", ErrValidation)
+		return User{}, fmt.Errorf("%w: invalid email or password", ErrValidation)
+	}
+	user, err := s.userByEmail(email, true)
+	if err != nil {
+		return User{}, fmt.Errorf("%w: invalid email or password", ErrValidation)
 	}
 	if user.Disabled {
 		return User{}, fmt.Errorf("%w: user is disabled", ErrValidation)
@@ -233,7 +241,7 @@ func (s *Store) Authenticate(username, password string) (User, error) {
 		return User{}, ErrPasswordResetRequired
 	}
 	if !security.VerifyPassword(user.PasswordHash, password) {
-		return User{}, fmt.Errorf("%w: invalid username or password", ErrValidation)
+		return User{}, fmt.Errorf("%w: invalid email or password", ErrValidation)
 	}
 	return publicUserCopy(user), nil
 }
@@ -278,7 +286,7 @@ func (s *Store) UserBySession(token string) (User, string, bool) {
 	hash := security.HashToken(token)
 	now := formatTime(time.Now().UTC())
 	row := s.db.QueryRow(`
-		SELECT u.id, u.username, u.display_name, u.email, u.role, u.disabled, u.password_reset_required, u.created_at, u.updated_at, s.csrf_token
+		SELECT u.id, u.display_name, u.email, u.role, u.disabled, u.password_reset_required, u.created_at, u.updated_at, s.csrf_token
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = ? AND s.expires_at > ?`,
@@ -289,7 +297,7 @@ func (s *Store) UserBySession(token string) (User, string, bool) {
 	var resetRequired int
 	var email sql.NullString
 	var created, updated, csrf string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &csrf); err != nil {
+	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &csrf); err != nil {
 		return User{}, "", false
 	}
 	user.Email = nullString(email)
@@ -356,7 +364,7 @@ func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepS
 	user.PasswordHash = hash
 	user.PasswordResetRequired = false
 	user.UpdatedAt = now
-	if err := insertAppEventTx(tx, now, firstEventContext(event), "password.changed", "user", user.ID, user.Username, nil, nil); err != nil {
+	if err := insertAppEventTx(tx, now, firstEventContext(event), "password.changed", "user", user.ID, user.Email, nil, nil); err != nil {
 		return User{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -391,7 +399,7 @@ func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration, 
 	}
 	user.PasswordResetRequired = true
 	user.UpdatedAt = now
-	if err := insertAppEventTx(tx, now, firstEventContext(event), "user.password_reset_requested", "user", user.ID, user.Username, map[string]any{
+	if err := insertAppEventTx(tx, now, firstEventContext(event), "user.password_reset_requested", "user", user.ID, user.Email, map[string]any{
 		"email_requested": AccountLinkEmailRequested(user, token),
 	}, accountLinkEventPayload("account.reset", user, token, link.ExpiresAt)); err != nil {
 		return User{}, AccountLink{}, "", err
@@ -475,7 +483,7 @@ func (s *Store) ConsumeAccountLink(token, password string, event ...EventContext
 		if ctx.Actor.UserID == 0 {
 			ctx.Actor = EventActorFromUser(user)
 		}
-		if err := insertAppEventTx(tx, now, ctx, "password.changed", "user", user.ID, user.Username, nil, nil); err != nil {
+		if err := insertAppEventTx(tx, now, ctx, "password.changed", "user", user.ID, user.Email, nil, nil); err != nil {
 			return User{}, err
 		}
 	}
@@ -579,7 +587,7 @@ func (s *Store) DeleteAPIToken(userID, tokenID int64, event ...EventContext) err
 func (s *Store) UserByAPIToken(token string) (User, bool) {
 	hash := security.HashToken(token)
 	row := s.db.QueryRow(`
-		SELECT u.id, u.username, u.display_name, u.email, u.role, u.disabled, u.password_reset_required, u.created_at, u.updated_at, t.id, t.last_used_at
+		SELECT u.id, u.display_name, u.email, u.role, u.disabled, u.password_reset_required, u.created_at, u.updated_at, t.id, t.last_used_at
 		FROM api_tokens t
 		JOIN users u ON u.id = t.user_id
 		WHERE t.token_hash = ?`,
@@ -592,7 +600,7 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 	var email sql.NullString
 	var created, updated string
 	var last sql.NullString
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &tokenID, &last); err != nil {
+	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &tokenID, &last); err != nil {
 		return User{}, false
 	}
 	user.Email = nullString(email)
@@ -613,13 +621,13 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 }
 
 func (s *Store) GetUser(id int64) (User, error) {
-	row := s.db.QueryRow(`SELECT id, username, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE id = ?`, id)
 	var user User
 	var disabled int
 	var resetRequired int
 	var email sql.NullString
 	var created, updated string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
+	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
@@ -635,7 +643,7 @@ func (s *Store) GetUser(id int64) (User, error) {
 }
 
 func createUserTx(tx *sql.Tx, input CreateUser) (User, error) {
-	username, displayName, email, role, err := normalizeCreateUserInput(input)
+	displayName, email, role, err := normalizeCreateUserInput(input)
 	if err != nil {
 		return User{}, err
 	}
@@ -643,11 +651,11 @@ func createUserTx(tx *sql.Tx, input CreateUser) (User, error) {
 	if err != nil {
 		return User{}, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
-	return insertUserTx(tx, username, displayName, email, role, hash, false)
+	return insertUserTx(tx, displayName, email, role, hash, false)
 }
 
 func createPendingUserTx(tx *sql.Tx, input CreateUser) (User, error) {
-	username, displayName, email, role, err := normalizeCreateUserInput(input)
+	displayName, email, role, err := normalizeCreateUserInput(input)
 	if err != nil {
 		return User{}, err
 	}
@@ -655,24 +663,20 @@ func createPendingUserTx(tx *sql.Tx, input CreateUser) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	return insertUserTx(tx, username, displayName, email, role, hash, true)
+	return insertUserTx(tx, displayName, email, role, hash, true)
 }
 
-func normalizeCreateUserInput(input CreateUser) (string, string, string, string, error) {
-	username := normalizeUsername(input.Username)
-	if !usernamePattern.MatchString(username) {
-		return "", "", "", "", fmt.Errorf("%w: username must be 3-48 lowercase letters, numbers, dot, dash, or underscore", ErrValidation)
+func normalizeCreateUserInput(input CreateUser) (string, string, string, error) {
+	email, err := normalizeRequiredEmail(input.Email)
+	if err != nil {
+		return "", "", "", err
 	}
 	role := normalizeGlobalRole(defaultString(input.Role, "staff"))
 	if !isValid(validGlobalRoles, role) {
-		return "", "", "", "", fmt.Errorf("%w: invalid role %q", ErrValidation, role)
+		return "", "", "", fmt.Errorf("%w: invalid role %q", ErrValidation, role)
 	}
-	email, err := normalizeEmail(input.Email)
-	if err != nil {
-		return "", "", "", "", err
-	}
-	displayName := defaultString(input.DisplayName, username)
-	return username, displayName, email, role, nil
+	displayName := defaultString(input.DisplayName, email)
+	return displayName, email, role, nil
 }
 
 func unusablePasswordHash() (string, error) {
@@ -683,11 +687,11 @@ func unusablePasswordHash() (string, error) {
 	return security.HashPassword(token)
 }
 
-func insertUserTx(tx *sql.Tx, username, displayName, email, role, hash string, passwordResetRequired bool) (User, error) {
+func insertUserTx(tx *sql.Tx, displayName, email, role, hash string, passwordResetRequired bool) (User, error) {
 	now := time.Now().UTC()
 	result, err := tx.Exec(
-		`INSERT INTO users (username, display_name, email, role, password_hash, password_reset_required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		username, displayName, nullEmptyString(email), role, hash, boolInt(passwordResetRequired), formatTime(now), formatTime(now),
+		`INSERT INTO users (display_name, email, role, password_hash, password_reset_required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		displayName, email, role, hash, boolInt(passwordResetRequired), formatTime(now), formatTime(now),
 	)
 	if err != nil {
 		return User{}, normalizeSQLError(err)
@@ -695,7 +699,6 @@ func insertUserTx(tx *sql.Tx, username, displayName, email, role, hash string, p
 	id, _ := result.LastInsertId()
 	return User{
 		ID:                    id,
-		Username:              username,
 		DisplayName:           displayName,
 		Email:                 email,
 		Role:                  role,
@@ -725,6 +728,44 @@ func userPatchEventDetails(before, after User, patch UpdateUser) map[string]any 
 		return nil
 	}
 	return details
+}
+
+func updateUserIdentityReferencesTx(tx *sql.Tx, before User, email string) error {
+	oldValues := compactIdentityValues(before.Email)
+	if len(oldValues) == 0 {
+		return nil
+	}
+	for _, value := range oldValues {
+		if _, err := tx.Exec(`UPDATE tickets SET assignee = ? WHERE lower(assignee) = ?`, email, value); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE tickets SET reporter = ? WHERE lower(reporter) = ?`, email, value); err != nil {
+			return err
+		}
+	}
+	if before.Email != "" {
+		if _, err := tx.Exec(`UPDATE tickets SET requester_email = ? WHERE lower(requester_email) = ?`, email, strings.ToLower(before.Email)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func compactIdentityValues(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func createAccountLinkTx(tx *sql.Tx, userID int64, purpose string, expiresFor time.Duration) (AccountLink, string, error) {
@@ -786,7 +827,7 @@ func accountLinkByTokenTx(tx *sql.Tx, token string) (AccountLink, User, error) {
 	}
 	row := tx.QueryRow(`
 		SELECT al.id, al.user_id, al.purpose, al.expires_at, al.used_at, al.created_at,
-		       u.id, u.username, u.display_name, u.email, u.role, u.password_hash, u.disabled, u.password_reset_required, u.created_at, u.updated_at
+		       u.id, u.display_name, u.email, u.role, u.password_hash, u.disabled, u.password_reset_required, u.created_at, u.updated_at
 		FROM account_links al
 		JOIN users u ON u.id = al.user_id
 		WHERE al.token_hash = ?`, security.HashToken(token))
@@ -800,7 +841,7 @@ func accountLinkByTokenTx(tx *sql.Tx, token string) (AccountLink, User, error) {
 	var resetRequired int
 	if err := row.Scan(
 		&link.ID, &link.UserID, &link.Purpose, &expires, &used, &created,
-		&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &user.PasswordHash,
+		&user.ID, &user.DisplayName, &email, &user.Role, &user.PasswordHash,
 		&disabled, &resetRequired, &userCreated, &userUpdated,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -824,13 +865,13 @@ func accountLinkByTokenTx(tx *sql.Tx, token string) (AccountLink, User, error) {
 }
 
 func getUserTx(tx *sql.Tx, id int64) (User, error) {
-	row := tx.QueryRow(`SELECT id, username, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE id = ?`, id)
+	row := tx.QueryRow(`SELECT id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE id = ?`, id)
 	var user User
 	var disabled int
 	var resetRequired int
 	var email sql.NullString
 	var created, updated string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
+	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
@@ -851,7 +892,7 @@ func scanUser(rows scanner) (User, error) {
 	var resetRequired int
 	var email sql.NullString
 	var created, updated string
-	if err := rows.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated); err != nil {
+	if err := rows.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated); err != nil {
 		return User{}, err
 	}
 	user.Email = nullString(email)
@@ -871,20 +912,20 @@ func hasActiveAdminTx(tx *sql.Tx) bool {
 	return count > 0
 }
 
-func (s *Store) userByUsername(username string, includeHash bool) (User, error) {
-	row := s.db.QueryRow(`SELECT id, username, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE username = ?`, username)
+func (s *Store) userByEmail(address string, includeHash bool) (User, error) {
+	row := s.db.QueryRow(`SELECT id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE lower(email) = ?`, strings.ToLower(strings.TrimSpace(address)))
 	var user User
 	var disabled int
 	var resetRequired int
-	var email sql.NullString
+	var emailValue sql.NullString
 	var created, updated string
-	if err := row.Scan(&user.ID, &user.Username, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
+	if err := row.Scan(&user.ID, &user.DisplayName, &emailValue, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
-	user.Email = nullString(email)
+	user.Email = nullString(emailValue)
 	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.PasswordResetRequired = resetRequired != 0

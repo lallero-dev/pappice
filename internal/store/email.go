@@ -26,14 +26,14 @@ func (s *Store) TicketEmailRecipients(event string, ticket Ticket, actor User) [
 			add(recipient)
 		}
 	case "ticket.updated", "ticket.commented":
-		if recipient, ok := s.emailRecipientByUsername(ticket.Reporter); ok {
+		if recipient, ok := s.emailRecipientByIdentity(ticket.Reporter); ok {
 			add(recipient)
 		}
-		if recipient, ok := s.emailRecipientByUsername(ticket.Assignee); ok {
+		if recipient, ok := s.emailRecipientByIdentity(ticket.Assignee); ok {
 			add(recipient)
 		}
 	case "ticket.assigned":
-		if recipient, ok := s.emailRecipientByUsername(ticket.Assignee); ok {
+		if recipient, ok := s.emailRecipientByIdentity(ticket.Assignee); ok {
 			add(recipient)
 		}
 	}
@@ -441,14 +441,14 @@ func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNo
 
 func (s *Store) productOwnerEmailRecipients(productID int64) []EmailRecipient {
 	rows, err := s.db.Query(`
-		SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.role
+		SELECT DISTINCT u.id, u.display_name, u.email, u.role
 		FROM users u
 		LEFT JOIN product_members pm ON pm.user_id = u.id AND pm.product_id = ?
 		WHERE u.disabled = 0
 		  AND u.email IS NOT NULL
 		  AND trim(u.email) <> ''
 		  AND (u.role = 'admin' OR pm.role = 'owner')
-		ORDER BY u.username`, productID)
+		ORDER BY u.email`, productID)
 	if err != nil {
 		return nil
 	}
@@ -464,25 +464,25 @@ func (s *Store) productOwnerEmailRecipients(productID int64) []EmailRecipient {
 	return recipients
 }
 
-func (s *Store) emailRecipientByUsername(username string) (EmailRecipient, bool) {
-	username = normalizeUsername(username)
-	if username == "" {
+func (s *Store) emailRecipientByIdentity(identity string) (EmailRecipient, bool) {
+	identity = strings.ToLower(strings.TrimSpace(identity))
+	if identity == "" {
 		return EmailRecipient{}, false
 	}
 	row := s.db.QueryRow(`
-		SELECT id, username, display_name, email, role
+		SELECT id, display_name, email, role
 		FROM users
-		WHERE username = ?
+		WHERE lower(email) = ?
 		  AND disabled = 0
 		  AND email IS NOT NULL
-		  AND trim(email) <> ''`, username)
+		  AND trim(email) <> ''`, identity)
 	recipient, err := scanEmailRecipient(row)
 	return recipient, err == nil
 }
 
 func scanEmailRecipient(rows scanner) (EmailRecipient, error) {
 	var recipient EmailRecipient
-	if err := rows.Scan(&recipient.UserID, &recipient.Username, &recipient.DisplayName, &recipient.Email, &recipient.Role); err != nil {
+	if err := rows.Scan(&recipient.UserID, &recipient.DisplayName, &recipient.Email, &recipient.Role); err != nil {
 		return EmailRecipient{}, err
 	}
 	return recipient, nil

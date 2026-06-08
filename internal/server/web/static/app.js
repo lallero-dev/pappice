@@ -248,8 +248,8 @@ function renderAccountLinkForm({ purpose, user = null, expiresAt = "", loading =
   if (user) {
     els.accountLinkUser.hidden = false;
     els.accountLinkUser.append(
-      el("strong", {}, user.display_name || user.username),
-      el("span", {}, user.email || user.username),
+      el("strong", {}, accountName(user)),
+      el("span", {}, user.email || ""),
       expiresAt ? el("span", {}, `Expires ${fullDateFormatter.format(new Date(expiresAt))}`) : el("span")
     );
   } else {
@@ -309,7 +309,7 @@ function showApp() {
 }
 
 function renderProfileMenu() {
-  const name = state.user?.display_name || state.user?.username || "";
+  const name = accountName(state.user);
   const role = labelize(state.user?.role || "");
   const email = state.user?.email || "";
   els.profileAvatar.textContent = (name || "P").slice(0, 1).toUpperCase();
@@ -317,6 +317,17 @@ function renderProfileMenu() {
   els.profileRole.textContent = role;
   els.profileMenuName.textContent = name;
   els.profileEmail.textContent = email || role;
+}
+
+function accountName(user) {
+  return user?.display_name || user?.email || "";
+}
+
+function accountLabel(user) {
+  const name = accountName(user);
+  const email = user?.email || "";
+  if (name && email && name !== email) return `${name} / ${email}`;
+  return name || email || "Account";
 }
 
 function toggleProfileMenu() {
@@ -807,11 +818,22 @@ function renderTicketList() {
       el("span", { className: "ticket-row-footer" }, [
         badge(ticket.status, `status-${ticket.status}`),
         badge(ticket.priority, `priority-${ticket.priority}`),
-        el("span", { className: "ticket-row-person" }, ticket.assignee || ticket.requester_name || ticket.requester || "Unassigned")
+        el("span", { className: "ticket-row-person" }, ticketPersonLabel(ticket))
       ])
     );
     els.ticketList.append(row);
   }
+}
+
+function ticketPersonLabel(ticket) {
+  if (ticket.assignee) return accountLabelByEmail(ticket.assignee);
+  return ticket.requester_name || ticket.requester_email || ticket.requester || "Unassigned";
+}
+
+function accountLabelByEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  const user = state.users.find((candidate) => String(candidate.email || "").trim().toLowerCase() === normalized);
+  return user ? accountName(user) || user.email : email;
 }
 
 function renderSortHeaders() {
@@ -1425,12 +1447,9 @@ function renderUsers() {
     const row = el("div", { className: "admin-row" });
     const edit = el("button", { className: "ghost-button", type: "button" }, "Edit");
     edit.addEventListener("click", () => openUserModal(user));
-    const label = user.email
-      ? `${user.display_name || user.username} / ${user.username} / ${user.email}`
-      : `${user.display_name || user.username} / ${user.username}`;
 
     row.append(
-      el("div", { className: "admin-row-main" }, label),
+      el("div", { className: "admin-row-main" }, accountLabel(user)),
       badge(user.role, "priority-normal"),
       el("span", { className: user.disabled || user.password_reset_required ? "muted" : "status-ok" }, user.disabled ? "Disabled" : user.password_reset_required ? "Password pending" : "Active"),
       edit
@@ -1479,7 +1498,7 @@ function renderMembers() {
     const edit = el("button", { className: "ghost-button", type: "button" }, "Edit");
     edit.addEventListener("click", () => openMemberModal(member));
     row.append(
-      el("div", { className: "admin-row-main" }, `${member.display_name || member.username} / ${member.username}`),
+      el("div", { className: "admin-row-main" }, accountLabel(member)),
       badge(member.role, "priority-normal"),
       edit
     );
@@ -2050,11 +2069,12 @@ function assigneeOptions(current = "") {
   const seen = new Set([""]);
   for (const user of state.users) {
     if (user.disabled || !["admin", "staff"].includes(user.role)) continue;
-    if (seen.has(user.username)) continue;
-    seen.add(user.username);
+    const email = String(user.email || "").trim();
+    if (!email || seen.has(email.toLowerCase())) continue;
+    seen.add(email.toLowerCase());
     options.push({
-      value: user.username,
-      label: `${user.display_name || user.username} / ${user.username}`
+      value: email,
+      label: accountLabel(user)
     });
   }
   if (current && !seen.has(current)) {
@@ -2173,7 +2193,6 @@ function currentUserAuthorValues() {
   const email = state.user?.email || "";
   return [
     state.user?.display_name,
-    state.user?.username,
     email,
     String(email).split("@")[0]
   ].map(normalizeAuthor).filter(Boolean);
@@ -2340,7 +2359,7 @@ function openUserModal(user = null) {
   const editing = Boolean(user);
   if (editing) {
     els.modalHost.open({
-      title: `Edit ${user.username}`,
+      title: `Edit ${accountName(user) || user.email}`,
       submitText: "Save",
       content: accountEditContent(user),
       onSubmit: async (data) => {
@@ -2360,10 +2379,9 @@ function openUserModal(user = null) {
 
   const fields = [
     { group: [
-      { name: "username", label: "Username", required: true, maxlength: 48, autocomplete: "off" },
+      { name: "email", label: "Email", type: "email", required: true, autocomplete: "email" },
       { name: "display_name", label: "Display name", autocomplete: "off" }
     ] },
-    { name: "email", label: "Email", type: "email", autocomplete: "email" },
     { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "staff" },
     { group: [
       { name: "password", label: "Manual password (optional)", type: "password", minlength: 8, autocomplete: "new-password" },
@@ -2452,13 +2470,13 @@ function accountEditContent(user) {
 
   reset.addEventListener("click", () => showAccountActionConfirm(confirmArea, {
     title: "Send a password reset link?",
-    body: `${user.display_name || user.username} will receive a one-time link if email is configured. Existing sessions are not changed.`,
+    body: `${accountName(user)} will receive a one-time link if email is configured. Existing sessions are not changed.`,
     confirmLabel: "Send reset link",
     onConfirm: () => resetUserPassword(user)
   }));
   remove.addEventListener("click", () => showAccountActionConfirm(confirmArea, {
     title: "Delete this account?",
-    body: `This permanently removes ${user.display_name || user.username}. This cannot be undone.`,
+    body: `This permanently removes ${accountName(user)}. This cannot be undone.`,
     confirmLabel: "Delete account",
     danger: true,
     onConfirm: async () => {
@@ -2503,7 +2521,7 @@ async function resetUserPassword(user) {
 
 function openAccountLinkResult(payload, purpose = "setup") {
   const link = payload.account_link || {};
-  const userLabel = payload.display_name || payload.username || "Account";
+  const userLabel = accountName(payload) || "Account";
   const title = purpose === "reset" ? `Password Reset for ${userLabel}` : `Setup Link for ${userLabel}`;
   const linkInput = el("input", {
     readonly: "readonly",
@@ -2530,7 +2548,7 @@ function openAccountLinkResult(payload, purpose = "setup") {
     el("div", { className: "copy-row" }, [linkInput, copy]),
     el("div", { className: "link-meta" }, [
       el("span", {}, ["Account: ", el("strong", {}, userLabel)]),
-      el("span", {}, ["Username: ", el("strong", {}, payload.username || "")]),
+      el("span", {}, ["Email: ", el("strong", {}, payload.email || "")]),
       link.expires_at ? el("span", {}, ["Expires: ", el("strong", {}, fullDateFormatter.format(new Date(link.expires_at)))]) : el("span")
     ])
   ]);
@@ -2645,7 +2663,7 @@ async function retryEmailNotification(id) {
 function openMemberModal(member = null) {
   if (member) {
     els.modalHost.open({
-      title: `Edit ${member.display_name || member.username}`,
+      title: `Edit ${accountName(member)}`,
       submitText: "Save",
       content: memberEditContent(member),
       onSubmit: async (data) => {
@@ -2656,7 +2674,7 @@ function openMemberModal(member = null) {
   }
   const users = state.users
     .filter((user) => !user.disabled)
-    .map((user) => ({ value: String(user.id), label: `${user.display_name || user.username} / ${user.username}` }));
+    .map((user) => ({ value: String(user.id), label: accountLabel(user) }));
   els.modalHost.open({
     title: "Add Product Member",
     submitText: "Save",
@@ -2686,7 +2704,7 @@ function memberEditContent(member) {
     el("div", { className: "account-edit-grid" }, [
       accountField("Account", el("input", {
         disabled: "disabled",
-        value: `${member.display_name || member.username} / ${member.username}`
+        value: accountLabel(member)
       })),
       accountField("Role", role)
     ]),
@@ -2702,7 +2720,7 @@ function memberEditContent(member) {
 
   remove.addEventListener("click", () => showAccountActionConfirm(confirmArea, {
     title: "Remove this member?",
-    body: `${member.display_name || member.username} will lose access to this product. Existing tickets and comments are kept.`,
+    body: `${accountName(member)} will lose access to this product. Existing tickets and comments are kept.`,
     confirmLabel: "Remove member",
     danger: true,
     onConfirm: async () => {

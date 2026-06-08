@@ -32,7 +32,7 @@ func TestSetupRequiresHTTPS(t *testing.T) {
 	defer server.Close()
 
 	resp, body := doJSON(t, server.Client(), http.MethodPost, server.URL+"/api/setup", map[string]any{
-		"username": "admin",
+		"email":    "admin@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	if resp.StatusCode != http.StatusBadRequest {
@@ -74,7 +74,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	setupResp, setupBody := doJSON(t, client, http.MethodPost, server.URL+"/api/setup", map[string]any{
-		"username": "admin",
+		"email":    "admin@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	requireStatus(t, setupResp, setupBody, http.StatusCreated)
@@ -94,7 +94,6 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	bobID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "bob",
 		"email":    "bob@example.test",
 		"password": "correct horse",
 		"role":     "staff",
@@ -107,7 +106,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusCreated)
 
 	loginResp, loginBody := doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
-		"username": "bob",
+		"email":    "bob@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	requireStatus(t, loginResp, loginBody, http.StatusOK)
@@ -233,7 +232,7 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	}
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
-		"username": "admin",
+		"email":    "admin@example.test",
 		"password": "wrong password",
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusUnauthorized)
@@ -271,7 +270,6 @@ func TestAPIMethodContracts(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	userID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "methodstaff",
 		"email":    "methodstaff@example.test",
 		"password": "correct horse",
 		"role":     "staff",
@@ -432,7 +430,6 @@ func TestProductDeletionRequiresAdmin(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	ownerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "owner",
 		"password": "correct horse",
 		"email":    "owner@example.test",
 		"role":     "staff",
@@ -468,7 +465,6 @@ func TestTicketDeletionRequiresAdmin(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	ownerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "owner",
 		"password": "correct horse",
 		"email":    "owner@example.test",
 		"role":     "staff",
@@ -515,7 +511,6 @@ func TestAPIValidationContracts(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	userID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "validationstaff",
 		"email":    "validationstaff@example.test",
 		"password": "correct horse",
 		"role":     "staff",
@@ -639,7 +634,6 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
-		"username":     "pending",
 		"display_name": "Pending User",
 		"email":        "pending@example.test",
 		"role":         "staff",
@@ -655,7 +649,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	setupToken := accountLinkTokenFromURL(t, setupURL)
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
-		"username": "pending",
+		"email":    "pending@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusUnauthorized)
@@ -670,7 +664,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/account-links/"+setupToken, nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte(`"purpose":"setup"`)) || !bytes.Contains(body, []byte(`"username":"pending"`)) {
+	if !bytes.Contains(body, []byte(`"purpose":"setup"`)) || !bytes.Contains(body, []byte(`"email":"pending@example.test"`)) {
 		t.Fatalf("account setup link lookup = %s", body)
 	}
 
@@ -707,7 +701,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 		t.Fatalf("old session still authenticated after reset: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
-		"username": "pending",
+		"email":    "pending@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusUnauthorized)
@@ -741,7 +735,6 @@ func TestAdminCreatesUserWithManualPassword(t *testing.T) {
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
-		"username":     "manual",
 		"display_name": "Manual Customer",
 		"email":        "manual@example.test",
 		"role":         "customer",
@@ -763,7 +756,6 @@ func TestProfileAndPasswordChangeFlow(t *testing.T) {
 	_, server, client := newTestServer(t)
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 	staffID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username":     "staffer",
 		"display_name": "Staffer",
 		"email":        "staffer@example.test",
 		"password":     "correct horse",
@@ -809,7 +801,7 @@ func TestProfileAndPasswordChangeFlow(t *testing.T) {
 	if decodeBool(t, body, "authenticated") {
 		t.Fatalf("other session still authenticated after password change: %s", body)
 	}
-	loginUser(t, client, server.URL, "staffer", "better password")
+	loginUser(t, client, server.URL, "person@example.test", "better password")
 }
 
 func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
@@ -830,13 +822,13 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 
 	for attempt := 0; attempt < 2; attempt++ {
 		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
-			"username": "missing",
+			"email":    "missing@example.test",
 			"password": "wrong password",
 		}, nil, "", "")
 		requireStatus(t, resp, body, http.StatusUnauthorized)
 	}
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
-		"username": "missing",
+		"email":    "missing@example.test",
 		"password": "wrong password",
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusTooManyRequests)
@@ -845,9 +837,8 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	}
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
-		"username": "limited",
-		"email":    "limited@example.test",
-		"role":     "staff",
+		"email": "limited@example.test",
+		"role":  "staff",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	token := accountLinkTokenFromURL(t, decodeNestedString(t, body, "account_link", "url"))
@@ -896,19 +887,16 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 
 	devID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "dev",
 		"password": "correct horse",
 		"email":    "dev@example.test",
 		"role":     "staff",
 	})
 	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "customer",
 		"password": "correct horse",
 		"email":    "customer@example.test",
 		"role":     "customer",
 	})
 	disabledID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "disabled",
 		"password": "correct horse",
 		"email":    "disabled@example.test",
 		"role":     "staff",
@@ -966,10 +954,10 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status":   "assigned",
-		"assignee": "dev",
+		"assignee": "dev@example.test",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?product_id="+itoa(productID)+"&status=new&status=assigned&assignee=dev&q=dashboard", nil, adminCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?product_id="+itoa(productID)+"&status=new&status=assigned&assignee=dev@example.test&q=dashboard", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Dashboard fails")) {
 		t.Fatalf("filtered tickets missing ticket: %s", body)
@@ -1088,7 +1076,6 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	devID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "dev",
 		"password": "correct horse",
 		"email":    "dev@example.test",
 		"role":     "staff",
@@ -1105,7 +1092,7 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status":   "assigned",
-		"assignee": "dev",
+		"assignee": "dev@example.test",
 		"comment": map[string]any{
 			"body":       "This should roll back",
 			"visibility": "private",
@@ -1120,7 +1107,7 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"status":   "assigned",
-		"assignee": "dev",
+		"assignee": "dev@example.test",
 		"comment": map[string]any{
 			"body":       "Taking this now",
 			"visibility": "public",
@@ -1161,7 +1148,7 @@ func TestWebhookGuardrails(t *testing.T) {
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	setupResp, setupBody := doJSON(t, client, http.MethodPost, blocking.URL+"/api/setup", map[string]any{
-		"username": "admin",
+		"email":    "admin@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	requireStatus(t, setupResp, setupBody, http.StatusCreated)
@@ -1195,7 +1182,7 @@ func TestWebhookGuardrails(t *testing.T) {
 	permissiveClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	setupResp, setupBody = doJSON(t, permissiveClient, http.MethodPost, permissive.URL+"/api/setup", map[string]any{
-		"username": "admin",
+		"email":    "admin@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	requireStatus(t, setupResp, setupBody, http.StatusCreated)
@@ -1526,37 +1513,28 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username":     "customer",
 		"display_name": "Customer",
 		"email":        "customer@example.test",
 		"password":     "correct horse",
 		"role":         "customer",
 	})
 	intruderID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "intruder",
 		"email":    "intruder@example.test",
-		"password": "correct horse",
-		"role":     "customer",
-	})
-	noEmailID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "noemail",
 		"password": "correct horse",
 		"role":     "customer",
 	})
 	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, customerID, "customer")
 	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, intruderID, "customer")
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, noEmailID, "customer")
 
-	noEmailCookie, noEmailCSRF := loginUser(t, client, server.URL, "noemail", "correct horse")
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
-		"product_id":  productID,
-		"title":       "No email",
-		"description": "Customer accounts need an email for support tickets",
-	}, noEmailCookie, noEmailCSRF, server.URL)
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
+		"display_name": "No Email",
+		"password":     "correct horse",
+		"role":         "customer",
+	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusBadRequest)
 
 	loginResp, loginBody := doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
-		"username": "customer",
+		"email":    "customer@example.test",
 		"password": "correct horse",
 	}, nil, "", "")
 	requireStatus(t, loginResp, loginBody, http.StatusOK)
@@ -1734,7 +1712,6 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	otherProductID := decodeInt64(t, body, "id")
 
 	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username":     "customer",
 		"display_name": "Customer",
 		"email":        "customer@example.test",
 		"password":     "correct horse",
@@ -1748,7 +1725,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 		"title":       "Customer-owned ticket",
 		"description": "Customer-visible request",
 		"priority":    "urgent",
-		"assignee":    "admin",
+		"assignee":    "admin@example.test",
 	}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	customerTicketID := decodeInt64(t, body, "id")
@@ -1761,23 +1738,23 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	}
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(customerTicketID), map[string]any{
-		"assignee": "support",
+		"assignee": "support@example.test",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte(`"assignee":"support"`)) {
+	if !bytes.Contains(body, []byte(`"assignee":"support@example.test"`)) {
 		t.Fatalf("admin assignment response = %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(customerTicketID), nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if bytes.Contains(body, []byte(`"assignee":"support"`)) || bytes.Contains(body, []byte(`"assignee":`)) {
+	if bytes.Contains(body, []byte(`"assignee":"support@example.test"`)) || bytes.Contains(body, []byte(`"assignee":`)) {
 		t.Fatalf("customer ticket detail leaked assignee: %s", body)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?assignee=support", nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?assignee=support@example.test", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee":`)) {
 		t.Fatalf("customer assignee filter should be ignored and sanitized: %s", body)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?q=support", nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?q=support@example.test", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee":`)) {
 		t.Fatalf("customer search leaked assignee matches: %s", body)
@@ -1810,7 +1787,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	for name, patch := range map[string]map[string]any{
 		"status":      {"status": "assigned"},
 		"priority":    {"priority": "low"},
-		"assignee":    {"assignee": "admin"},
+		"assignee":    {"assignee": "admin@example.test"},
 		"title":       {"title": "Customer renamed ticket"},
 		"description": {"description": "Customer edited description"},
 		"mixed": {
@@ -1832,7 +1809,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 		bytes.Contains(body, []byte("Customer edited description")) ||
 		bytes.Contains(body, []byte(`"status":"assigned"`)) ||
 		bytes.Contains(body, []byte(`"priority":"low"`)) ||
-		bytes.Contains(body, []byte(`"assignee":"admin"`)) {
+		bytes.Contains(body, []byte(`"assignee":"admin@example.test"`)) {
 		t.Fatalf("blocked customer workflow change persisted: %s", body)
 	}
 }
@@ -1845,13 +1822,11 @@ func TestAdminOnlyEndpointsRejectStaffAndCustomers(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
 	staffID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "staff",
 		"email":    "staff@example.test",
 		"password": "correct horse",
 		"role":     "staff",
 	})
 	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "customer",
 		"email":    "customer@example.test",
 		"password": "correct horse",
 		"role":     "customer",
@@ -1879,7 +1854,7 @@ func TestAdminOnlyEndpointsRejectStaffAndCustomers(t *testing.T) {
 		payload any
 	}{
 		{"/api/products", map[string]any{"key": "NOPE", "name": "Nope"}},
-		{"/api/users", map[string]any{"username": "blocked", "email": "blocked@example.test", "role": "staff"}},
+		{"/api/users", map[string]any{"email": "blocked@example.test", "role": "staff"}},
 	}
 	for _, item := range adminOnlyWrites {
 		resp, body = doJSON(t, client, http.MethodPost, server.URL+item.path, item.payload, staffCookie, staffCSRF, server.URL)
@@ -1901,7 +1876,6 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "customer",
 		"email":    "customer@example.test",
 		"password": "correct horse",
 		"role":     "customer",
@@ -2042,7 +2016,6 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 	productID := decodeFirstProductID(t, body)
 
 	devID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "patchdev",
 		"email":    "patchdev@example.test",
 		"password": "correct horse",
 		"role":     "staff",
@@ -2062,7 +2035,7 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 		"description": "Updated through a multipart save",
 		"status":      "assigned",
 		"priority":    "high",
-		"assignee":    "patchdev",
+		"assignee":    "patchdev@example.test",
 		"body":        "Patch evidence attached",
 		"visibility":  "public",
 	}, []testUpload{{
@@ -2079,7 +2052,7 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 		patched.Description != "Updated through a multipart save" ||
 		patched.Status != "assigned" ||
 		patched.Priority != "high" ||
-		patched.Assignee != "patchdev" {
+		patched.Assignee != "patchdev@example.test" {
 		t.Fatalf("multipart patch did not update workflow fields: %#v", patched)
 	}
 
@@ -2150,13 +2123,11 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	devID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username": "dev",
 		"password": "correct horse",
 		"email":    "dev@example.test",
 		"role":     "staff",
 	})
 	customerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"username":     "customer",
 		"display_name": "Customer",
 		"email":        "customer@example.test",
 		"password":     "correct horse",
@@ -2186,7 +2157,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(workflowOnlyID), map[string]any{
 		"status":   "assigned",
 		"priority": "urgent",
-		"assignee": "dev",
+		"assignee": "dev@example.test",
 		"comment": map[string]any{
 			"body":       "Internal triage details",
 			"visibility": "internal",
@@ -2210,7 +2181,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 	publicReplyID := createTicket("Grouped public reply")
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(publicReplyID), map[string]any{
 		"status":   "assigned",
-		"assignee": "dev",
+		"assignee": "dev@example.test",
 		"comment": map[string]any{
 			"body":       "Visible staff reply",
 			"visibility": "public",
@@ -2239,14 +2210,14 @@ func newTestServer(t *testing.T, opts ...Options) (*store.Store, *httptest.Serve
 	return tracker, server, client
 }
 
-func setupAdmin(t *testing.T, client *http.Client, baseURL, username, email string) (*http.Cookie, string) {
+func setupAdmin(t *testing.T, client *http.Client, baseURL, name, email string) (*http.Cookie, string) {
 	t.Helper()
-	payload := map[string]any{
-		"username": username,
-		"password": "correct horse",
+	if email == "" {
+		email = fixtureEmail(name)
 	}
-	if email != "" {
-		payload["email"] = email
+	payload := map[string]any{
+		"email":    email,
+		"password": "correct horse",
 	}
 	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/setup", payload, nil, "", "")
 	requireStatus(t, resp, body, http.StatusCreated)
@@ -2256,10 +2227,10 @@ func setupAdmin(t *testing.T, client *http.Client, baseURL, username, email stri
 	return resp.Cookies()[0], decodeString(t, body, "csrf_token")
 }
 
-func loginUser(t *testing.T, client *http.Client, baseURL, username, password string) (*http.Cookie, string) {
+func loginUser(t *testing.T, client *http.Client, baseURL, email, password string) (*http.Cookie, string) {
 	t.Helper()
 	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/login", map[string]any{
-		"username": username,
+		"email":    fixtureEmail(email),
 		"password": password,
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -2288,6 +2259,14 @@ func createUser(t *testing.T, client *http.Client, baseURL string, cookie *http.
 		requireStatus(t, resp, body, http.StatusOK)
 	}
 	return id
+}
+
+func fixtureEmail(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.Contains(value, "@") {
+		return value
+	}
+	return value + "@example.test"
 }
 
 func addProductMember(t *testing.T, client *http.Client, baseURL string, cookie *http.Cookie, csrf string, productID, userID int64, role string) {

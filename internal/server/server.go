@@ -287,24 +287,24 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Username string `json:"username"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	limitKey := "login|" + clientIP(r) + "|" + strings.ToLower(strings.TrimSpace(input.Username))
+	limitKey := "login|" + clientIP(r) + "|" + strings.ToLower(strings.TrimSpace(input.Email))
 	if !s.loginLimiter.Allow(limitKey, time.Now().UTC()) {
 		respondRateLimited(w)
 		return
 	}
-	user, err := s.store.Authenticate(input.Username, input.Password)
+	user, err := s.store.Authenticate(input.Email, input.Password)
 	if err != nil {
 		if errors.Is(err, store.ErrPasswordResetRequired) {
 			respondError(w, http.StatusUnauthorized, "password setup or reset is required; use the emailed link or contact an admin")
 			return
 		}
-		respondError(w, http.StatusUnauthorized, "invalid username or password")
+		respondError(w, http.StatusUnauthorized, "invalid email or password")
 		return
 	}
 	csrf, ok := s.createSession(w, user.ID)
@@ -852,7 +852,7 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 			respondError(w, http.StatusForbidden, "agent access is required for internal notes")
 			return store.Ticket{}, false
 		}
-		next.Author = defaultString(auth.User.DisplayName, auth.User.Username)
+		next.Author = defaultString(auth.User.DisplayName, auth.User.Email)
 		next.AuthorUserID = auth.User.ID
 		comment = &next
 	}
@@ -1334,7 +1334,7 @@ func (s *Server) handleEmailNotificationTest(w http.ResponseWriter, r *http.Requ
 		respondError(w, http.StatusBadRequest, "test recipient email is required")
 		return
 	}
-	recipientName := defaultString(auth.User.DisplayName, auth.User.Username)
+	recipientName := defaultString(auth.User.DisplayName, auth.User.Email)
 	subject := "Pappice test email"
 	bodyText := "This is a no-reply test email from Pappice.\n\nIf you received this message, SMTP delivery is working."
 	bodyHTML := "<!doctype html><meta charset=\"utf-8\"><p>This is a no-reply test email from Pappice.</p><p>If you received this message, SMTP delivery is working.</p>"
@@ -1551,12 +1551,12 @@ func (s *Server) isSupportTicketRequester(user store.User, ticket store.Ticket) 
 	if email != "" && strings.EqualFold(email, strings.TrimSpace(ticket.RequesterEmail)) {
 		return true
 	}
-	return ticket.Source == "portal" && strings.EqualFold(strings.TrimSpace(ticket.Reporter), strings.TrimSpace(user.Username))
+	return ticket.Source == "portal" && email != "" && strings.EqualFold(strings.TrimSpace(ticket.Reporter), email)
 }
 
 func (s *Server) prepareTicketInput(w http.ResponseWriter, user store.User, productID int64, input *store.CreateTicket) (bool, bool) {
 	input.ProductID = productID
-	input.Reporter = user.Username
+	input.Reporter = user.Email
 	if !s.isCustomerTicketCreator(user, productID) {
 		return false, true
 	}
@@ -1567,7 +1567,7 @@ func (s *Server) prepareTicketInput(w http.ResponseWriter, user store.User, prod
 	}
 	input.Assignee = ""
 	input.Source = "portal"
-	input.RequesterName = defaultString(user.DisplayName, user.Username)
+	input.RequesterName = defaultString(user.DisplayName, user.Email)
 	input.RequesterEmail = requesterEmail
 	return true, true
 }
@@ -1716,7 +1716,7 @@ func commentByUser(user store.User, comment store.Comment) bool {
 
 func userAuthorValues(user store.User) map[string]bool {
 	values := map[string]bool{}
-	for _, value := range []string{user.Username, user.DisplayName, user.Email, emailLocalPart(user.Email)} {
+	for _, value := range []string{user.DisplayName, user.Email, emailLocalPart(user.Email)} {
 		if normalized := normalizeAuthor(value); normalized != "" {
 			values[normalized] = true
 		}

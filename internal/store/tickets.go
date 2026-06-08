@@ -131,6 +131,7 @@ func (s *Store) listTickets(filter Filter, user User) []Ticket {
 		if role == "staff" {
 			staffScope = 1
 		}
+		userEmail := strings.ToLower(strings.TrimSpace(user.Email))
 		conditions = append(conditions, `EXISTS (
 			SELECT 1
 			FROM product_members pm
@@ -142,7 +143,7 @@ func (s *Store) listTickets(filter Filter, user User) []Ticket {
 			    lower(i.requester_email) = ?
 			  )
 		)`)
-		args = append(args, user.ID, staffScope, strings.ToLower(strings.TrimSpace(user.Username)), strings.ToLower(strings.TrimSpace(user.Email)))
+		args = append(args, user.ID, staffScope, userEmail, userEmail)
 	}
 	if filter.ProductID > 0 {
 		conditions = append(conditions, "i.product_id = ?")
@@ -184,7 +185,7 @@ func (s *Store) listTickets(filter Filter, user User) []Ticket {
 		       i.created_at, i.updated_at, i.closed_at
 		FROM tickets i
 		JOIN products p ON p.id = i.product_id
-		LEFT JOIN users requester ON requester.username = lower(i.reporter)
+		LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY i.updated_at DESC`
 	rows, err := s.db.Query(query, args...)
@@ -238,7 +239,7 @@ func (s *Store) GetTicketByCustomerToken(token string) (Ticket, error) {
 		       i.created_at, i.updated_at, i.closed_at
 		FROM tickets i
 		JOIN products p ON p.id = i.product_id
-		LEFT JOIN users requester ON requester.username = lower(i.reporter)
+		LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)
 		WHERE i.customer_token = ?`, token)
 	ticket, err := scanTicket(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -724,7 +725,7 @@ func hydrateTicketWithQuery(queryer ticketQueryer, ticket *Ticket) error {
 		SELECT c.id, COALESCE(NULLIF(author_by_id.display_name, ''), NULLIF(author_by_name.display_name, ''), c.author), c.author_user_id, c.body, c.visibility, c.created_at
 		FROM comments c
 		LEFT JOIN users author_by_id ON author_by_id.id = c.author_user_id
-		LEFT JOIN users author_by_name ON c.author_user_id IS NULL AND author_by_name.username = lower(c.author)
+		LEFT JOIN users author_by_name ON c.author_user_id IS NULL AND lower(author_by_name.email) = lower(c.author)
 		WHERE c.ticket_id = ?
 		ORDER BY c.created_at`, ticket.ID)
 	if err != nil {
@@ -797,7 +798,7 @@ const ticketSelectSQL = `
 	       i.created_at, i.updated_at, i.closed_at
 	FROM tickets i
 	JOIN products p ON p.id = i.product_id
-	LEFT JOIN users requester ON requester.username = lower(i.reporter)`
+	LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)`
 
 func scanTicket(rows scanner) (Ticket, error) {
 	var ticket Ticket

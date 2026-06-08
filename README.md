@@ -15,8 +15,7 @@ build, and no inbound email processing.
 
 Pappice is intended for small-team self-hosting and public audit. It is not yet
 externally security audited, and the API/schema should be considered unstable
-until a non-alpha release. Alpha builds may require recreating the SQLite
-database.
+until a non-alpha release. Alpha builds may require explicit SQLite migrations.
 
 ## Features
 
@@ -86,10 +85,17 @@ Use [.env.example](./.env.example) as the complete reference.
 Useful local commands:
 
 ```sh
+pappice db status
+pappice db migrate --dry-run
+pappice db migrate
 pappice doctor
 pappice version
 pappice serve -h
 ```
+
+`pappice serve` initializes a brand-new database, but it does not run migrations
+for an existing database. If the schema is behind, run a backup, then
+`pappice db migrate --dry-run`, then `pappice db migrate`.
 
 `pappice doctor` validates paths, TLS, public URL, SMTP, upload limits, rate
 limits, and development-only webhook settings before starting the server.

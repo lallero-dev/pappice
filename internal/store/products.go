@@ -141,11 +141,11 @@ func (s *Store) ProductRole(userID, productID int64) (string, bool) {
 
 func (s *Store) ListProductMembers(productID int64) []ProductMember {
 	rows, err := s.db.Query(`
-		SELECT pm.product_id, u.id, u.username, u.display_name, pm.role, pm.created_at
+		SELECT pm.product_id, u.id, u.email, u.display_name, pm.role, pm.created_at
 		FROM product_members pm
 		JOIN users u ON u.id = pm.user_id
 		WHERE pm.product_id = ?
-		ORDER BY pm.role, u.username`, productID)
+		ORDER BY pm.role, u.email`, productID)
 	if err != nil {
 		return nil
 	}
@@ -155,7 +155,7 @@ func (s *Store) ListProductMembers(productID int64) []ProductMember {
 	for rows.Next() {
 		var member ProductMember
 		var created string
-		if err := rows.Scan(&member.ProductID, &member.UserID, &member.Username, &member.DisplayName, &member.Role, &created); err == nil {
+		if err := rows.Scan(&member.ProductID, &member.UserID, &member.Email, &member.DisplayName, &member.Role, &created); err == nil {
 			member.Role = normalizeProductRole(member.Role)
 			member.CreatedAt = parseTime(created)
 			members = append(members, member)
@@ -197,12 +197,12 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 	member := ProductMember{
 		ProductID:   productID,
 		UserID:      user.ID,
-		Username:    user.Username,
+		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Role:        role,
 		CreatedAt:   now,
 	}
-	if err := insertAppEventTx(tx, now, input.Event, "product_member.upserted", "user", member.UserID, member.Username, map[string]any{
+	if err := insertAppEventTx(tx, now, input.Event, "product_member.upserted", "user", member.UserID, member.Email, map[string]any{
 		"product_id": productID,
 		"role":       member.Role,
 	}, nil); err != nil {
@@ -233,7 +233,7 @@ func (s *Store) DeleteProductMember(productID, userID int64, event ...EventConte
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return ErrNotFound
 	}
-	targetName := user.Username
+	targetName := user.Email
 	if targetName == "" {
 		targetName = strconv.FormatInt(userID, 10)
 	}

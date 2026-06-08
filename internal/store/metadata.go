@@ -69,7 +69,6 @@ func stringSet(values []string) map[string]struct{} {
 func ToPublicUser(user User) PublicUser {
 	return PublicUser{
 		ID:                    user.ID,
-		Username:              user.Username,
 		DisplayName:           user.DisplayName,
 		Email:                 user.Email,
 		Role:                  normalizeGlobalRole(user.Role),

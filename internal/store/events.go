@@ -11,7 +11,6 @@ import (
 
 type EventActor struct {
 	UserID      int64
-	Username    string
 	DisplayName string
 	Email       string
 	Role        string
@@ -89,7 +88,6 @@ type AppEventPayload struct {
 type AccountLinkEventPayload struct {
 	Event       string    `json:"event"`
 	UserID      int64     `json:"user_id"`
-	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name"`
 	Email       string    `json:"email"`
 	Token       string    `json:"token"`
@@ -99,7 +97,6 @@ type AccountLinkEventPayload struct {
 func EventActorFromUser(user User) EventActor {
 	return EventActor{
 		UserID:      user.ID,
-		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Email:       user.Email,
 		Role:        normalizeGlobalRole(user.Role),
@@ -109,7 +106,6 @@ func EventActorFromUser(user User) EventActor {
 func (event DomainEvent) Actor() User {
 	return User{
 		ID:          event.ActorUserID,
-		Username:    event.ActorUsername,
 		DisplayName: event.ActorDisplayName,
 		Email:       event.ActorEmail,
 		Role:        normalizeGlobalRole(event.ActorRole),
@@ -124,7 +120,6 @@ func accountLinkEventPayload(event string, user User, token string, expiresAt ti
 	return &AccountLinkEventPayload{
 		Event:       strings.TrimSpace(event),
 		UserID:      user.ID,
-		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Email:       user.Email,
 		Token:       token,
@@ -366,7 +361,7 @@ func insertDomainEventTx(tx *sql.Tx, input CreateDomainEvent, now time.Time) (in
 			payload_json, status, attempts, created_at, updated_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-		eventType, input.ProductID, input.TicketID, input.Actor.UserID, strings.TrimSpace(input.Actor.Username),
+		eventType, input.ProductID, input.TicketID, input.Actor.UserID, strings.TrimSpace(input.Actor.Email),
 		strings.TrimSpace(input.Actor.DisplayName), strings.TrimSpace(input.Actor.Email), normalizeGlobalRole(input.Actor.Role),
 		payload, formatTime(now), formatTime(now),
 	)
