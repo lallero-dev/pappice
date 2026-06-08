@@ -1291,8 +1291,7 @@ function requesterBlock(ticket) {
   const block = el("div", { className: "requester-block" });
   block.append(
     el("strong", {}, ticket.requester_name || "Unknown"),
-    ticket.requester_email ? el("span", {}, ticket.requester_email) : el("span", {}, ticket.requester || "Requester"),
-    badge(ticket.source || "staff", "priority-normal")
+    ticket.requester_email ? el("span", {}, ticket.requester_email) : el("span", {}, ticket.requester || "Requester")
   );
   return block;
 }
