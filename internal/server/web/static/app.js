@@ -2123,7 +2123,7 @@ function conversationMessages(ticket) {
     author: opener,
     avatar: initials(opener),
     body: String(ticket.description || "").trim() || "No description.",
-    label: `opened ${relativeTime(ticket.created_at)}`,
+    label: conversationTimestamp(ticket.created_at),
     visibility: "public",
     attachments: ticket.attachments || [],
     createdAt: ticket.created_at,
@@ -2137,7 +2137,7 @@ function conversationMessages(ticket) {
       author,
       avatar: initials(author),
       body: String(comment.body || "").trim() || "Attachment only",
-      label: relativeTime(comment.created_at),
+      label: conversationTimestamp(comment.created_at),
       visibility: internal ? "internal" : "public",
       attachments: comment.attachments || [],
       createdAt: comment.created_at,
@@ -2146,6 +2146,12 @@ function conversationMessages(ticket) {
     });
   }
   return messages;
+}
+
+function conversationTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return fullDateFormatter.format(date);
 }
 
 function firstUnreadMessageIndex(ticket, messages) {
