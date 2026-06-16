@@ -122,7 +122,7 @@ The backup script uses SQLite's online backup command, so it can run while
 Pappice is running.
 
 ```sh
-scripts/backup.sh
+ops/backup.sh
 ```
 
 This creates `PAPPICE_BACKUP_DIR/<timestamp>/` with `pappice.db`,
@@ -132,10 +132,10 @@ directory and latest detected backup.
 Stop Pappice before restoring:
 
 ```sh
-scripts/restore.sh pappice-backups/20260101T120000Z
+ops/restore.sh pappice-backups/20260101T120000Z
 ```
 
-Use `scripts/restore.sh latest` to restore the newest snapshot. The restore
+Use `ops/restore.sh latest` to restore the newest snapshot. The restore
 script moves the current database, WAL/SHM files, and upload directory into a
 `restore-pre-<timestamp>` folder before replacing them.
 

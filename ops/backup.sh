@@ -80,4 +80,4 @@ has_uploads=$has_uploads
 EOF
 
 echo "Backup created: $destination"
-echo "Restore with: scripts/restore.sh $destination"
+echo "Restore with: ops/restore.sh $destination"

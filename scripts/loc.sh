@@ -49,7 +49,7 @@ category_for() {
     internal/server/web/*)
       echo "frontend"
       ;;
-    *_test.go|scripts/e2e-smoke.mjs)
+    *_test.go|test/e2e-smoke.mjs)
       echo "tests"
       ;;
     cmd/*.go|cmd/*/*.go|internal/*.go|internal/*/*.go)
@@ -57,6 +57,9 @@ category_for() {
       ;;
     scripts/*)
       echo "scripts"
+      ;;
+    ops/*)
+      echo "ops"
       ;;
     deploy/*|.env.example|.gitignore|go.mod|go.sum|package.json)
       echo "ops-config"
@@ -112,7 +115,7 @@ fi
 printf "Pappice LOC (%s)\n\n" "$source_label"
 awk -F '\t' -v show_files="$show_files" '
 BEGIN {
-  split("backend frontend tests scripts ops-config docs other", order, " ")
+  split("backend frontend tests scripts ops ops-config docs other", order, " ")
 }
 {
   category = $1

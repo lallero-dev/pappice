@@ -30,7 +30,7 @@ Create the service account and directories:
 sudo useradd --system --home /var/lib/pappice --shell /usr/sbin/nologin pappice
 sudo install -d -o pappice -g pappice -m 0750 /var/lib/pappice /var/lib/pappice/uploads /var/backups/pappice
 sudo install -d -o root -g pappice -m 0750 /etc/pappice
-sudo install -d -o root -g root -m 0755 /opt/pappice /opt/pappice/scripts
+sudo install -d -o root -g root -m 0755 /opt/pappice /opt/pappice/ops
 ```
 
 Build and install the binary from a checked-out release:
@@ -47,8 +47,8 @@ sudo install -o root -g pappice -m 0640 deploy/env/pappice.env.example /etc/papp
 sudo install -o root -g root -m 0644 deploy/systemd/pappice.service /etc/systemd/system/pappice.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.service /etc/systemd/system/pappice-backup.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.timer /etc/systemd/system/pappice-backup.timer
-sudo install -o root -g root -m 0755 scripts/backup.sh /opt/pappice/scripts/backup.sh
-sudo install -o root -g root -m 0755 scripts/restore.sh /opt/pappice/scripts/restore.sh
+sudo install -o root -g root -m 0755 ops/backup.sh /opt/pappice/ops/backup.sh
+sudo install -o root -g root -m 0755 ops/restore.sh /opt/pappice/ops/restore.sh
 ```
 
 Edit `/etc/pappice/pappice.env` and set SMTP credentials before starting.
@@ -127,6 +127,6 @@ Stop Pappice before restoring:
 
 ```sh
 sudo systemctl stop pappice.service
-sudo -u pappice bash -lc 'cd /opt/pappice && set -a; source /etc/pappice/pappice.env; set +a; /opt/pappice/scripts/restore.sh latest'
+sudo -u pappice bash -lc 'cd /opt/pappice && set -a; source /etc/pappice/pappice.env; set +a; /opt/pappice/ops/restore.sh latest'
 sudo systemctl start pappice.service
 ```

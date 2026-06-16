@@ -2,6 +2,6 @@
   "private": true,
   "scripts": {
     "loc": "bash scripts/loc.sh",
-    "test:e2e": "node scripts/e2e-smoke.mjs"
+    "test:e2e": "node test/e2e-smoke.mjs"
   }
 }
