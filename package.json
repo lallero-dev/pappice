@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
+    "bench:small": "node benchmark/small-env.mjs",
     "demo:gif": "node demo/show.mjs",
     "loc": "bash scripts/loc.sh",
     "test:e2e": "node test/e2e-smoke.mjs"

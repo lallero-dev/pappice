@@ -214,6 +214,11 @@ Regenerate the README demo GIF with:
 npm run demo:gif
 ```
 
+Run the small memory benchmark with `npm run bench:small`. On this development
+machine, the default scenario reported about 22 MiB RSS mean and 23 MiB RSS max
+for 2 products, 2 staff sessions, 8 customer sessions, and 24 tickets. Treat
+this as an indicative local measurement; compare runs on the same host.
+
 ## Contributing
 
 Keep changes small and focused. Run the tests above before opening a pull

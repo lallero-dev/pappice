@@ -55,7 +55,10 @@ category_for() {
     cmd/*.go|cmd/*/*.go|internal/*.go|internal/*/*.go)
       echo "backend"
       ;;
-    demo/*|scripts/*|test/tools/*)
+    benchmark/*.md)
+      echo "docs"
+      ;;
+    benchmark/*|demo/*|scripts/*|test/tools/*)
       echo "scripts"
       ;;
     ops/*)
