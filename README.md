@@ -4,21 +4,22 @@
 
 # Pappice
 
-Pappice is a small self-hosted, chat-style customer support ticketing system for
-small teams. It is one Go binary with SQLite storage, embedded web assets,
-registered customers, staff tools, no-reply email notifications, webhooks, and
-an audit log.
+Pappice is a small, self-hosted, chat-style support desk. It runs as one Go
+binary with SQLite and embedded web assets. Customers open tickets from the
+portal; staff reply, assign, filter, and track them.
 
 ![Pappice chat-style ticketing demo](./assets/demo.gif)
 
-The project is intentionally simple: no external database, no separate frontend
-build, and no inbound email processing.
+It includes registered customers, staff tools, attachments, unread state,
+no-reply email notifications, webhooks, and audit logging. It does not require
+an external database or frontend build step, and it does not process inbound
+email.
 
 ## Project Status
 
-Pappice is intended for small-team self-hosting and public audit. It is not yet
-externally security audited, and the API/schema should be considered unstable
-until a non-alpha release. Alpha builds may require explicit SQLite migrations.
+Alpha. Pappice is not externally security audited. The API and schema may change
+before a stable release; existing installations can require `pappice db migrate`
+after a backup.
 
 ## Features
 
@@ -67,9 +68,9 @@ go run ./cmd/pappice serve
 
 ## Configuration
 
-Every runtime option is available as a flag and as an environment variable.
-Pappice loads a repo-local `.env` file when present; existing process
-environment variables take precedence.
+Every runtime option is available as a flag and an environment variable.
+Pappice loads `.env` from the working directory when present; process
+environment variables win.
 
 Important values:
 
@@ -78,7 +79,8 @@ Important values:
 - `PAPPICE_TLS_CERT` / `PAPPICE_TLS_KEY`: HTTPS certificate and key
 - `PAPPICE_PUBLIC_URL`: public HTTPS URL used in emails
 - `PAPPICE_NOTIFICATION_DELAY`: ticket notification delay, default `30s`
-- `PAPPICE_DOMAIN_EVENT_RETENTION`: processed event retention, default `720h`; `0` disables pruning
+- `PAPPICE_DOMAIN_EVENT_RETENTION`: processed event retention, default `720h`;
+  `0` disables pruning
 - `PAPPICE_SESSION_TTL`: browser session lifetime, default `336h`
 - `PAPPICE_BRAND_NAME`: display name for the deployed instance
 - `PAPPICE_UPLOAD_DIR`: directory for ticket attachments
@@ -102,14 +104,12 @@ for an existing database. If the schema is behind, run a backup, then
 `pappice db migrate --dry-run`, then `pappice db migrate`.
 
 `pappice doctor` validates paths, TLS, public URL, SMTP, upload limits, rate
-limits, and development-only webhook settings before starting the server.
+limits, and development-only webhook settings.
 
 ## Branding
 
 Set `PAPPICE_BRAND_NAME`, `PAPPICE_BRAND_SUBTITLE`, `PAPPICE_BRAND_MARK`, and
-`PAPPICE_BRAND_COLOR` to brand a deployment, for example `Acme Support`.
-Branding changes the visible instance identity without changing the software
-name or requiring a custom build.
+`PAPPICE_BRAND_COLOR` to brand a deployment without rebuilding the binary.
 
 ## Attachments
 
@@ -129,7 +129,7 @@ ops/backup.sh
 ```
 
 This creates `PAPPICE_BACKUP_DIR/<timestamp>/` with `pappice.db`,
-`uploads.tar`, and a small manifest. The admin Maintenance page shows the backup
+`uploads.tar`, and a manifest. The admin Maintenance page shows the backup
 directory and latest detected backup.
 
 Stop Pappice before restoring:
@@ -165,10 +165,10 @@ PAPPICE_SMTP_FROM=no-reply@example.com
 PAPPICE_SMTP_TLS_MODE=starttls
 ```
 
-Ticket notifications are queued in SQLite. Email and webhook notifications wait
-for `PAPPICE_NOTIFICATION_DELAY` before delivery; pending email updates are also
-coalesced. Admins can inspect the email outbox, send a test email, and retry
-failures from the admin page.
+Ticket notifications are queued in SQLite. Email and webhook delivery waits for
+`PAPPICE_NOTIFICATION_DELAY`; pending updates for the same ticket are coalesced.
+Admins can inspect the email outbox, send a test email, and retry failures from
+the admin page.
 
 ## Webhooks And API
 
