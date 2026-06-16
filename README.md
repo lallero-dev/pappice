@@ -59,7 +59,9 @@ sudo install -m 0755 pappice-release/pappice /usr/local/bin/pappice
 ```
 
 See [deploy/](./deploy/README.md) for the full `systemd`, nginx, backup, and
-upgrade setup.
+upgrade setup. The extracted archive also includes that guide at
+`pappice-release/deploy/README.md` together with the environment, systemd,
+nginx, backup, and restore files it references.
 
 ## Build From Source
 
