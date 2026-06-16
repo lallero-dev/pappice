@@ -4,16 +4,20 @@
 
 # Pappice
 
-Pappice is a small, self-hosted, chat-style support desk. It runs as one Go
-binary with SQLite and embedded web assets. Customers open tickets from the
-portal; staff reply, assign, filter, and track them.
+Pappice is a small, self-hosted, chat-style support desk. Customers open tickets
+from the portal; staff assign, reply, and track them.
 
 ![Pappice chat-style ticketing demo](./assets/demo.gif)
 
-It includes registered customers, staff tools, attachments, unread state,
-no-reply email notifications, webhooks, and audit logging. It does not require
-an external database or frontend build step, and it does not process inbound
-email.
+Pappice is intentionally minimal and self-contained:
+
+- One Go binary with embedded web assets.
+- SQLite storage plus an upload directory.
+- No external database, queue, or frontend build step at runtime.
+- Standard library first; the only direct Go dependency is the embedded SQLite
+  driver.
+- Linux amd64 release binary around 12 MiB.
+- Small production instance measured at roughly 20-30 MiB of RAM.
 
 ## Project Status
 
@@ -32,13 +36,6 @@ after a backup.
 - Admin-created accounts with one-time setup/reset links or manual passwords.
 - SMTP-backed no-reply notifications with a durable SQLite outbox.
 - API tokens, webhooks, admin audit events, and a maintenance overview.
-
-## Requirements
-
-- SQLite is embedded through the Go driver; no database server is required.
-- Source builds require Go 1.26+.
-- Optional for E2E tests: Node, OpenSSL, and Chromium.
-- Optional for regenerating the README demo GIF: `ffmpeg`.
 
 ## Install
 
@@ -64,6 +61,8 @@ upgrade setup. The extracted archive also includes that guide at
 nginx, backup, and restore files it references.
 
 ## Build From Source
+
+Requires Go 1.26+.
 
 ```sh
 go build -trimpath -o dist/pappice ./cmd/pappice
@@ -237,6 +236,9 @@ hatches are available with `PAPPICE_ALLOW_INSECURE_WEBHOOKS` and
 
 ## Tests
 
+E2E tests require Node, OpenSSL, and Chromium. Regenerating the README demo GIF
+also requires `ffmpeg`.
+
 ```sh
 go test ./...
 npm run test:e2e
@@ -246,12 +248,6 @@ The E2E smoke test starts an isolated HTTPS Pappice instance with a temporary
 SQLite database and fake SMTP server, then drives Chromium through the core
 customer/staff ticket flow. Set `PAPPICE_E2E_CHROMIUM=/path/to/chromium` if
 Chromium is not at `/usr/bin/chromium`.
-
-Regenerate the README demo GIF with:
-
-```sh
-npm run demo:gif
-```
 
 Run the small memory benchmark with `npm run bench:small`. On this development
 machine, the default scenario reported about 22 MiB RSS mean and 23 MiB RSS max
