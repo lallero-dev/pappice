@@ -283,6 +283,7 @@ func TestAPIMethodContracts(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	ticketID := decodeInt64(t, body, "id")
+	ticketKey := decodeString(t, body, "key")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tokens", map[string]any{"name": "method-contract"}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
@@ -321,6 +322,7 @@ func TestAPIMethodContracts(t *testing.T) {
 		{"product deliveries", http.MethodPost, "/api/products/" + itoa(productID) + "/webhook-deliveries", http.MethodGet},
 		{"tickets", http.MethodPut, "/api/tickets", "GET, POST"},
 		{"single ticket", http.MethodPost, "/api/tickets/" + itoa(ticketID), "GET, PATCH, DELETE"},
+		{"ticket by key", http.MethodPost, "/api/tickets/key/" + ticketKey, http.MethodGet},
 		{"ticket comments", http.MethodGet, "/api/tickets/" + itoa(ticketID) + "/comments", http.MethodPost},
 		{"ticket read", http.MethodGet, "/api/tickets/" + itoa(ticketID) + "/read", http.MethodPost},
 		{"attachments", http.MethodPost, "/api/attachments/1", http.MethodGet},
@@ -335,6 +337,7 @@ func TestAPIMethodContracts(t *testing.T) {
 		{"webhook secret", http.MethodGet, "/api/webhooks/" + itoa(hookID) + "/secret", http.MethodPost},
 		{"webhook deliveries", http.MethodPost, "/api/webhook-deliveries", http.MethodGet},
 		{"email notifications", http.MethodPost, "/api/email-notifications", http.MethodGet},
+		{"email test", http.MethodGet, "/api/email-notifications/test", http.MethodPost},
 		{"email retry", http.MethodGet, "/api/email-notifications/" + itoa(notificationID) + "/retry", http.MethodPost},
 		{"audit", http.MethodPost, "/api/audit-events", http.MethodGet},
 		{"maintenance", http.MethodPost, "/api/admin/maintenance", http.MethodGet},
@@ -454,6 +457,46 @@ func TestProductDeletionRequiresAdmin(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
+}
+
+func TestProductMemberRemovalAPI(t *testing.T) {
+	tracker, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+
+	userID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"display_name": "Removable Agent",
+		"email":        "removable@example.test",
+		"password":     "correct horse",
+		"role":         "staff",
+	})
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, userID, "agent")
+	if role, ok := tracker.ProductRole(userID, productID); !ok || role != "agent" {
+		t.Fatalf("product role before delete = %q ok=%v", role, ok)
+	}
+
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/products/"+itoa(productID)+"/members/"+itoa(userID), nil, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if !decodeBool(t, body, "ok") {
+		t.Fatalf("delete member response = %s", body)
+	}
+	if role, ok := tracker.ProductRole(userID, productID); ok {
+		t.Fatalf("product role after delete = %q, want none", role)
+	}
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID)+"/members", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("removable@example.test")) {
+		t.Fatalf("member list still contains removed user: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events?q=product_member.removed", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("product_member.removed")) || !bytes.Contains(body, []byte("removable@example.test")) {
+		t.Fatalf("audit log missing product member removal: %s", body)
+	}
 }
 
 func TestTicketDeletionRequiresAdmin(t *testing.T) {
