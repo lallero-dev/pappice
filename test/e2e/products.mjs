@@ -1,5 +1,5 @@
 import { customer } from "./fixtures.mjs";
-import { runInPage, waitForDocumentReady } from "./page-tools.mjs";
+import { runInPage, waitForDocumentReady } from "../tools/browser-page.mjs";
 
 async function selectFirstProduct(cdp) {
   return runInPage(cdp, async () => {

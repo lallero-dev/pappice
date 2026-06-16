@@ -1,5 +1,5 @@
 import { customer, ticket } from "./fixtures.mjs";
-import { runInPage } from "./page-tools.mjs";
+import { runInPage } from "../tools/browser-page.mjs";
 
 async function verifyEmailOutbox(cdp) {
   await runInPage(cdp, async (input) => {

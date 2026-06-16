@@ -1,5 +1,5 @@
 import { admin, customer } from "./fixtures.mjs";
-import { runInPage, waitForDocumentReady } from "./page-tools.mjs";
+import { runInPage, waitForDocumentReady } from "../tools/browser-page.mjs";
 
 async function setupFirstAdmin(cdp) {
   await runInPage(cdp, async (input) => {

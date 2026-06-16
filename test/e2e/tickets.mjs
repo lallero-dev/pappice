@@ -1,5 +1,5 @@
 import { admin, customer, ticket } from "./fixtures.mjs";
-import { runInPage, waitForDocumentReady } from "./page-tools.mjs";
+import { runInPage, waitForDocumentReady } from "../tools/browser-page.mjs";
 
 async function createCustomerTicket(cdp) {
   return runInPage(cdp, async (input) => {
