@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v0.8.0-alpha - 2026-06-16
+
+- Show full message timestamps in ticket conversations.
+- Tighten the README, demo GIF workflow, E2E smoke tests, and API contract
+  coverage.
+- Add small-environment memory benchmarking and document the baseline result.
+- Improve production deployment docs around release archives, checksums,
+  backups, and migrations.
+- Add local maintainer scripts for building and publishing release archives.
+
 ## v0.7.0-alpha - 2026-06-09
 
 - Linkify URLs in ticket conversations while keeping messages stored as plain

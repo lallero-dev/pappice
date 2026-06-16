@@ -144,9 +144,14 @@ script moves the current database, WAL/SHM files, and upload directory into a
 
 ## Deployment
 
-Production templates for `systemd`, nginx, and `/etc/pappice/pappice.env` live
-in [deploy/](./deploy/README.md). The default production shape is public HTTPS
-in nginx and local HTTPS from nginx to Pappice on `127.0.0.1:8388`.
+Production installs use the release archive plus the `systemd`, nginx, and
+environment templates in [deploy/](./deploy/README.md). The default production
+shape is public HTTPS in nginx and local HTTPS from nginx to Pappice on
+`127.0.0.1:8388`.
+
+Maintainers can build release assets with `scripts/build-release.sh` and publish
+them with `scripts/release.sh`; bump `VERSION` first because release tags are
+immutable.
 
 ## Email
 

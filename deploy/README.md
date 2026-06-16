@@ -14,9 +14,11 @@ HTTPS upstream because browser sessions require the Go app to receive TLS.
 
 ## First Install
 
-Set the hostname used by the copy/paste commands:
+Choose the release and hostname used by the copy/paste commands:
 
 ```sh
+VERSION=v0.8.0-alpha
+ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
 DOMAIN=support.example.com
 ```
 
@@ -24,7 +26,17 @@ Install OS packages:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ca-certificates nginx sqlite3 openssl
+sudo apt-get install -y ca-certificates curl nginx sqlite3 openssl
+```
+
+Download and unpack the release archive:
+
+```sh
+curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}"
+curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}.sha256"
+sha256sum -c "${ARCHIVE}.sha256"
+tar -xzf "$ARCHIVE"
+cd "pappice-${VERSION}-linux-amd64"
 ```
 
 Create the service account and directories:
@@ -36,11 +48,10 @@ sudo install -d -o root -g pappice -m 0750 /etc/pappice
 sudo install -d -o root -g root -m 0755 /opt/pappice /opt/pappice/ops
 ```
 
-Build and install the binary from a checked-out release:
+Install the binary:
 
 ```sh
-scripts/build-release.sh
-sudo install -o root -g root -m 0755 dist/pappice /usr/local/bin/pappice
+sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice
 ```
 
 Install deploy assets:
@@ -118,12 +129,28 @@ sudo journalctl -u pappice-backup.service -n 50
 ## Upgrade
 
 ```sh
-git fetch --tags
-git checkout <release-tag>
-scripts/build-release.sh
+VERSION=<release-tag>
+ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
+curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}"
+curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}.sha256"
+sha256sum -c "${ARCHIVE}.sha256"
+tar -xzf "$ARCHIVE"
+cd "pappice-${VERSION}-linux-amd64"
 sudo systemctl start pappice-backup.service
-sudo install -o root -g root -m 0755 dist/pappice /usr/local/bin/pappice
-sudo systemctl restart pappice.service
+sudo systemctl stop pappice.service
+sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice
+sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice db status'
+sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice db migrate --dry-run'
+sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice db migrate'
+sudo systemctl start pappice.service
+```
+
+## Build From Source
+
+Maintainers can create the same release archive from a source checkout with:
+
+```sh
+scripts/build-release.sh
 ```
 
 ## Restore
