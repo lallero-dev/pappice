@@ -94,6 +94,8 @@ target_arch="${GOARCH:-amd64}"
 tag="$version"
 archive="dist/pappice-${version}-${target_os}-${target_arch}.tar.gz"
 checksum="$archive.sha256"
+latest_archive="dist/pappice-${target_os}-${target_arch}.tar.gz"
+latest_checksum="$latest_archive.sha256"
 
 release_flags=()
 if [[ "$version" == *-* ]]; then
@@ -112,6 +114,7 @@ fi
 
 scripts/build-release.sh
 verify_checksum "$checksum"
+verify_checksum "$latest_checksum"
 
 tag_exists=0
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
@@ -135,7 +138,7 @@ if ((dry_run)); then
   fi
   echo "+ git push origin $branch"
   echo "+ git push origin $tag"
-  echo "+ gh release create-or-upload $tag $archive $checksum ${release_flags[*]}"
+  echo "+ gh release create-or-upload $tag $archive $checksum $latest_archive $latest_checksum ${release_flags[*]}"
   exit 0
 fi
 
@@ -147,9 +150,9 @@ git push origin "$branch"
 git push origin "$tag"
 
 if gh release view "$tag" >/dev/null 2>&1; then
-  gh release upload "$tag" "$archive" "$checksum" --clobber
+  gh release upload "$tag" "$archive" "$checksum" "$latest_archive" "$latest_checksum" --clobber
 else
-  gh release create "$tag" "$archive" "$checksum" \
+  gh release create "$tag" "$archive" "$checksum" "$latest_archive" "$latest_checksum" \
     --title "Pappice $version" \
     --notes "See CHANGELOG.md for release notes." \
     "${release_flags[@]}"

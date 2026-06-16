@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Document latest-release install URLs and publish stable archive aliases for
+  release assets.
+
 ## v0.8.0-alpha - 2026-06-16
 
 - Show full message timestamps in ticket conversations.

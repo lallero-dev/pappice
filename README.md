@@ -35,10 +35,46 @@ after a backup.
 
 ## Requirements
 
-- Go 1.26+
 - SQLite is embedded through the Go driver; no database server is required.
+- Source builds require Go 1.26+.
 - Optional for E2E tests: Node, OpenSSL, and Chromium.
 - Optional for regenerating the README demo GIF: `ffmpeg`.
+
+## Install
+
+Download the latest Linux amd64 release archive, verify it, and install the
+binary:
+
+```sh
+ARCHIVE=pappice-linux-amd64.tar.gz
+BASE_URL=https://github.com/lallero-dev/pappice/releases/latest/download
+
+curl -LO "${BASE_URL}/${ARCHIVE}"
+curl -LO "${BASE_URL}/${ARCHIVE}.sha256"
+sha256sum -c "${ARCHIVE}.sha256"
+rm -rf pappice-release
+mkdir pappice-release
+tar -xzf "$ARCHIVE" -C pappice-release --strip-components=1
+sudo install -m 0755 pappice-release/pappice /usr/local/bin/pappice
+```
+
+See [deploy/](./deploy/README.md) for the full `systemd`, nginx, backup, and
+upgrade setup.
+
+## Build From Source
+
+```sh
+go build -trimpath -o dist/pappice ./cmd/pappice
+```
+
+To create the same archive published in GitHub releases:
+
+```sh
+scripts/build-release.sh
+```
+
+Maintainers publish releases with `scripts/release.sh`; bump `VERSION` first
+because release tags are immutable.
 
 ## Run Locally
 
@@ -148,10 +184,6 @@ Production installs use the release archive plus the `systemd`, nginx, and
 environment templates in [deploy/](./deploy/README.md). The default production
 shape is public HTTPS in nginx and local HTTPS from nginx to Pappice on
 `127.0.0.1:8388`.
-
-Maintainers can build release assets with `scripts/build-release.sh` and publish
-them with `scripts/release.sh`; bump `VERSION` first because release tags are
-immutable.
 
 ## Email
 

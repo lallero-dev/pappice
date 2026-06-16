@@ -18,6 +18,8 @@ archive_root="pappice-${version}-${target_os}-${target_arch}"
 package_dir="$dist_dir/$archive_root"
 archive="$dist_dir/$archive_root.tar.gz"
 checksum="$archive.sha256"
+latest_archive="$dist_dir/pappice-${target_os}-${target_arch}.tar.gz"
+latest_checksum="$latest_archive.sha256"
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -27,7 +29,7 @@ sha256_file() {
   fi
 }
 
-rm -rf "$package_dir" "$archive" "$checksum"
+rm -rf "$package_dir" "$archive" "$checksum" "$latest_archive" "$latest_checksum"
 mkdir -p "$dist_dir" "$package_dir"
 
 CGO_ENABLED="${CGO_ENABLED:-0}" GOOS="$target_os" GOARCH="$target_arch" go build \
@@ -50,8 +52,12 @@ install -m 0755 ops/backup.sh "$package_dir/ops/backup.sh"
 install -m 0755 ops/restore.sh "$package_dir/ops/restore.sh"
 
 tar -C "$dist_dir" -czf "$archive" "$archive_root"
+cp "$archive" "$latest_archive"
 (cd "$dist_dir" && sha256_file "$(basename "$archive")" > "$(basename "$checksum")")
+(cd "$dist_dir" && sha256_file "$(basename "$latest_archive")" > "$(basename "$latest_checksum")")
 
 echo "Built $binary ($version, $target_os/$target_arch)"
 echo "Built $archive"
 echo "Built $checksum"
+echo "Built $latest_archive"
+echo "Built $latest_checksum"

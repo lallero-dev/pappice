@@ -14,11 +14,11 @@ HTTPS upstream because browser sessions require the Go app to receive TLS.
 
 ## First Install
 
-Choose the release and hostname used by the copy/paste commands:
+Choose the hostname used by the copy/paste commands:
 
 ```sh
-VERSION=v0.8.0-alpha
-ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
+ARCHIVE=pappice-linux-amd64.tar.gz
+BASE_URL=https://github.com/lallero-dev/pappice/releases/latest/download
 DOMAIN=support.example.com
 ```
 
@@ -32,11 +32,13 @@ sudo apt-get install -y ca-certificates curl nginx sqlite3 openssl
 Download and unpack the release archive:
 
 ```sh
-curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}"
-curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}.sha256"
+curl -LO "${BASE_URL}/${ARCHIVE}"
+curl -LO "${BASE_URL}/${ARCHIVE}.sha256"
 sha256sum -c "${ARCHIVE}.sha256"
-tar -xzf "$ARCHIVE"
-cd "pappice-${VERSION}-linux-amd64"
+rm -rf pappice-release
+mkdir pappice-release
+tar -xzf "$ARCHIVE" -C pappice-release --strip-components=1
+cd pappice-release
 ```
 
 Create the service account and directories:
@@ -129,13 +131,15 @@ sudo journalctl -u pappice-backup.service -n 50
 ## Upgrade
 
 ```sh
-VERSION=<release-tag>
-ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
-curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}"
-curl -LO "https://github.com/lallero-dev/pappice/releases/download/${VERSION}/${ARCHIVE}.sha256"
+ARCHIVE=pappice-linux-amd64.tar.gz
+BASE_URL=https://github.com/lallero-dev/pappice/releases/latest/download
+curl -LO "${BASE_URL}/${ARCHIVE}"
+curl -LO "${BASE_URL}/${ARCHIVE}.sha256"
 sha256sum -c "${ARCHIVE}.sha256"
-tar -xzf "$ARCHIVE"
-cd "pappice-${VERSION}-linux-amd64"
+rm -rf pappice-release
+mkdir pappice-release
+tar -xzf "$ARCHIVE" -C pappice-release --strip-components=1
+cd pappice-release
 sudo systemctl start pappice-backup.service
 sudo systemctl stop pappice.service
 sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice
