@@ -161,7 +161,7 @@ PAPPICE_SMTP_HOST=smtp.example.com
 PAPPICE_SMTP_PORT=587
 PAPPICE_SMTP_USER=pappice
 PAPPICE_SMTP_PASSWORD=secret
-PAPPICE_SMTP_FROM=no-reply@example.com
+PAPPICE_SMTP_FROM=no-reply@support.example.com
 PAPPICE_SMTP_TLS_MODE=starttls
 ```
 

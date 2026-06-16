@@ -1,8 +1,5 @@
 # Production Deploy
 
-Example host: `support.example.com`. Replace it with your real hostname before
-installing the nginx site or writing `/etc/pappice/pappice.env`.
-
 This setup uses nginx for public HTTPS and systemd for the Pappice process.
 Pappice also listens with local HTTPS on `127.0.0.1:8388`; nginx proxies to that
 HTTPS upstream because browser sessions require the Go app to receive TLS.
@@ -10,12 +7,18 @@ HTTPS upstream because browser sessions require the Go app to receive TLS.
 ## Files
 
 - `deploy/env/pappice.env.example`: production environment template.
-- `deploy/nginx/support.example.com.conf`: nginx site.
+- `deploy/nginx/pappice.conf.example`: nginx site template.
 - `deploy/systemd/pappice.service`: application service.
 - `deploy/systemd/pappice-backup.service`: one-shot backup service.
 - `deploy/systemd/pappice-backup.timer`: daily backup timer.
 
 ## First Install
+
+Set the hostname used by the copy/paste commands:
+
+```sh
+DOMAIN=support.example.com
+```
 
 Install OS packages:
 
@@ -44,6 +47,7 @@ Install deploy assets:
 
 ```sh
 sudo install -o root -g pappice -m 0640 deploy/env/pappice.env.example /etc/pappice/pappice.env
+sudo sed -i "s/support.example.com/$DOMAIN/g" /etc/pappice/pappice.env
 sudo install -o root -g root -m 0644 deploy/systemd/pappice.service /etc/systemd/system/pappice.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.service /etc/systemd/system/pappice-backup.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.timer /etc/systemd/system/pappice-backup.timer
@@ -73,8 +77,9 @@ Install the nginx site after issuing the public certificate with your preferred
 ACME flow:
 
 ```sh
-sudo install -o root -g root -m 0644 deploy/nginx/support.example.com.conf /etc/nginx/sites-available/support.example.com.conf
-sudo ln -sf /etc/nginx/sites-available/support.example.com.conf /etc/nginx/sites-enabled/support.example.com.conf
+sudo install -o root -g root -m 0644 deploy/nginx/pappice.conf.example /etc/nginx/sites-available/pappice.conf
+sudo sed -i "s/support.example.com/$DOMAIN/g" /etc/nginx/sites-available/pappice.conf
+sudo ln -sf /etc/nginx/sites-available/pappice.conf /etc/nginx/sites-enabled/pappice.conf
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -87,7 +92,7 @@ sudo systemctl enable --now pappice.service
 sudo systemctl enable --now pappice-backup.timer
 ```
 
-Open `https://support.example.com` and create the first admin account.
+Open `https://$DOMAIN` and create the first admin account.
 
 ## Checks
 
