@@ -208,7 +208,7 @@ Chromium is not at `/usr/bin/chromium`.
 ## Contributing
 
 Keep changes small and focused. Run the tests above before opening a pull
-request. Do not commit `.env`, SQLite databases, certificates, or SMTP secrets.
+request.
 
 ## License
 

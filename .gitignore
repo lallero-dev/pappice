@@ -11,12 +11,17 @@
 /localhost-key.pem
 /deploy/local/
 /tmp/
+/node_modules/
 .env
 .env.local
 .env.*.local
 .env.production
 .env.staging
+*.log
 *.crt
 *.csr
 *.key
 *.test
+.DS_Store
+.codex
+.agents
