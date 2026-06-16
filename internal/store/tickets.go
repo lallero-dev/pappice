@@ -138,7 +138,7 @@ func (s *Store) listTickets(filter Filter, user User) []Ticket {
 			WHERE pm.product_id = i.product_id
 			  AND pm.user_id = ?
 			  AND (
-			    (? = 1 AND pm.role NOT IN ('customer', 'reporter')) OR
+			    (? = 1 AND pm.role != 'customer') OR
 			    lower(i.reporter) = ? OR
 			    lower(i.requester_email) = ?
 			  )

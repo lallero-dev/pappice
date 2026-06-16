@@ -296,7 +296,7 @@ func TestMetadataAndPublicViews(t *testing.T) {
 		t.Fatalf("statuses leaked mutable backing array, first status = %q", got)
 	}
 
-	publicUser := ToPublicUser(User{ID: 7, DisplayName: "Bob", Email: "bob@example.test", Role: "user", Disabled: true})
+	publicUser := ToPublicUser(User{ID: 7, DisplayName: "Bob", Email: "bob@example.test", Role: "staff", Disabled: true})
 	if publicUser.Role != "staff" || publicUser.Email != "bob@example.test" || !publicUser.Disabled {
 		t.Fatalf("public user = %#v", publicUser)
 	}

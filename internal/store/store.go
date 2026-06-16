@@ -603,25 +603,11 @@ func defaultString(value, fallback string) string {
 }
 
 func normalizeGlobalRole(role string) string {
-	switch strings.TrimSpace(role) {
-	case "user":
-		return "staff"
-	case "client":
-		return "customer"
-	default:
-		return strings.TrimSpace(role)
-	}
+	return strings.TrimSpace(role)
 }
 
 func normalizeProductRole(role string) string {
-	switch strings.TrimSpace(role) {
-	case "developer":
-		return "agent"
-	case "reporter":
-		return "customer"
-	default:
-		return strings.TrimSpace(role)
-	}
+	return strings.TrimSpace(role)
 }
 
 func normalizeEmail(value string) (string, error) {
