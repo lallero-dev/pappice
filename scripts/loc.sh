@@ -49,13 +49,13 @@ category_for() {
     internal/server/web/*)
       echo "frontend"
       ;;
-    *_test.go|test/e2e-smoke.mjs)
+    *_test.go|test/*|test/e2e/*)
       echo "tests"
       ;;
     cmd/*.go|cmd/*/*.go|internal/*.go|internal/*/*.go)
       echo "backend"
       ;;
-    scripts/*)
+    demo/*|scripts/*|test/tools/*)
       echo "scripts"
       ;;
     ops/*)
@@ -64,11 +64,23 @@ category_for() {
     deploy/*|.env.example|.gitignore|go.mod|go.sum|package.json)
       echo "ops-config"
       ;;
-    README.md|LICENSE|VERSION)
+    CHANGELOG.md|README.md|LICENSE|VERSION)
       echo "docs"
       ;;
     *)
       echo "other"
+      ;;
+  esac
+}
+
+is_counted_file() {
+  local file="$1"
+  case "$file" in
+    assets/*.gif|assets/*.jpg|assets/*.jpeg|assets/*.png|assets/*.webp)
+      return 1
+      ;;
+    *)
+      return 0
       ;;
   esac
 }
@@ -99,6 +111,7 @@ count_ref_file() {
 if [[ -z "$ref" ]]; then
   source_label="working tree"
   while IFS= read -r -d '' file; do
+    is_counted_file "$file" || continue
     count_worktree_file "$file"
   done < <(git ls-files -z)
 else
@@ -108,6 +121,7 @@ else
   }
   source_label="$ref"
   while IFS= read -r -d '' file; do
+    is_counted_file "$file" || continue
     count_ref_file "$file"
   done < <(git ls-tree -r -z --name-only "$ref")
 fi

@@ -9,6 +9,8 @@ small teams. It is one Go binary with SQLite storage, embedded web assets,
 registered customers, staff tools, no-reply email notifications, webhooks, and
 an audit log.
 
+![Pappice chat-style ticketing demo](./assets/demo.gif)
+
 The project is intentionally simple: no external database, no separate frontend
 build, and no inbound email processing.
 
@@ -35,6 +37,7 @@ until a non-alpha release. Alpha builds may require explicit SQLite migrations.
 - Go 1.26+
 - SQLite is embedded through the Go driver; no database server is required.
 - Optional for E2E tests: Node, OpenSSL, and Chromium.
+- Optional for regenerating the README demo GIF: `ffmpeg`.
 
 ## Run Locally
 
@@ -204,6 +207,12 @@ The E2E smoke test starts an isolated HTTPS Pappice instance with a temporary
 SQLite database and fake SMTP server, then drives Chromium through the core
 customer/staff ticket flow. Set `PAPPICE_E2E_CHROMIUM=/path/to/chromium` if
 Chromium is not at `/usr/bin/chromium`.
+
+Regenerate the README demo GIF with:
+
+```sh
+npm run demo:gif
+```
 
 ## Contributing
 
