@@ -38,6 +38,67 @@ func TestSetupRequiresHTTPS(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s, want 400", resp.StatusCode, body)
 	}
+
+	resp, body = doJSONWithHeaders(t, server.Client(), http.MethodPost, server.URL+"/api/setup", map[string]any{
+		"email":    "admin@example.test",
+		"password": "correct horse",
+	}, nil, "", map[string]string{"X-Forwarded-Proto": "https"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("forwarded proto without trust status = %d body=%s, want 400", resp.StatusCode, body)
+	}
+}
+
+func TestTrustedProxyHeadersAllowBrowserSession(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer tracker.Close()
+
+	server := httptest.NewServer(New(tracker, Options{TrustProxyHeaders: true}))
+	defer server.Close()
+	client := server.Client()
+	headers := map[string]string{
+		"X-Forwarded-Proto": "https",
+		"X-Forwarded-Host":  "support.example.test",
+		"X-Forwarded-For":   "198.51.100.99",
+		"X-Real-IP":         "203.0.113.42",
+	}
+
+	resp, body := doJSONWithHeaders(t, client, http.MethodPost, server.URL+"/api/setup", map[string]any{
+		"email":    "admin@example.test",
+		"password": "correct horse",
+	}, nil, "", headers)
+	requireStatus(t, resp, body, http.StatusCreated)
+	if resp.Header.Get("Strict-Transport-Security") == "" {
+		t.Fatalf("trusted proxy HTTPS response missing HSTS header")
+	}
+	adminCookie := resp.Cookies()[0]
+	adminCSRF := decodeString(t, body, "csrf_token")
+
+	headers["Origin"] = "https://support.example.test"
+	resp, body = doJSONWithHeaders(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
+		"key":  "OPS",
+		"name": "Operations",
+	}, adminCookie, adminCSRF, headers)
+	requireStatus(t, resp, body, http.StatusCreated)
+}
+
+func TestTrustedProxyClientIPPrefersRealIP(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "192.0.2.10:12345"
+	request.Header.Set("X-Forwarded-For", "198.51.100.99, 192.0.2.10")
+	request.Header.Set("X-Real-IP", "203.0.113.42")
+
+	server := NewServer(nil, Options{TrustProxyHeaders: true})
+	if got := server.clientIP(request); got != "203.0.113.42" {
+		t.Fatalf("clientIP = %q, want X-Real-IP over spoofable X-Forwarded-For", got)
+	}
+
+	untrusted := NewServer(nil)
+	if got := untrusted.clientIP(request); got != "192.0.2.10" {
+		t.Fatalf("untrusted clientIP = %q, want remote address", got)
+	}
 }
 
 func TestSecurityHeadersAllowBlobImagePreviews(t *testing.T) {
@@ -2394,6 +2455,15 @@ func doMultipart(t *testing.T, client *http.Client, method, rawURL string, field
 
 func doJSON(t *testing.T, client *http.Client, method, rawURL string, payload any, cookie *http.Cookie, csrf, origin string) (*http.Response, []byte) {
 	t.Helper()
+	headers := map[string]string{}
+	if origin != "" {
+		headers["Origin"] = origin
+	}
+	return doJSONWithHeaders(t, client, method, rawURL, payload, cookie, csrf, headers)
+}
+
+func doJSONWithHeaders(t *testing.T, client *http.Client, method, rawURL string, payload any, cookie *http.Cookie, csrf string, headers map[string]string) (*http.Response, []byte) {
+	t.Helper()
 	var body io.Reader
 	if payload != nil {
 		content, err := json.Marshal(payload)
@@ -2413,8 +2483,10 @@ func doJSON(t *testing.T, client *http.Client, method, rawURL string, payload an
 	if csrf != "" {
 		req.Header.Set("X-Pappice-CSRF", csrf)
 	}
-	if origin != "" {
-		req.Header.Set("Origin", origin)
+	for name, value := range headers {
+		if value != "" {
+			req.Header.Set(name, value)
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {

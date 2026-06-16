@@ -36,6 +36,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDB(commandArgs, stdout, stderr)
 	case "doctor":
 		return runDoctor(commandArgs, stdout, stderr)
+	case "healthcheck":
+		return runHealthcheck(commandArgs, stdout, stderr)
 	case "version":
 		return runVersion(commandArgs, stdout, stderr)
 	default:
@@ -53,8 +55,6 @@ func splitCommand(args []string) (string, []string) {
 	switch first {
 	case "-h", "--help", "help":
 		return "help", args[2:]
-	case "serve", "db", "doctor", "version":
-		return first, args[2:]
 	default:
 		return first, args[2:]
 	}
@@ -67,9 +67,10 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "  pappice serve [flags]     Start the web server")
 	fmt.Fprintln(w, "  pappice db <command>      Inspect or migrate the SQLite database")
 	fmt.Fprintln(w, "  pappice doctor [flags]    Validate local runtime configuration")
+	fmt.Fprintln(w, "  pappice healthcheck       Check the local HTTP(S) health endpoint")
 	fmt.Fprintln(w, "  pappice version           Print the build version")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run \"pappice serve -h\", \"pappice db -h\", or \"pappice doctor -h\" for configuration flags.")
+	fmt.Fprintln(w, "Run \"pappice serve -h\", \"pappice db -h\", \"pappice doctor -h\", or \"pappice healthcheck -h\" for configuration flags.")
 }
 
 func runServe(args []string, stderr io.Writer) int {
@@ -138,6 +139,10 @@ func serve(cfg appConfig, stderr io.Writer) error {
 
 	app := server.NewServer(tracker, cfg.serverOptions(emailEnabled))
 	go app.RunEventDispatcher(ctx, 5*time.Second, logger)
+	useTLS, err := cfg.tlsEnabled()
+	if err != nil {
+		return err
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -147,11 +152,7 @@ func serve(cfg appConfig, stderr io.Writer) error {
 
 	errs := make(chan error, 1)
 	go func() {
-		if cfg.TLSCert != "" || cfg.TLSKey != "" {
-			if cfg.TLSCert == "" || cfg.TLSKey == "" {
-				errs <- errors.New("both -tls-cert and -tls-key are required for HTTPS")
-				return
-			}
+		if useTLS {
 			logger.Printf("pappice listening on https://%s", cfg.Addr)
 			errs <- srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
 			return

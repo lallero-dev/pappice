@@ -130,28 +130,68 @@ func isAdmin(user store.User) bool {
 }
 
 func isStaff(user store.User) bool {
-	return user.Role == "admin" || user.Role == "staff" || user.Role == "user"
+	return user.Role == "admin" || user.Role == "staff"
 }
 
 func isCustomer(user store.User) bool {
-	return user.Role == "customer" || user.Role == "client"
+	return user.Role == "customer"
 }
 
 func isUnsafeMethod(method string) bool {
 	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut || method == http.MethodDelete
 }
 
-func sameOrigin(r *http.Request) bool {
-	if r.TLS == nil {
+func (s *Server) sameOrigin(r *http.Request) bool {
+	if !s.requestIsSecure(r) {
 		return false
 	}
+	host := s.requestHost(r)
 	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
-		return originMatches(origin, r.Host)
+		return originMatches(origin, host)
 	}
 	if referer := strings.TrimSpace(r.Header.Get("Referer")); referer != "" {
-		return originMatches(referer, r.Host)
+		return originMatches(referer, host)
 	}
 	return false
+}
+
+func (s *Server) requestIsSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return s.options.TrustProxyHeaders && strings.EqualFold(firstForwardedValue(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+func (s *Server) requestHost(r *http.Request) string {
+	if s.options.TrustProxyHeaders {
+		if host := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); host != "" {
+			return host
+		}
+	}
+	return r.Host
+}
+
+func (s *Server) clientIP(r *http.Request) string {
+	if s.options.TrustProxyHeaders {
+		if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+			return ip
+		}
+		if ip := firstForwardedValue(r.Header.Get("X-Forwarded-For")); ip != "" {
+			return ip
+		}
+	}
+	return clientIP(r)
+}
+
+func firstForwardedValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if before, _, ok := strings.Cut(value, ","); ok {
+		value = before
+	}
+	return strings.TrimSpace(value)
 }
 
 func originMatches(raw, host string) bool {
@@ -248,13 +288,13 @@ func defaultString(value, fallback string) string {
 	return value
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
-		if r.TLS != nil {
+		if s.requestIsSecure(r) {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		next.ServeHTTP(w, r)

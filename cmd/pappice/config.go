@@ -16,6 +16,7 @@ type appConfig struct {
 	DBPath                string
 	TLSCert               string
 	TLSKey                string
+	TrustProxyHeaders     bool
 	AllowInsecureWebhooks bool
 	AllowPrivateWebhooks  bool
 	PublicURL             string
@@ -91,6 +92,7 @@ func newConfigFlagSet(name string, cfg *appConfig, output io.Writer) *flag.FlagS
 	fs.StringVar(&cfg.DBPath, "db", cfg.DBPath, "path to SQLite database file")
 	fs.StringVar(&cfg.TLSCert, "tls-cert", cfg.TLSCert, "TLS certificate path")
 	fs.StringVar(&cfg.TLSKey, "tls-key", cfg.TLSKey, "TLS private key path")
+	fs.BoolVar(&cfg.TrustProxyHeaders, "trust-proxy-headers", cfg.TrustProxyHeaders, "trust X-Forwarded-* headers from a private reverse proxy")
 	fs.BoolVar(&cfg.AllowInsecureWebhooks, "allow-insecure-webhooks", cfg.AllowInsecureWebhooks, "allow http webhook URLs")
 	fs.BoolVar(&cfg.AllowPrivateWebhooks, "allow-private-webhooks", cfg.AllowPrivateWebhooks, "allow private/link-local webhook targets")
 	fs.StringVar(&cfg.PublicURL, "public-url", cfg.PublicURL, "public base URL used in email notifications")
@@ -140,6 +142,9 @@ func applyEnv(cfg *appConfig, flags map[string]bool) {
 	}
 	if !flags["tls-key"] {
 		cfg.TLSKey = envOr("PAPPICE_TLS_KEY", cfg.TLSKey)
+	}
+	if !flags["trust-proxy-headers"] {
+		cfg.TrustProxyHeaders = envBoolOr("PAPPICE_TRUST_PROXY_HEADERS", cfg.TrustProxyHeaders)
 	}
 	if !flags["allow-insecure-webhooks"] {
 		cfg.AllowInsecureWebhooks = envBoolOr("PAPPICE_ALLOW_INSECURE_WEBHOOKS", cfg.AllowInsecureWebhooks)
@@ -236,10 +241,22 @@ func (cfg appConfig) emailEnabled() bool {
 	return cfg.EmailNotifications || cfg.smtpConfig().Enabled()
 }
 
+func (cfg appConfig) tlsEnabled() (bool, error) {
+	switch {
+	case cfg.TLSCert == "" && cfg.TLSKey == "":
+		return false, nil
+	case cfg.TLSCert == "" || cfg.TLSKey == "":
+		return false, errors.New("both -tls-cert and -tls-key are required for HTTPS")
+	default:
+		return true, nil
+	}
+}
+
 func (cfg appConfig) serverOptions(emailEnabled bool) server.Options {
 	return server.Options{
 		AllowInsecureWebhooks: cfg.AllowInsecureWebhooks,
 		AllowPrivateWebhooks:  cfg.AllowPrivateWebhooks,
+		TrustProxyHeaders:     cfg.TrustProxyHeaders,
 		Branding: server.Branding{
 			Name:     cfg.BrandName,
 			Subtitle: cfg.BrandSubtitle,

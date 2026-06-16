@@ -1,8 +1,10 @@
 # Production Deploy
 
 This setup uses nginx for public HTTPS and systemd for the Pappice process.
-Pappice also listens with local HTTPS on `127.0.0.1:8388`; nginx proxies to that
-HTTPS upstream because browser sessions require the Go app to receive TLS.
+Pappice listens on local HTTP at `127.0.0.1:8388`; nginx terminates public HTTPS
+and forwards `X-Forwarded-Proto: https`. `PAPPICE_TRUST_PROXY_HEADERS=true` is
+enabled in the production environment template, so do not expose the Pappice
+listener directly to the public internet.
 
 ## Files
 
@@ -27,7 +29,7 @@ Install OS packages:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl nginx sqlite3 openssl
+sudo apt-get install -y ca-certificates curl nginx sqlite3
 ```
 
 Download and unpack the release archive:
@@ -70,22 +72,9 @@ sudo install -o root -g root -m 0755 ops/restore.sh /opt/pappice/ops/restore.sh
 ```
 
 Edit `/etc/pappice/pappice.env` and set SMTP credentials before starting.
-Keep `PAPPICE_ALLOW_INSECURE_WEBHOOKS=false` and
+Keep `PAPPICE_TRUST_PROXY_HEADERS=true` only when nginx is the only public entry
+point. Keep `PAPPICE_ALLOW_INSECURE_WEBHOOKS=false` and
 `PAPPICE_ALLOW_PRIVATE_WEBHOOKS=false` in production.
-
-Create the local upstream certificate used between nginx and Pappice:
-
-```sh
-sudo openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout /etc/pappice/upstream-key.pem \
-  -out /etc/pappice/upstream.pem \
-  -days 3650 \
-  -subj /CN=127.0.0.1 \
-  -addext subjectAltName=IP:127.0.0.1,DNS:localhost
-
-sudo chown root:pappice /etc/pappice/upstream.pem /etc/pappice/upstream-key.pem
-sudo chmod 0640 /etc/pappice/upstream.pem /etc/pappice/upstream-key.pem
-```
 
 Install the nginx site after issuing the public certificate with your preferred
 ACME flow:

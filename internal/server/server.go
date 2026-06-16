@@ -44,6 +44,7 @@ type RateLimit struct {
 type Options struct {
 	AllowInsecureWebhooks bool
 	AllowPrivateWebhooks  bool
+	TrustProxyHeaders     bool
 	Branding              Branding
 	DomainEventRetention  time.Duration
 	EmailNotifications    bool
@@ -142,7 +143,7 @@ func NewServer(tracker *store.Store, opts ...Options) *Server {
 	}
 	s.client = s.newWebhookClient()
 	s.routes()
-	s.handler = securityHeaders(s.mux)
+	s.handler = s.securityHeaders(s.mux)
 	return s
 }
 
@@ -261,7 +262,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	input.Event = store.EventContext{Enabled: true, IP: clientIP(r)}
+	input.Event = store.EventContext{Enabled: true, IP: s.clientIP(r)}
 	user, err := s.store.CreateFirstAdmin(input)
 	if err != nil {
 		respondStoreError(w, err)
@@ -293,7 +294,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	limitKey := "login|" + clientIP(r) + "|" + strings.ToLower(strings.TrimSpace(input.Email))
+	limitKey := "login|" + s.clientIP(r) + "|" + strings.ToLower(strings.TrimSpace(input.Email))
 	if !s.loginLimiter.Allow(limitKey, time.Now().UTC()) {
 		respondRateLimited(w)
 		return
@@ -349,7 +350,7 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		http.NotFound(w, r)
 		return
 	}
-	limitKey := "account-link|" + clientIP(r) + "|" + security.HashToken(token)
+	limitKey := "account-link|" + s.clientIP(r) + "|" + security.HashToken(token)
 	switch r.Method {
 	case http.MethodGet:
 		if !s.accountLinkLimiter.Allow(limitKey, time.Now().UTC()) {
@@ -384,7 +385,7 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-		user, err := s.store.ConsumeAccountLink(token, input.Password, store.EventContext{Enabled: true, IP: clientIP(r)})
+		user, err := s.store.ConsumeAccountLink(token, input.Password, store.EventContext{Enabled: true, IP: s.clientIP(r)})
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				s.respondAccountLinkError(w, token)
@@ -1478,7 +1479,7 @@ func (s *Server) requireStaff(w http.ResponseWriter, r *http.Request) (authConte
 }
 
 func (s *Server) requireHTTPS(w http.ResponseWriter, r *http.Request) bool {
-	if r.TLS != nil {
+	if s.requestIsSecure(r) {
 		return true
 	}
 	respondError(w, http.StatusBadRequest, "HTTPS is required for browser sessions")
@@ -1486,7 +1487,7 @@ func (s *Server) requireHTTPS(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) verifyCSRF(w http.ResponseWriter, r *http.Request, expected string) bool {
-	if !sameOrigin(r) {
+	if !s.sameOrigin(r) {
 		respondError(w, http.StatusForbidden, "same-origin request is required")
 		return false
 	}
@@ -1769,7 +1770,7 @@ func (s *Server) eventContext(r *http.Request, actor store.User) store.EventCont
 		Actor:   store.EventActorFromUser(actor),
 	}
 	if r != nil {
-		ctx.IP = clientIP(r)
+		ctx.IP = s.clientIP(r)
 	}
 	return ctx
 }

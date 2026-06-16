@@ -10,6 +10,10 @@
 /localhost.pem
 /localhost-key.pem
 /deploy/local/
+/deploy/docker/data/
+/deploy/docker/backups/
+/deploy/docker/certs/
+/deploy/docker/pappice.env
 /demo/.tmp/
 /tmp/
 /node_modules/

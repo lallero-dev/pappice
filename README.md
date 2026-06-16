@@ -114,6 +114,8 @@ Important values:
 - `PAPPICE_ADDR`: listen address, default `127.0.0.1:8388`
 - `PAPPICE_DB`: SQLite database path, default `./pappice.db`
 - `PAPPICE_TLS_CERT` / `PAPPICE_TLS_KEY`: HTTPS certificate and key
+- `PAPPICE_TRUST_PROXY_HEADERS`: trust `X-Forwarded-*` headers from a private
+  reverse proxy, default `false`
 - `PAPPICE_PUBLIC_URL`: public HTTPS URL used in emails
 - `PAPPICE_NOTIFICATION_DELAY`: ticket notification delay, default `30s`
 - `PAPPICE_DOMAIN_EVENT_RETENTION`: processed event retention, default `720h`;
@@ -183,8 +185,11 @@ script moves the current database, WAL/SHM files, and upload directory into a
 
 Production installs use the release archive plus the `systemd`, nginx, and
 environment templates in [deploy/](./deploy/README.md). The default production
-shape is public HTTPS in nginx and local HTTPS from nginx to Pappice on
+shape is public HTTPS in nginx and local HTTP from nginx to Pappice on
 `127.0.0.1:8388`.
+
+Docker Compose deployment is available in
+[deploy/docker/](./deploy/docker/README.md).
 
 ## Email
 

@@ -117,6 +117,7 @@ func TestSplitCommand(t *testing.T) {
 		{[]string{"pappice", "serve", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
 		{[]string{"pappice", "-addr", ":8080"}, "-addr", []string{":8080"}},
 		{[]string{"pappice", "doctor"}, "doctor", nil},
+		{[]string{"pappice", "healthcheck"}, "healthcheck", nil},
 		{[]string{"pappice", "db", "status"}, "db", []string{"status"}},
 		{[]string{"pappice", "version"}, "version", nil},
 		{[]string{"pappice", "-h"}, "help", nil},
@@ -196,6 +197,57 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestHealthcheckURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		addr  string
+		https bool
+		want  string
+	}{
+		{"default http", "127.0.0.1:8388", false, "http://127.0.0.1:8388/api/health"},
+		{"default https", "127.0.0.1:8388", true, "https://127.0.0.1:8388/api/health"},
+		{"all interfaces", "0.0.0.0:8388", true, "https://127.0.0.1:8388/api/health"},
+		{"port only", ":8388", false, "http://127.0.0.1:8388/api/health"},
+		{"ipv6 all interfaces", "[::]:8388", true, "https://127.0.0.1:8388/api/health"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := healthcheckURL(tt.addr, tt.https)
+			if err != nil {
+				t.Fatalf("healthcheckURL returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("healthcheckURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigTLSEnabled(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     appConfig
+		wantTLS bool
+		wantErr bool
+	}{
+		{"plain http", appConfig{}, false, false},
+		{"tls", appConfig{TLSCert: "cert.pem", TLSKey: "key.pem"}, true, false},
+		{"missing key", appConfig{TLSCert: "cert.pem"}, false, true},
+		{"missing cert", appConfig{TLSKey: "key.pem"}, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.cfg.tlsEnabled()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("tlsEnabled error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.wantTLS {
+				t.Fatalf("tlsEnabled() = %v, want %v", got, tt.wantTLS)
+			}
+		})
+	}
+}
+
 func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
 	t.Setenv("PAPPICE_SMTP_PASSWORD", "super-secret-password")
 	t.Setenv("PAPPICE_SMTP_USER", "secret-user")
@@ -223,6 +275,7 @@ func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	t.Setenv("PAPPICE_SMTP_PASSWORD", "configured-secret")
 	t.Setenv("PAPPICE_NOTIFICATION_DELAY", "45s")
 	t.Setenv("PAPPICE_DOMAIN_EVENT_RETENTION", "720h")
+	t.Setenv("PAPPICE_TRUST_PROXY_HEADERS", "true")
 
 	var output bytes.Buffer
 	cfg, code, ok := parseRuntimeConfig("pappice serve", []string{"-addr", "127.0.0.1:9999"}, &output)
@@ -243,6 +296,9 @@ func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	}
 	if cfg.DomainEventRetention != 720*time.Hour {
 		t.Fatalf("env domain event retention = %s", cfg.DomainEventRetention)
+	}
+	if !cfg.TrustProxyHeaders {
+		t.Fatalf("env trust proxy headers was not applied")
 	}
 }
 
@@ -270,6 +326,23 @@ func TestDoctorCommand(t *testing.T) {
 	output := stdout.String()
 	if !strings.Contains(output, "Pappice doctor") || !strings.Contains(output, "0 error(s)") {
 		t.Fatalf("doctor output = %s", output)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"pappice",
+		"doctor",
+		"-db", dbPath,
+		"-upload-dir", uploads,
+		"-backup-dir", backups,
+		"-trust-proxy-headers",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doctor proxy exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "OK    tls: terminated by trusted reverse proxy") {
+		t.Fatalf("doctor proxy output = %s", stdout.String())
 	}
 
 	stdout.Reset()

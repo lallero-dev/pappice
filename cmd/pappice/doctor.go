@@ -37,12 +37,21 @@ func (report *doctorReport) run(cfg appConfig) {
 	report.checkWritableDirectory("uploads", cfg.UploadDir)
 	report.checkWritableDirectory("backups", cfg.BackupDir)
 	report.checkTLS(cfg)
+	report.checkProxyTrust(cfg)
 	report.checkPublicURL(cfg)
 	report.checkEmail(cfg)
 	report.checkUploads(cfg)
 	report.checkRateLimits(cfg)
 	report.checkWebhookPolicy(cfg)
 	fmt.Fprintf(report.out, "\nDoctor finished with %d error(s), %d warning(s).\n", report.errors, report.warnings)
+}
+
+func (report *doctorReport) checkProxyTrust(cfg appConfig) {
+	if cfg.TrustProxyHeaders {
+		report.warn("proxy", "trusting X-Forwarded-* headers; expose Pappice only behind a private reverse proxy")
+		return
+	}
+	report.ok("proxy", "not trusting forwarded headers")
 }
 
 func (report *doctorReport) ok(label, message string) {
@@ -122,17 +131,23 @@ func (report *doctorReport) checkWritableDirectory(label, path string) {
 }
 
 func (report *doctorReport) checkTLS(cfg appConfig) {
-	switch {
-	case cfg.TLSCert == "" && cfg.TLSKey == "":
-		report.warn("tls", "not configured; browser login requires HTTPS here or at a reverse proxy")
-	case cfg.TLSCert == "" || cfg.TLSKey == "":
-		report.err("tls", "both certificate and key are required")
-	default:
-		certOK := report.checkReadableFile("tls-cert", cfg.TLSCert)
-		keyOK := report.checkReadableFile("tls-key", cfg.TLSKey)
-		if certOK && keyOK {
-			report.ok("tls", "certificate and key are readable")
+	useTLS, err := cfg.tlsEnabled()
+	if err != nil {
+		report.err("tls", err.Error())
+		return
+	}
+	if !useTLS {
+		if cfg.TrustProxyHeaders {
+			report.ok("tls", "terminated by trusted reverse proxy")
+			return
 		}
+		report.warn("tls", "not configured; browser login requires HTTPS here or at a reverse proxy")
+		return
+	}
+	certOK := report.checkReadableFile("tls-cert", cfg.TLSCert)
+	keyOK := report.checkReadableFile("tls-key", cfg.TLSKey)
+	if certOK && keyOK {
+		report.ok("tls", "certificate and key are readable")
 	}
 }
 
