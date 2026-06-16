@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Document latest-release install URLs and publish stable archive aliases for
-  release assets.
+- Keep alpha install docs on explicit release URLs and make release downloads
+  fail on HTTP errors.
 
 ## v0.8.0-alpha - 2026-06-16
 

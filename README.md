@@ -42,15 +42,15 @@ after a backup.
 
 ## Install
 
-Download the latest Linux amd64 release archive, verify it, and install the
-binary:
+Download the Linux amd64 release archive, verify it, and install the binary:
 
 ```sh
-ARCHIVE=pappice-linux-amd64.tar.gz
-BASE_URL=https://github.com/lallero-dev/pappice/releases/latest/download
+VERSION=v0.8.0-alpha
+ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
+BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
 
-curl -LO "${BASE_URL}/${ARCHIVE}"
-curl -LO "${BASE_URL}/${ARCHIVE}.sha256"
+curl -fLO "${BASE_URL}/${ARCHIVE}"
+curl -fLO "${BASE_URL}/${ARCHIVE}.sha256"
 sha256sum -c "${ARCHIVE}.sha256"
 rm -rf pappice-release
 mkdir pappice-release
