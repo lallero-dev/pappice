@@ -4,6 +4,11 @@
 
 - Keep alpha install docs on explicit release URLs and make release downloads
   fail on HTTP errors.
+- Make `pappice doctor` report database schema status, including empty
+  databases and pending migrations.
+- Replace stale uploads during restore even when a backup does not include an
+  upload archive.
+- Upgrade password hashes after successful legacy-hash login.
 
 ## v0.8.0-alpha - 2026-06-16
 
