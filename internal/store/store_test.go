@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"pappice/internal/security"
 )
 
 func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
@@ -854,7 +856,9 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if time.Until(expires) > time.Second {
 		t.Fatalf("short session expires too late: %s", expires)
 	}
-	time.Sleep(30 * time.Millisecond)
+	if _, err := tracker.db.Exec(`UPDATE sessions SET expires_at = ? WHERE token_hash = ?`, formatTime(time.Now().UTC().Add(-time.Hour)), security.HashToken(shortSession)); err != nil {
+		t.Fatalf("expire short session: %v", err)
+	}
 	if _, _, ok := tracker.UserBySession(shortSession); ok {
 		t.Fatal("expired short session should not authenticate")
 	}
@@ -1074,7 +1078,9 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create expiring reset link: %v", err)
 	}
-	time.Sleep(2 * time.Millisecond)
+	if _, err := tracker.db.Exec(`UPDATE account_links SET expires_at = ? WHERE token_hash = ?`, formatTime(time.Now().UTC().Add(-time.Hour)), security.HashToken(expiringToken)); err != nil {
+		t.Fatalf("expire reset link: %v", err)
+	}
 	if _, _, err := tracker.GetAccountLink(expiringToken); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expired reset link error = %v, want ErrNotFound", err)
 	}

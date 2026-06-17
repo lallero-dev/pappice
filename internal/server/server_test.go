@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"pappice/internal/security"
 	"pappice/internal/store"
 )
 
@@ -823,7 +825,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create expired reset link: %v", err)
 	}
-	time.Sleep(time.Millisecond)
+	expireAccountLinkToken(t, tracker, expiredToken)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/account-links/"+expiredToken, nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusGone)
 	if !bytes.Contains(body, []byte("expired")) || !bytes.Contains(body, []byte(`"reason":"expired"`)) {
@@ -909,9 +911,11 @@ func TestProfileAndPasswordChangeFlow(t *testing.T) {
 }
 
 func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
-	_, ttlServer, ttlClient := newTestServer(t, Options{SessionTTL: 20 * time.Millisecond})
+	ttlStarted := time.Now().UTC()
+	ttlTracker, ttlServer, ttlClient := newTestServer(t, Options{SessionTTL: time.Hour})
 	adminCookie, _ := setupAdmin(t, ttlClient, ttlServer.URL, "admin", "admin@example.test")
-	time.Sleep(30 * time.Millisecond)
+	requireSessionCookieTTL(t, adminCookie, ttlStarted, time.Hour)
+	expireSessionToken(t, ttlTracker, adminCookie.Value)
 	resp, body := doJSON(t, ttlClient, http.MethodGet, ttlServer.URL+"/api/session", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if decodeBool(t, body, "authenticated") {
@@ -1404,7 +1408,9 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 		"title":      "Webhook-backed ticket",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	waitUntil(t, func() bool { return webhookHits.Load() >= 2 && ticketEventSeen.Load() })
+	if webhookHits.Load() < 2 || !ticketEventSeen.Load() {
+		t.Fatalf("ticket webhook was not delivered: hits=%d seen=%v", webhookHits.Load(), ticketEventSeen.Load())
+	}
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/webhooks/"+itoa(hookID)+"/secret", nil, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
@@ -1464,7 +1470,6 @@ func TestWebhookNotificationsUseNotificationDelay(t *testing.T) {
 		"title":      "Delayed webhook ticket",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	time.Sleep(50 * time.Millisecond)
 	if webhookHits.Load() != 0 {
 		t.Fatalf("webhook was delivered before notification delay")
 	}
@@ -1486,7 +1491,7 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 	app := NewServer(tracker, Options{
 		AllowInsecureWebhooks: true,
 		AllowPrivateWebhooks:  true,
-		NotificationDelay:     80 * time.Millisecond,
+		NotificationDelay:     time.Hour,
 	})
 	server := httptest.NewTLSServer(app)
 	t.Cleanup(server.Close)
@@ -1525,13 +1530,12 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 
-	time.Sleep(40 * time.Millisecond)
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
 		"title": "Second webhook update",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 
-	time.Sleep(100 * time.Millisecond)
+	makePendingWebhookNotificationsDue(t, tracker)
 	if err := app.dispatchPendingEvents(nil, 10); err != nil {
 		t.Fatalf("dispatch coalesced webhook: %v", err)
 	}
@@ -1590,12 +1594,13 @@ func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T)
 		"title":      "Projection ticket",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	waitUntil(t, func() bool { return webhookHits.Load() == 1 })
+	if webhookHits.Load() != 1 {
+		t.Fatalf("webhook deliveries = %d, want 1", webhookHits.Load())
+	}
 
 	if err := app.dispatchPendingEvents(nil, 10); err != nil {
 		t.Fatalf("dispatch pending events again: %v", err)
 	}
-	time.Sleep(30 * time.Millisecond)
 	if webhookHits.Load() != 1 {
 		t.Fatalf("duplicate webhook deliveries = %d", webhookHits.Load())
 	}
@@ -2382,18 +2387,67 @@ func addProductMember(t *testing.T, client *http.Client, baseURL string, cookie 
 	requireStatus(t, resp, body, http.StatusCreated)
 }
 
-func waitUntil(t *testing.T, condition func() bool) {
+func requireSessionCookieTTL(t *testing.T, cookie *http.Cookie, started time.Time, ttl time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if cookie == nil {
+		t.Fatal("missing session cookie")
 	}
-	if !condition() {
-		t.Fatal("condition was not met before timeout")
+	minExpires := started.Add(ttl - time.Minute)
+	maxExpires := started.Add(ttl + time.Minute)
+	if cookie.Expires.Before(minExpires) || cookie.Expires.After(maxExpires) {
+		t.Fatalf("session cookie expires at %s, want within %s and %s", cookie.Expires, minExpires, maxExpires)
 	}
+	minMaxAge := int((ttl - time.Minute).Seconds())
+	maxMaxAge := int(ttl.Seconds())
+	if cookie.MaxAge < minMaxAge || cookie.MaxAge > maxMaxAge {
+		t.Fatalf("session cookie max-age = %d, want between %d and %d", cookie.MaxAge, minMaxAge, maxMaxAge)
+	}
+}
+
+func expireSessionToken(t *testing.T, tracker *store.Store, token string) {
+	t.Helper()
+	changed := execStoreSQL(t, tracker, `UPDATE sessions SET expires_at = ? WHERE token_hash = ?`, pastTimestamp(), security.HashToken(token))
+	if changed == 0 {
+		t.Fatal("session was not expired")
+	}
+}
+
+func expireAccountLinkToken(t *testing.T, tracker *store.Store, token string) {
+	t.Helper()
+	changed := execStoreSQL(t, tracker, `UPDATE account_links SET expires_at = ? WHERE token_hash = ?`, pastTimestamp(), security.HashToken(token))
+	if changed == 0 {
+		t.Fatal("account link was not expired")
+	}
+}
+
+func makePendingWebhookNotificationsDue(t *testing.T, tracker *store.Store) {
+	t.Helper()
+	changed := execStoreSQL(t, tracker, `UPDATE webhook_notifications SET next_attempt_at = ? WHERE status = 'pending'`, pastTimestamp())
+	if changed == 0 {
+		t.Fatal("no pending webhook notifications were made due")
+	}
+}
+
+func execStoreSQL(t *testing.T, tracker *store.Store, query string, args ...any) int64 {
+	t.Helper()
+	db, err := sql.Open("sqlite", tracker.Path())
+	if err != nil {
+		t.Fatalf("open test store connection: %v", err)
+	}
+	defer db.Close()
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		t.Fatalf("execute test store SQL: %v", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("read affected rows: %v", err)
+	}
+	return changed
+}
+
+func pastTimestamp() string {
+	return time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
 }
 
 type testUpload struct {
