@@ -1,6 +1,11 @@
 package security
 
-import "testing"
+import (
+	"encoding/base64"
+	"strconv"
+	"strings"
+	"testing"
+)
 
 func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	if _, err := HashPassword("short"); err == nil {
@@ -13,11 +18,27 @@ func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	if !VerifyPassword(hash, "correct horse") {
 		t.Fatal("password should verify")
 	}
+	if !strings.Contains(hash, "$120000$") {
+		t.Fatalf("hash should use current iteration count: %q", hash)
+	}
+	if PasswordNeedsRehash(hash) {
+		t.Fatal("fresh password hash should not need rehash")
+	}
+	legacyHash := hashPasswordWithIterations("correct horse", 60000)
+	if !VerifyPassword(legacyHash, "correct horse") {
+		t.Fatal("legacy password hash should verify")
+	}
+	if !PasswordNeedsRehash(legacyHash) {
+		t.Fatal("legacy password hash should need rehash")
+	}
 	if VerifyPassword(hash, "wrong horse") {
 		t.Fatal("wrong password should not verify")
 	}
 	if VerifyPassword("not-a-password-hash", "correct horse") {
 		t.Fatal("malformed hash should not verify")
+	}
+	if !PasswordNeedsRehash("not-a-password-hash") {
+		t.Fatal("malformed hash should need rehash")
 	}
 
 	token, err := RandomToken()
@@ -33,4 +54,13 @@ func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	if got := HMACSHA256("secret", []byte("payload")); got == "" || got == HMACSHA256("secret", []byte("other")) {
 		t.Fatalf("unexpected hmac value %q", got)
 	}
+}
+
+func hashPasswordWithIterations(password string, iterations int) string {
+	salt := []byte("0123456789abcdef")
+	key := pbkdf2SHA256([]byte(password), salt, iterations, passwordKeyBytes)
+	return passwordAlgorithm + "$" +
+		strconv.Itoa(iterations) + "$" +
+		base64.RawStdEncoding.EncodeToString(salt) + "$" +
+		base64.RawStdEncoding.EncodeToString(key)
 }

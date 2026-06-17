@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -809,6 +810,25 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	}
 	if authenticated.PasswordHash != "" {
 		t.Fatal("authenticated user leaked password hash")
+	}
+
+	legacyUser, err := tracker.CreateUser(CreateUser{Email: "legacy@example.test", Password: "legacy horse"})
+	if err != nil {
+		t.Fatalf("create legacy hash user: %v", err)
+	}
+	legacyHash := "pbkdf2-sha256$60000$MDEyMzQ1Njc4OWFiY2RlZg$R5q4Ncg29rBEEUjjeFQAxCjvocVZrvSI1dBok5+gOyk"
+	if _, err := tracker.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, legacyHash, legacyUser.ID); err != nil {
+		t.Fatalf("install legacy hash: %v", err)
+	}
+	if _, err := tracker.Authenticate("legacy@example.test", "legacy horse"); err != nil {
+		t.Fatalf("authenticate legacy hash: %v", err)
+	}
+	upgraded, err := tracker.GetUser(legacyUser.ID)
+	if err != nil {
+		t.Fatalf("get upgraded legacy user: %v", err)
+	}
+	if upgraded.PasswordHash == legacyHash || !strings.Contains(upgraded.PasswordHash, "$120000$") {
+		t.Fatalf("legacy hash was not upgraded: %q", upgraded.PasswordHash)
 	}
 
 	session, csrf, _, err := tracker.CreateSession(admin.ID)

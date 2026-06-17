@@ -243,7 +243,19 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 	if !security.VerifyPassword(user.PasswordHash, password) {
 		return User{}, fmt.Errorf("%w: invalid email or password", ErrValidation)
 	}
+	s.rehashPasswordIfNeeded(user, password)
 	return publicUserCopy(user), nil
+}
+
+func (s *Store) rehashPasswordIfNeeded(user User, password string) {
+	if !security.PasswordNeedsRehash(user.PasswordHash) {
+		return
+	}
+	hash, err := security.HashPassword(password)
+	if err != nil {
+		return
+	}
+	_, _ = s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?`, hash, user.ID, user.PasswordHash)
 }
 
 func (s *Store) CreateSession(userID int64) (string, string, time.Time, error) {

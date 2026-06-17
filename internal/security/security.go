@@ -13,18 +13,32 @@ import (
 	"strings"
 )
 
-const passwordIterations = 60000
+const (
+	passwordAlgorithm  = "pbkdf2-sha256"
+	passwordIterations = 120000
+
+	maximumPasswordIterations = 2000000
+	passwordSaltBytes         = 16
+	passwordKeyBytes          = 32
+)
+
+type passwordHashParams struct {
+	iterations int
+	salt       []byte
+	expected   []byte
+}
 
 func HashPassword(password string) (string, error) {
 	if len(password) < 8 {
 		return "", fmt.Errorf("password must be at least 8 characters")
 	}
-	salt := make([]byte, 16)
+	salt := make([]byte, passwordSaltBytes)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := pbkdf2SHA256([]byte(password), salt, passwordIterations, 32)
-	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s",
+	key := pbkdf2SHA256([]byte(password), salt, passwordIterations, passwordKeyBytes)
+	return fmt.Sprintf("%s$%d$%s$%s",
+		passwordAlgorithm,
 		passwordIterations,
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(key),
@@ -32,24 +46,42 @@ func HashPassword(password string) (string, error) {
 }
 
 func VerifyPassword(encoded, password string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 4 || parts[0] != "pbkdf2-sha256" {
+	params, ok := parsePasswordHash(encoded)
+	if !ok {
 		return false
+	}
+	actual := pbkdf2SHA256([]byte(password), params.salt, params.iterations, len(params.expected))
+	return subtle.ConstantTimeCompare(actual, params.expected) == 1
+}
+
+func PasswordNeedsRehash(encoded string) bool {
+	params, ok := parsePasswordHash(encoded)
+	if !ok {
+		return true
+	}
+	return params.iterations < passwordIterations ||
+		len(params.salt) < passwordSaltBytes ||
+		len(params.expected) < passwordKeyBytes
+}
+
+func parsePasswordHash(encoded string) (passwordHashParams, bool) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 4 || parts[0] != passwordAlgorithm {
+		return passwordHashParams{}, false
 	}
 	iterations, err := strconv.Atoi(parts[1])
-	if err != nil || iterations < 1 {
-		return false
+	if err != nil || iterations < 1 || iterations > maximumPasswordIterations {
+		return passwordHashParams{}, false
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[2])
-	if err != nil {
-		return false
+	if err != nil || len(salt) == 0 {
+		return passwordHashParams{}, false
 	}
 	expected, err := base64.RawStdEncoding.DecodeString(parts[3])
-	if err != nil {
-		return false
+	if err != nil || len(expected) == 0 {
+		return passwordHashParams{}, false
 	}
-	actual := pbkdf2SHA256([]byte(password), salt, iterations, len(expected))
-	return subtle.ConstantTimeCompare(actual, expected) == 1
+	return passwordHashParams{iterations: iterations, salt: salt, expected: expected}, true
 }
 
 func RandomToken() (string, error) {
