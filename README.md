@@ -25,6 +25,9 @@ Alpha. Pappice is not externally security audited. The API and schema may change
 before a stable release; existing installations can require `pappice db migrate`
 after a backup.
 
+See [docs/architecture.md](./docs/architecture.md) for the current codebase
+boundaries, persistence model, and change guidelines.
+
 ## Features
 
 - Products group tickets by service, customer, or team.
