@@ -105,11 +105,11 @@ for suffix in -wal -shm; do
 done
 cp "$backup/pappice.db" "$DB_PATH"
 
+if [[ -e "$UPLOAD_DIR" ]]; then
+  mv "$UPLOAD_DIR" "$safety_dir/uploads"
+fi
+mkdir -p "$UPLOAD_DIR"
 if [[ -f "$backup/uploads.tar" ]]; then
-  if [[ -d "$UPLOAD_DIR" ]]; then
-    mv "$UPLOAD_DIR" "$safety_dir/uploads"
-  fi
-  mkdir -p "$UPLOAD_DIR"
   tar -C "$UPLOAD_DIR" -xf "$backup/uploads.tar"
 fi
 
