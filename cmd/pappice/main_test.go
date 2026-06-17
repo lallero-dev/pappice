@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestEnvHelpers(t *testing.T) {
@@ -327,6 +330,9 @@ func TestDoctorCommand(t *testing.T) {
 	if !strings.Contains(output, "Pappice doctor") || !strings.Contains(output, "0 error(s)") {
 		t.Fatalf("doctor output = %s", output)
 	}
+	if !strings.Contains(output, "WARN  schema: database is empty") {
+		t.Fatalf("doctor missing empty schema warning: %s", output)
+	}
 
 	stdout.Reset()
 	stderr.Reset()
@@ -360,5 +366,34 @@ func TestDoctorCommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "ERROR email") {
 		t.Fatalf("doctor missing email error: %s", stdout.String())
+	}
+
+	legacyDBPath := filepath.Join(dir, "legacy.db")
+	legacyDB, err := sql.Open("sqlite", legacyDBPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := legacyDB.Exec(`CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY)`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("create legacy db: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"pappice",
+		"doctor",
+		"-db", legacyDBPath,
+		"-upload-dir", uploads,
+		"-backup-dir", backups,
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("doctor should fail when migrations are pending: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ERROR schema: database migration required") {
+		t.Fatalf("doctor missing migration error: %s", stdout.String())
 	}
 }

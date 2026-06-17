@@ -142,8 +142,8 @@ pappice serve -h
 for an existing database. If the schema is behind, run a backup, then
 `pappice db migrate --dry-run`, then `pappice db migrate`.
 
-`pappice doctor` validates paths, TLS, public URL, SMTP, upload limits, rate
-limits, and development-only webhook settings.
+`pappice doctor` validates paths, schema status, TLS, public URL, SMTP, upload
+limits, rate limits, and development-only webhook settings.
 
 ## Branding
 

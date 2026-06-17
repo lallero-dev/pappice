@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"pappice/internal/notify"
+	"pappice/internal/store"
 )
 
 func runDoctor(args []string, stdout, stderr io.Writer) int {
@@ -34,6 +35,7 @@ func (report *doctorReport) run(cfg appConfig) {
 	fmt.Fprintln(report.out, "Pappice doctor")
 	report.ok("version", version)
 	report.checkDatabase(cfg.DBPath)
+	report.checkSchema(cfg.DBPath)
 	report.checkWritableDirectory("uploads", cfg.UploadDir)
 	report.checkWritableDirectory("backups", cfg.BackupDir)
 	report.checkTLS(cfg)
@@ -98,6 +100,24 @@ func (report *doctorReport) checkDatabase(path string) {
 		return
 	}
 	report.warn("database", path+" does not exist and will be created on first start")
+}
+
+func (report *doctorReport) checkSchema(path string) {
+	status, err := store.InspectMigration(path)
+	if err != nil {
+		report.err("schema", err.Error())
+		return
+	}
+	switch {
+	case status.Empty:
+		report.warn("schema", "database is empty; current schema will be installed on first start")
+	case status.CurrentVersion > status.TargetVersion:
+		report.err("schema", fmt.Sprintf("database is at version %d, app supports %d", status.CurrentVersion, status.TargetVersion))
+	case len(status.Pending) > 0:
+		report.err("schema", fmt.Sprintf("database migration required: %d pending; run pappice db migrate --dry-run, then pappice db migrate", len(status.Pending)))
+	default:
+		report.ok("schema", fmt.Sprintf("current (%d)", status.CurrentVersion))
+	}
 }
 
 func (report *doctorReport) checkWritableDirectory(label, path string) {
