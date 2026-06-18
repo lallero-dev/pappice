@@ -7,6 +7,11 @@
 Pappice is a small, self-hosted, chat-style support desk. Customers open tickets
 from the portal; staff assign, reply, and track them.
 
+It started as an internal tool for our small consultancy team and is currently
+used in production to support multiple clients. It exists because the
+alternatives we tried were either heavier than we wanted, not fully open
+source, or missed the pieces we actually needed.
+
 ![Pappice chat-style ticketing demo](./assets/demo.gif)
 
 Pappice is intentionally minimal and self-contained:
