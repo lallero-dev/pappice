@@ -24,6 +24,7 @@ exists in the product.
 - flag and `.env` configuration
 - database migration commands
 - `doctor` diagnostics
+- binary-native backup and restore commands
 - HTTP server startup and graceful shutdown
 - SMTP worker startup when email is enabled
 
@@ -152,7 +153,7 @@ The normal backend quality gate is:
 ```sh
 go test ./...
 go vet ./...
-for file in ops/backup.sh ops/restore.sh scripts/build-release.sh scripts/release.sh; do
+for file in scripts/build-release.sh scripts/release.sh; do
   bash -n "$file"
 done
 ```

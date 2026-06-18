@@ -11,7 +11,7 @@ listener directly to the public internet.
 - `deploy/env/pappice.env.example`: production environment template.
 - `deploy/nginx/pappice.conf.example`: nginx site template.
 - `deploy/systemd/pappice.service`: application service.
-- `deploy/systemd/pappice-backup.service`: one-shot backup service.
+- `deploy/systemd/pappice-backup.service`: one-shot `pappice backup` service.
 - `deploy/systemd/pappice-backup.timer`: daily backup timer.
 
 ## First Install
@@ -29,7 +29,7 @@ Install OS packages:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl nginx sqlite3
+sudo apt-get install -y ca-certificates curl nginx
 ```
 
 Download and unpack the release archive:
@@ -50,7 +50,7 @@ Create the service account and directories:
 sudo useradd --system --home /var/lib/pappice --shell /usr/sbin/nologin pappice
 sudo install -d -o pappice -g pappice -m 0750 /var/lib/pappice /var/lib/pappice/uploads /var/backups/pappice
 sudo install -d -o root -g pappice -m 0750 /etc/pappice
-sudo install -d -o root -g root -m 0755 /opt/pappice /opt/pappice/ops
+sudo install -d -o root -g root -m 0755 /opt/pappice
 ```
 
 Install the binary:
@@ -67,8 +67,6 @@ sudo sed -i "s/support.example.com/$DOMAIN/g" /etc/pappice/pappice.env
 sudo install -o root -g root -m 0644 deploy/systemd/pappice.service /etc/systemd/system/pappice.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.service /etc/systemd/system/pappice-backup.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.timer /etc/systemd/system/pappice-backup.timer
-sudo install -o root -g root -m 0755 ops/backup.sh /opt/pappice/ops/backup.sh
-sudo install -o root -g root -m 0755 ops/restore.sh /opt/pappice/ops/restore.sh
 ```
 
 Edit `/etc/pappice/pappice.env` and set SMTP credentials before starting.
@@ -154,6 +152,6 @@ Stop Pappice before restoring:
 
 ```sh
 sudo systemctl stop pappice.service
-sudo -u pappice bash -lc 'cd /opt/pappice && set -a; source /etc/pappice/pappice.env; set +a; /opt/pappice/ops/restore.sh latest'
+sudo -u pappice bash -lc 'cd /opt/pappice && set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice restore -yes latest'
 sudo systemctl start pappice.service
 ```

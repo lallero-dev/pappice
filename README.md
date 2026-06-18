@@ -60,8 +60,8 @@ sudo install -m 0755 pappice-release/pappice /usr/local/bin/pappice
 
 See [deploy/](./deploy/README.md) for the full `systemd`, nginx, backup, and
 upgrade setup. The extracted archive also includes that guide at
-`pappice-release/deploy/README.md` together with the environment, systemd,
-nginx, backup, and restore files it references.
+`pappice-release/deploy/README.md` together with the environment, systemd, and
+nginx files it references.
 
 ## Build From Source
 
@@ -136,6 +136,8 @@ Useful local commands:
 pappice db status
 pappice db migrate --dry-run
 pappice db migrate
+pappice backup
+pappice restore latest
 pappice doctor
 pappice version
 pappice serve -h
@@ -163,25 +165,29 @@ directory together.
 ## Backup And Restore
 
 Backups are local snapshots of the SQLite database plus the upload directory.
-The backup script uses SQLite's online backup command, so it can run while
-Pappice is running.
+`pappice backup` uses SQLite's online backup API for a consistent database copy,
+so it can run while Pappice is running.
 
 ```sh
-ops/backup.sh
+pappice backup
 ```
 
 This creates `PAPPICE_BACKUP_DIR/<timestamp>/` with `pappice.db`,
 `uploads.tar`, and a manifest. The admin Maintenance page shows the backup
 directory and latest detected backup.
 
+Upload files are copied from the filesystem. A backup taken during an active
+upload can include extra unreferenced files; stop Pappice first if you need a
+strict database-and-upload snapshot.
+
 Stop Pappice before restoring:
 
 ```sh
-ops/restore.sh pappice-backups/20260101T120000Z
+pappice restore pappice-backups/20260101T120000Z
 ```
 
-Use `ops/restore.sh latest` to restore the newest snapshot. The restore
-script moves the current database, WAL/SHM files, and upload directory into a
+Use `pappice restore latest` to restore the newest snapshot. Restore moves the
+current database, WAL/SHM files, and upload directory into a
 `restore-pre-<timestamp>` folder before replacing them.
 
 ## Deployment

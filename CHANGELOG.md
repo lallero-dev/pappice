@@ -9,6 +9,8 @@
 - Replace stale uploads during restore even when a backup does not include an
   upload archive.
 - Upgrade password hashes after successful legacy-hash login.
+- Add binary-native `pappice backup` and `pappice restore` commands, replacing
+  the operational backup/restore shell scripts.
 
 ## v0.8.0-alpha - 2026-06-16
 

@@ -8,7 +8,7 @@ User=pappice
 Group=pappice
 WorkingDirectory=/opt/pappice
 EnvironmentFile=/etc/pappice/pappice.env
-ExecStart=/opt/pappice/ops/backup.sh
+ExecStart=/usr/local/bin/pappice backup
 
 NoNewPrivileges=true
 PrivateTmp=true

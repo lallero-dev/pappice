@@ -61,8 +61,15 @@ docker compose -f deploy/docker/compose.yaml run --rm pappice db status
 docker compose -f deploy/docker/compose.yaml run --rm pappice db migrate --dry-run
 ```
 
-Back up `deploy/docker/data` and `deploy/docker/backups` together. They contain
-the SQLite database, uploads, and backup snapshots.
+Create an app-level backup:
+
+```sh
+docker compose -f deploy/docker/compose.yaml run --rm pappice backup
+```
+
+Back up `deploy/docker/data` and `deploy/docker/backups` together if you need a
+full host-level snapshot. They contain the SQLite database, uploads, and backup
+snapshots.
 
 ## Upgrade
 
@@ -70,17 +77,24 @@ The Docker image contains only the Pappice binary and embedded web assets. The
 SQLite database, uploads, and backup snapshots stay on the host in the bind
 mounts under `deploy/docker/`.
 
-After updating the source checkout to a newer version, create a host-level
-snapshot first:
+After updating the source checkout to a newer version, create an app-level
+backup first:
 
 ```sh
-tar -C deploy/docker -czf pappice-docker-backup-$(date -u +%Y%m%dT%H%M%SZ).tar.gz data backups
+docker compose -f deploy/docker/compose.yaml run --rm pappice backup
 ```
 
-Stop the running container and rebuild the image:
+For a full bind-mount snapshot, stop the container and archive both mounted
+directories:
 
 ```sh
 docker compose -f deploy/docker/compose.yaml stop pappice
+tar -C deploy/docker -czf pappice-docker-backup-$(date -u +%Y%m%dT%H%M%SZ).tar.gz data backups
+```
+
+Rebuild the image:
+
+```sh
 docker compose -f deploy/docker/compose.yaml build --pull
 ```
 
