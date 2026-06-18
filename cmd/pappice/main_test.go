@@ -120,6 +120,8 @@ func TestSplitCommand(t *testing.T) {
 		{[]string{"pappice", "serve", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
 		{[]string{"pappice", "-addr", ":8080"}, "-addr", []string{":8080"}},
 		{[]string{"pappice", "doctor"}, "doctor", nil},
+		{[]string{"pappice", "backup"}, "backup", nil},
+		{[]string{"pappice", "restore", "latest"}, "restore", []string{"latest"}},
 		{[]string{"pappice", "healthcheck"}, "healthcheck", nil},
 		{[]string{"pappice", "db", "status"}, "db", []string{"status"}},
 		{[]string{"pappice", "version"}, "version", nil},
@@ -186,6 +188,61 @@ func TestDBCommandStatusAndMigrate(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Status: current") {
 		t.Fatalf("db status current output = %s", stdout.String())
+	}
+}
+
+func TestBackupAndRestoreCommands(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "pappice.db")
+	uploads := filepath.Join(dir, "uploads")
+	backups := filepath.Join(dir, "backups")
+	createCommandDB(t, dbPath, "before")
+	writeCommandFile(t, filepath.Join(uploads, "tickets", "one.txt"), "attachment before")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"pappice",
+		"backup",
+		"-db", dbPath,
+		"-upload-dir", uploads,
+		"-backup-dir", backups,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("backup exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Backup created:") ||
+		!strings.Contains(stdout.String(), "Restore with: pappice restore") {
+		t.Fatalf("backup output = %s", stdout.String())
+	}
+
+	createCommandDB(t, dbPath, "after")
+	writeCommandFile(t, filepath.Join(uploads, "stale.txt"), "stale upload")
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"pappice",
+		"restore",
+		"-yes",
+		"-db", dbPath,
+		"-upload-dir", uploads,
+		"-backup-dir", backups,
+		"latest",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("restore exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Restore complete from:") ||
+		!strings.Contains(stdout.String(), "Previous files saved in:") {
+		t.Fatalf("restore output = %s", stdout.String())
+	}
+	if got := queryCommandDB(t, dbPath); got != "before" {
+		t.Fatalf("restored database value = %q", got)
+	}
+	if got := readCommandFile(t, filepath.Join(uploads, "tickets", "one.txt")); got != "attachment before" {
+		t.Fatalf("restored upload = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(uploads, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale upload remained after restore: %v", err)
 	}
 }
 
@@ -396,4 +453,60 @@ func TestDoctorCommand(t *testing.T) {
 	if !strings.Contains(stdout.String(), "ERROR schema: database migration required") {
 		t.Fatalf("doctor missing migration error: %s", stdout.String())
 	}
+}
+
+func createCommandDB(t *testing.T, path, value string) {
+	t.Helper()
+	for _, item := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Remove(item); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove command db file: %v", err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("create command db dir: %v", err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open command db: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE records (value TEXT NOT NULL)`); err != nil {
+		t.Fatalf("create command records: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO records (value) VALUES (?)`, value); err != nil {
+		t.Fatalf("insert command record: %v", err)
+	}
+}
+
+func queryCommandDB(t *testing.T, path string) string {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open command query db: %v", err)
+	}
+	defer db.Close()
+	var value string
+	if err := db.QueryRow(`SELECT value FROM records`).Scan(&value); err != nil {
+		t.Fatalf("query command record: %v", err)
+	}
+	return value
+}
+
+func writeCommandFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("create command file dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write command file: %v", err)
+	}
+}
+
+func readCommandFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read command file: %v", err)
+	}
+	return string(data)
 }

@@ -32,6 +32,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "serve":
 		return runServe(commandArgs, stderr)
+	case "backup":
+		return runBackup(commandArgs, stdout, stderr)
+	case "restore":
+		return runRestore(commandArgs, stdout, stderr)
 	case "db":
 		return runDB(commandArgs, stdout, stderr)
 	case "doctor":
@@ -65,12 +69,14 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  pappice serve [flags]     Start the web server")
+	fmt.Fprintln(w, "  pappice backup [flags]    Create a database and uploads backup")
+	fmt.Fprintln(w, "  pappice restore [flags]   Restore a backup")
 	fmt.Fprintln(w, "  pappice db <command>      Inspect or migrate the SQLite database")
 	fmt.Fprintln(w, "  pappice doctor [flags]    Validate local runtime configuration")
 	fmt.Fprintln(w, "  pappice healthcheck       Check the local HTTP(S) health endpoint")
 	fmt.Fprintln(w, "  pappice version           Print the build version")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run \"pappice serve -h\", \"pappice db -h\", \"pappice doctor -h\", or \"pappice healthcheck -h\" for configuration flags.")
+	fmt.Fprintln(w, "Run \"pappice serve -h\", \"pappice backup -h\", \"pappice restore -h\", \"pappice db -h\", \"pappice doctor -h\", or \"pappice healthcheck -h\" for flags.")
 }
 
 func runServe(args []string, stderr io.Writer) int {
