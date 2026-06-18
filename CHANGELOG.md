@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.8.1-alpha - 2026-06-18
+
 - Keep alpha install docs on explicit release URLs and make release downloads
   fail on HTTP errors.
 - Make `pappice doctor` report database schema status, including empty
@@ -11,6 +13,9 @@
 - Upgrade password hashes after successful legacy-hash login.
 - Add binary-native `pappice backup` and `pappice restore` commands, replacing
   the operational backup/restore shell scripts.
+- Simplify deployment onboarding with Docker named volumes, systemd working
+  directories under `/var/lib/pappice`, and opt-in SMTP for first boot.
+- Update the nginx template to the current HTTP/2 directive style.
 
 ## v0.8.0-alpha - 2026-06-16
 
