@@ -1,8 +1,7 @@
 # Docker Deploy
 
 This path builds the image locally from a source checkout and runs Pappice with
-Docker Compose. Runtime state is kept in bind-mounted directories under
-`deploy/docker/`.
+Docker Compose. Runtime state is kept in Docker named volumes.
 
 The container listens with plain HTTP on `127.0.0.1:8388`. Put nginx, Caddy, or
 Traefik in front of it for public HTTPS.
@@ -12,19 +11,6 @@ The Compose service runs as UID/GID `10001`, drops Linux capabilities, uses
 `/data`, `/backups`, and a small `/tmp` tmpfs as writable paths.
 
 ## Setup
-
-Create local state directories:
-
-```sh
-mkdir -p deploy/docker/data deploy/docker/backups
-```
-
-Make the bind mounts writable by the container user:
-
-```sh
-sudo chown -R 10001:10001 deploy/docker/data deploy/docker/backups
-sudo chmod 0750 deploy/docker/data deploy/docker/backups
-```
 
 Copy and edit the environment file:
 
@@ -41,6 +27,9 @@ Start Pappice:
 ```sh
 docker compose -f deploy/docker/compose.yaml up --build -d
 ```
+
+Compose creates the `pappice-data` and `pappice-backups` volumes on first
+start. They contain the SQLite database, uploads, and app backup snapshots.
 
 Direct `http://127.0.0.1:8388` access is useful for health checks and token API
 testing. Browser sessions need an HTTPS reverse proxy that sends
@@ -70,15 +59,14 @@ Create an app-level backup:
 docker compose -f deploy/docker/compose.yaml run --rm pappice backup
 ```
 
-Back up `deploy/docker/data` and `deploy/docker/backups` together if you need a
-full host-level snapshot. They contain the SQLite database, uploads, and backup
-snapshots.
+Use the app-level backup for normal restores. If you need a full host-level
+snapshot, include both Docker volumes.
 
 ## Upgrade
 
 The Docker image contains only the Pappice binary and embedded web assets. The
-SQLite database, uploads, and backup snapshots stay on the host in the bind
-mounts under `deploy/docker/`.
+SQLite database, uploads, and backup snapshots stay in the `pappice-data` and
+`pappice-backups` Docker volumes.
 
 After updating the source checkout to a newer version, create an app-level
 backup first:
@@ -87,13 +75,9 @@ backup first:
 docker compose -f deploy/docker/compose.yaml run --rm pappice backup
 ```
 
-For a full bind-mount snapshot, stop the container and archive both mounted
-directories:
-
-```sh
-docker compose -f deploy/docker/compose.yaml stop pappice
-tar -C deploy/docker -czf pappice-docker-backup-$(date -u +%Y%m%dT%H%M%SZ).tar.gz data backups
-```
+If you also want a volume-level snapshot, stop the container and copy the
+`pappice-data` and `pappice-backups` volumes with your usual Docker host backup
+tool.
 
 Rebuild the image:
 
@@ -115,5 +99,15 @@ docker compose -f deploy/docker/compose.yaml up -d
 ```
 
 If the dry run fails, do not run the real migration. Keep the old container
-stopped, inspect the error, and restore the `data` and `backups` directories
-from the snapshot if needed.
+stopped, inspect the error, and restore the volumes from your snapshot if
+needed.
+
+## Restore
+
+Stop Pappice before restoring an app-level backup:
+
+```sh
+docker compose -f deploy/docker/compose.yaml stop pappice
+docker compose -f deploy/docker/compose.yaml run --rm pappice restore -yes latest
+docker compose -f deploy/docker/compose.yaml up -d
+```

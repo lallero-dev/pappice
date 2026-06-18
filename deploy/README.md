@@ -50,7 +50,6 @@ Create the service account and directories:
 sudo useradd --system --home /var/lib/pappice --shell /usr/sbin/nologin pappice
 sudo install -d -o pappice -g pappice -m 0750 /var/lib/pappice /var/lib/pappice/uploads /var/backups/pappice
 sudo install -d -o root -g pappice -m 0750 /etc/pappice
-sudo install -d -o root -g root -m 0755 /opt/pappice
 ```
 
 Install the binary:
@@ -69,8 +68,10 @@ sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.service /etc/
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.timer /etc/systemd/system/pappice-backup.timer
 ```
 
-Edit `/etc/pappice/pappice.env` and set SMTP credentials before starting.
-Keep `PAPPICE_TRUST_PROXY_HEADERS=true` only when nginx is the only public entry
+Edit `/etc/pappice/pappice.env` before starting. Set branding and SMTP values
+now if you have them; otherwise leave `PAPPICE_EMAIL_NOTIFICATIONS=false` and
+enable email later from a known-good SMTP configuration. Keep
+`PAPPICE_TRUST_PROXY_HEADERS=true` only when nginx is the only public entry
 point. Keep `PAPPICE_ALLOW_INSECURE_WEBHOOKS=false` and
 `PAPPICE_ALLOW_PRIVATE_WEBHOOKS=false` in production.
 
@@ -105,7 +106,7 @@ journalctl -u pappice.service -f
 
 From the admin UI:
 
-- Send a test email.
+- Send a test email if SMTP is enabled.
 - Create a product.
 - Create a test customer.
 - Create and reply to a test ticket.
@@ -152,6 +153,6 @@ Stop Pappice before restoring:
 
 ```sh
 sudo systemctl stop pappice.service
-sudo -u pappice bash -lc 'cd /opt/pappice && set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice restore -yes latest'
+sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice restore -yes latest'
 sudo systemctl start pappice.service
 ```

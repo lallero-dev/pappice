@@ -6,7 +6,7 @@ Documentation=https://github.com/lallero-dev/pappice
 Type=oneshot
 User=pappice
 Group=pappice
-WorkingDirectory=/opt/pappice
+WorkingDirectory=/var/lib/pappice
 EnvironmentFile=/etc/pappice/pappice.env
 ExecStart=/usr/local/bin/pappice backup
 

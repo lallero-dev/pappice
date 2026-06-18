@@ -197,7 +197,7 @@ environment templates in [deploy/](./deploy/README.md). The default production
 shape is public HTTPS in nginx and local HTTP from nginx to Pappice on
 `127.0.0.1:8388`.
 
-Docker Compose deployment is available in
+Docker Compose deployment from a source checkout is available in
 [deploy/docker/](./deploy/docker/README.md).
 
 ## Email

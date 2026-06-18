@@ -19,5 +19,11 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
     volumes:
-      - ./data:/data
-      - ./backups:/backups
+      - pappice-data:/data
+      - pappice-backups:/backups
+
+volumes:
+  pappice-data:
+    name: pappice-data
+  pappice-backups:
+    name: pappice-backups
