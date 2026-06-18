@@ -54,6 +54,10 @@ func parseRuntimeConfig(name string, args []string, output io.Writer) (appConfig
 		}
 		return cfg, 2, false
 	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(output, "%s: unexpected argument %q\n", name, fs.Arg(0))
+		return cfg, 2, false
+	}
 	if err := loadDotEnv(".env"); err != nil {
 		fmt.Fprintf(output, "load .env: %v\n", err)
 		return cfg, 1, false

@@ -786,6 +786,68 @@ func TestDeleteTicketCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 	}
 }
 
+func TestDeleteProductCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	deleteProductID := tracker.ListProducts(admin)[0].ID
+	keepProduct, err := tracker.CreateProduct(CreateProduct{Key: "KEEP", Name: "Keep"})
+	if err != nil {
+		t.Fatalf("create keep product: %v", err)
+	}
+	shared := CreateAttachment{
+		Filename:    "shared.txt",
+		ContentType: "text/plain",
+		SizeBytes:   6,
+		SHA256:      "shared-hash",
+		StorageKey:  "sh/ar/shared-hash",
+	}
+	orphan := CreateAttachment{
+		Filename:    "orphan.txt",
+		ContentType: "text/plain",
+		SizeBytes:   6,
+		SHA256:      "orphan-hash",
+		StorageKey:  "or/ph/orphan-hash",
+	}
+	deletedTicket, err := tracker.CreateTicketWithAttachments(CreateTicket{
+		ProductID: deleteProductID,
+		Title:     "Delete product ticket",
+	}, []CreateAttachment{shared, orphan}, admin.ID)
+	if err != nil {
+		t.Fatalf("create deleted product ticket: %v", err)
+	}
+	keptTicket, err := tracker.CreateTicketWithAttachments(CreateTicket{
+		ProductID: keepProduct.ID,
+		Title:     "Keep product ticket",
+	}, []CreateAttachment{shared}, admin.ID)
+	if err != nil {
+		t.Fatalf("create kept product ticket: %v", err)
+	}
+
+	orphaned, err := tracker.DeleteProduct(deleteProductID)
+	if err != nil {
+		t.Fatalf("delete product: %v", err)
+	}
+	if slices.Contains(orphaned, shared.StorageKey) || !slices.Contains(orphaned, orphan.StorageKey) {
+		t.Fatalf("orphaned storage keys = %#v", orphaned)
+	}
+	if _, err := tracker.GetTicket(deletedTicket.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted product ticket err = %v, want not found", err)
+	}
+	kept, err := tracker.GetTicket(keptTicket.ID)
+	if err != nil {
+		t.Fatalf("get kept ticket: %v", err)
+	}
+	if len(kept.Attachments) != 1 || kept.Attachments[0].StorageKey != shared.StorageKey {
+		t.Fatalf("kept ticket attachments = %#v", kept.Attachments)
+	}
+}
+
 func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.json"))
 	if err != nil {
@@ -1338,7 +1400,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if err := tracker.DeleteUser(user.ID); err != nil {
 		t.Fatalf("delete user: %v", err)
 	}
-	if err := tracker.DeleteProduct(product.ID); err != nil {
+	if _, err := tracker.DeleteProduct(product.ID); err != nil {
 		t.Fatalf("delete product: %v", err)
 	}
 }

@@ -60,6 +60,10 @@ func parseHealthcheckConfig(args []string, output io.Writer) (appConfig, int, bo
 		}
 		return cfg, 2, false
 	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(output, "pappice healthcheck: unexpected argument %q\n", fs.Arg(0))
+		return cfg, 2, false
+	}
 	if err := loadDotEnv(".env"); err != nil {
 		fmt.Fprintf(output, "load .env: %v\n", err)
 		return cfg, 1, false

@@ -85,11 +85,7 @@ func userAccountLinkResponse(user store.User, url string, expiresAt time.Time, e
 	}
 }
 
-func (s *Server) ticketURL(token string) string {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return ""
-	}
+func (s *Server) ticketURL() string {
 	base := strings.TrimRight(s.options.PublicURL, "/")
 	if base == "" {
 		return "/"

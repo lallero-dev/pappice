@@ -7,10 +7,17 @@ services:
       dockerfile: Dockerfile
     image: pappice:local
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     env_file:
       - ./pappice.env
     ports:
       - "127.0.0.1:8388:8388"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     volumes:
       - ./data:/data
       - ./backups:/backups

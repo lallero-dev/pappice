@@ -549,10 +549,12 @@ func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, aut
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-		if err := s.store.DeleteProduct(productID, s.eventContext(r, auth.User)); err != nil {
+		orphanedStorageKeys, err := s.store.DeleteProduct(productID, s.eventContext(r, auth.User))
+		if err != nil {
 			respondStoreError(w, err)
 			return
 		}
+		s.removeOrphanedAttachmentFiles(orphanedStorageKeys)
 		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
@@ -695,7 +697,7 @@ func (s *Server) createTicketFromRequest(w http.ResponseWriter, r *http.Request,
 		respondError(w, http.StatusForbidden, "product write access is required")
 		return store.Ticket{}, false
 	}
-	if _, ok := s.prepareTicketInput(w, auth.User, input.ProductID, &input); !ok {
+	if !s.prepareTicketInput(w, auth.User, input.ProductID, &input) {
 		return store.Ticket{}, false
 	}
 
@@ -1555,22 +1557,22 @@ func (s *Server) isSupportTicketRequester(user store.User, ticket store.Ticket) 
 	return ticket.Source == "portal" && email != "" && strings.EqualFold(strings.TrimSpace(ticket.Reporter), email)
 }
 
-func (s *Server) prepareTicketInput(w http.ResponseWriter, user store.User, productID int64, input *store.CreateTicket) (bool, bool) {
+func (s *Server) prepareTicketInput(w http.ResponseWriter, user store.User, productID int64, input *store.CreateTicket) bool {
 	input.ProductID = productID
 	input.Reporter = user.Email
 	if !s.isCustomerTicketCreator(user, productID) {
-		return false, true
+		return true
 	}
 	requesterEmail := strings.TrimSpace(user.Email)
 	if requesterEmail == "" {
 		respondError(w, http.StatusBadRequest, "your account needs an email address before you can open support tickets")
-		return true, false
+		return false
 	}
 	input.Assignee = ""
 	input.Source = "portal"
 	input.RequesterName = defaultString(user.DisplayName, user.Email)
 	input.RequesterEmail = requesterEmail
-	return true, true
+	return true
 }
 
 func (s *Server) isCustomerTicketCreator(user store.User, productID int64) bool {

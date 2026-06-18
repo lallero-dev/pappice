@@ -7,6 +7,10 @@ Docker Compose. Runtime state is kept in bind-mounted directories under
 The container listens with plain HTTP on `127.0.0.1:8388`. Put nginx, Caddy, or
 Traefik in front of it for public HTTPS.
 
+The Compose service runs as UID/GID `10001`, drops Linux capabilities, uses
+`no-new-privileges`, keeps the root filesystem read-only, and mounts only
+`/data`, `/backups`, and a small `/tmp` tmpfs as writable paths.
+
 ## Setup
 
 Create local state directories:
@@ -15,8 +19,7 @@ Create local state directories:
 mkdir -p deploy/docker/data deploy/docker/backups
 ```
 
-The container runs as UID/GID `10001`. Make the bind mounts writable by that
-user:
+Make the bind mounts writable by the container user:
 
 ```sh
 sudo chown -R 10001:10001 deploy/docker/data deploy/docker/backups

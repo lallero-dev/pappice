@@ -624,27 +624,10 @@ func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(`
-		SELECT DISTINCT storage_key
-		FROM attachments
-		WHERE ticket_id = ? AND storage_key <> ''`, id)
+	storageKeys, err := ticketAttachmentStorageKeysTx(tx, id)
 	if err != nil {
 		return nil, err
 	}
-	var storageKeys []string
-	for rows.Next() {
-		var storageKey string
-		if err := rows.Scan(&storageKey); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		storageKeys = append(storageKeys, storageKey)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
 
 	result, err := tx.Exec(`DELETE FROM tickets WHERE id = ?`, id)
 	if err != nil {
@@ -654,15 +637,9 @@ func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) 
 		return nil, ErrNotFound
 	}
 
-	orphaned := make([]string, 0, len(storageKeys))
-	for _, storageKey := range storageKeys {
-		var references int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM attachments WHERE storage_key = ?`, storageKey).Scan(&references); err != nil {
-			return nil, err
-		}
-		if references == 0 {
-			orphaned = append(orphaned, storageKey)
-		}
+	orphaned, err := orphanedAttachmentStorageKeysTx(tx, storageKeys)
+	if err != nil {
+		return nil, err
 	}
 	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "ticket.deleted", "ticket", ticket.ID, ticket.Key, map[string]any{
 		"product_id": ticket.ProductID,
@@ -672,6 +649,48 @@ func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) 
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
+	}
+	return orphaned, nil
+}
+
+func ticketAttachmentStorageKeysTx(tx *sql.Tx, ticketID int64) ([]string, error) {
+	return attachmentStorageKeysTx(tx, `ticket_id = ?`, ticketID)
+}
+
+func productAttachmentStorageKeysTx(tx *sql.Tx, productID int64) ([]string, error) {
+	return attachmentStorageKeysTx(tx, `ticket_id IN (SELECT id FROM tickets WHERE product_id = ?)`, productID)
+}
+
+func attachmentStorageKeysTx(tx *sql.Tx, condition string, args ...any) ([]string, error) {
+	rows, err := tx.Query(`
+		SELECT DISTINCT storage_key
+		FROM attachments
+		WHERE storage_key <> '' AND `+condition, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var storageKeys []string
+	for rows.Next() {
+		var storageKey string
+		if err := rows.Scan(&storageKey); err != nil {
+			return nil, err
+		}
+		storageKeys = append(storageKeys, storageKey)
+	}
+	return storageKeys, rows.Err()
+}
+
+func orphanedAttachmentStorageKeysTx(tx *sql.Tx, storageKeys []string) ([]string, error) {
+	orphaned := make([]string, 0, len(storageKeys))
+	for _, storageKey := range storageKeys {
+		var references int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM attachments WHERE storage_key = ?`, storageKey).Scan(&references); err != nil {
+			return nil, err
+		}
+		if references == 0 {
+			orphaned = append(orphaned, storageKey)
+		}
 	}
 	return orphaned, nil
 }

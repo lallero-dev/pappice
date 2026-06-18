@@ -362,6 +362,29 @@ func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandsRejectUnexpectedArguments(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"serve", []string{"pappice", "serve", "extra"}},
+		{"doctor", []string{"pappice", "doctor", "extra"}},
+		{"healthcheck", []string{"pappice", "healthcheck", "extra"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(tt.args, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "unexpected argument") {
+				t.Fatalf("stderr did not report unexpected argument: %s", stderr.String())
+			}
+		})
+	}
+}
+
 func TestDoctorCommand(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pappice.db")

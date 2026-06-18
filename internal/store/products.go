@@ -110,27 +110,38 @@ func (s *Store) UpdateProduct(id int64, patch UpdateProduct) (Product, error) {
 	return s.GetProduct(id)
 }
 
-func (s *Store) DeleteProduct(id int64, event ...EventContext) error {
+func (s *Store) DeleteProduct(id int64, event ...EventContext) ([]string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 	product, err := getProductTx(tx, id)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	storageKeys, err := productAttachmentStorageKeysTx(tx, id)
+	if err != nil {
+		return nil, err
 	}
 	result, err := tx.Exec(`DELETE FROM products WHERE id = ?`, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
+	}
+	orphaned, err := orphanedAttachmentStorageKeysTx(tx, storageKeys)
+	if err != nil {
+		return nil, err
 	}
 	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "product.deleted", "product", product.ID, product.Key, map[string]any{"name": product.Name}, nil); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return orphaned, nil
 }
 
 func (s *Store) ProductRole(userID, productID int64) (string, bool) {

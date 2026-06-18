@@ -111,7 +111,7 @@ func (s *Server) accountLinkEmailContent(event string, user store.User, token st
 
 func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorName string) (string, string, string) {
 	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, requesterEmailSubjectAction(event), ticket.Title)
-	link := s.ticketURL(ticket.CustomerToken)
+	link := s.ticketURL()
 
 	intro := "We received your ticket."
 	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
