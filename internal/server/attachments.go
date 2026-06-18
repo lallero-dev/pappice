@@ -377,7 +377,7 @@ func (s *Server) openAttachmentFile(storageKey string) (*os.File, os.FileInfo, e
 
 func (s *Server) attachmentFilePath(storageKey string) (string, error) {
 	clean := pathpkg.Clean(strings.TrimSpace(storageKey))
-	if clean == "." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || pathpkg.IsAbs(clean) {
 		return "", os.ErrNotExist
 	}
 	return filepath.Join(s.options.UploadDir, filepath.FromSlash(clean)), nil

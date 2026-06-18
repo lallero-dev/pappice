@@ -2115,6 +2115,28 @@ func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 	}
 }
 
+func TestAttachmentFilePathRejectsTraversal(t *testing.T) {
+	uploadDir := t.TempDir()
+	server := NewServer(nil, Options{UploadDir: uploadDir})
+
+	for _, storageKey := range []string{"..", "../secret.txt", "/secret.txt"} {
+		t.Run(storageKey, func(t *testing.T) {
+			path, err := server.attachmentFilePath(storageKey)
+			if !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("attachmentFilePath(%q) = %q, %v; want not exist", storageKey, path, err)
+			}
+		})
+	}
+
+	path, err := server.attachmentFilePath("ab/cd/hash")
+	if err != nil {
+		t.Fatalf("valid attachment path: %v", err)
+	}
+	if path != filepath.Join(uploadDir, "ab", "cd", "hash") {
+		t.Fatalf("valid attachment path = %q", path)
+	}
+}
+
 func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) {
 	uploadDir := t.TempDir()
 	tracker, server, client := newTestServer(t, Options{UploadDir: uploadDir})
