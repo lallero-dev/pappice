@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.8.2-alpha - 2026-06-22
+
+- Prevent stale ticket-list responses from overwriting a freshly updated ticket
+  conversation.
+- Refresh the browser CSRF token and retry once after a stale-token error.
+
 ## v0.8.1-alpha - 2026-06-18
 
 - Keep alpha install docs on explicit release URLs and make release downloads

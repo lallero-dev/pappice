@@ -37,6 +37,7 @@ import { richTextNodes } from "./rich-text.js";
 defineComponents();
 
 let appAlertTimer = 0;
+let ticketLoadRequestID = 0;
 
 function formatSeconds(seconds) {
   const value = Number(seconds || 0);
@@ -398,6 +399,7 @@ async function loadProducts() {
 }
 
 async function loadTickets({ renderDetail = true } = {}) {
+  const requestID = ++ticketLoadRequestID;
   if (state.products.length === 0) {
     state.tickets = [];
     state.ticketCounts = countTickets([]);
@@ -421,6 +423,7 @@ async function loadTickets({ renderDetail = true } = {}) {
     request(`/api/tickets?${countParams.toString()}`),
     request(`/api/tickets?${unreadParams.toString()}`)
   ]);
+  if (requestID !== ticketLoadRequestID) return;
   if (productID !== (state.ticketProductId || null)) return;
   state.tickets = payload.tickets || [];
   state.ticketCounts = countTickets(countsPayload.tickets || []);
