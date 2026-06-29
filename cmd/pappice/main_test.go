@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"pappice/internal/store"
 
 	_ "modernc.org/sqlite"
 )
@@ -117,6 +120,7 @@ func TestSplitCommand(t *testing.T) {
 		wantArgs    []string
 	}{
 		{[]string{"pappice"}, "help", nil},
+		{[]string{"pappice", "demo", "-addr", ":18443"}, "demo", []string{"-addr", ":18443"}},
 		{[]string{"pappice", "serve", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
 		{[]string{"pappice", "-addr", ":8080"}, "-addr", []string{":8080"}},
 		{[]string{"pappice", "doctor"}, "doctor", nil},
@@ -143,6 +147,62 @@ func TestRootFlagsAreNotServeAliases(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unknown command "-addr"`) {
 		t.Fatalf("flat flags did not report unknown command: %s", stderr.String())
+	}
+}
+
+func TestDemoHelpers(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "localhost.pem")
+	keyPath := filepath.Join(dir, "localhost-key.pem")
+	if err := writeDemoCertificate(certPath, keyPath, "127.0.0.1:8388"); err != nil {
+		t.Fatalf("write demo cert: %v", err)
+	}
+	if _, err := tls.LoadX509KeyPair(certPath, keyPath); err != nil {
+		t.Fatalf("load generated cert: %v", err)
+	}
+	if got, err := demoURL(":8388"); err != nil || got != "https://127.0.0.1:8388" {
+		t.Fatalf("demoURL(:8388) = %q, %v", got, err)
+	}
+	if got, err := demoURL("localhost:9443"); err != nil || got != "https://localhost:9443" {
+		t.Fatalf("demoURL(localhost:9443) = %q, %v", got, err)
+	}
+	if _, err := demoURL(":0"); err == nil {
+		t.Fatal("demoURL(:0) should fail")
+	}
+}
+
+func TestSeedDemoStore(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pappice.db")
+	seed, err := seedDemoStore(dbPath)
+	if err != nil {
+		t.Fatalf("seed demo store: %v", err)
+	}
+	if seed.Admin != "admin@example.test" || seed.Staff != "staff@example.test" ||
+		seed.Customer != "customer@example.test" || seed.Password != demoPassword {
+		t.Fatalf("seed summary = %#v", seed)
+	}
+
+	tracker, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open seeded store: %v", err)
+	}
+	defer tracker.Close()
+
+	admin, err := tracker.Authenticate(seed.Admin, seed.Password)
+	if err != nil {
+		t.Fatalf("authenticate demo admin: %v", err)
+	}
+	customer, err := tracker.Authenticate(seed.Customer, seed.Password)
+	if err != nil {
+		t.Fatalf("authenticate demo customer: %v", err)
+	}
+	products := tracker.ListProducts(customer)
+	if len(products) != 1 || products[0].Key != "WEB" || products[0].Name != "Website Support" {
+		t.Fatalf("customer products = %#v", products)
+	}
+	tickets := tracker.ListTicketsForUser(store.Filter{}, admin)
+	if len(tickets) < 2 {
+		t.Fatalf("seeded tickets = %#v", tickets)
 	}
 }
 

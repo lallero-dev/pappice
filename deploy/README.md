@@ -19,7 +19,7 @@ listener directly to the public internet.
 Choose the release and hostname used by the copy/paste commands:
 
 ```sh
-VERSION=v0.8.0-alpha
+VERSION=v0.9.0-alpha
 ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
 BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
 DOMAIN=support.example.com

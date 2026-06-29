@@ -45,28 +45,33 @@ boundaries, persistence model, and change guidelines.
 - SMTP-backed no-reply notifications with a durable SQLite outbox.
 - API tokens, webhooks, admin audit events, and a maintenance overview.
 
-## Install
+## Try Quickly
 
-Download the Linux amd64 release archive, verify it, and install the binary:
+From a source checkout:
 
 ```sh
-VERSION=v0.8.0-alpha
-ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
-BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
-
-curl -fLO "${BASE_URL}/${ARCHIVE}"
-curl -fLO "${BASE_URL}/${ARCHIVE}.sha256"
-sha256sum -c "${ARCHIVE}.sha256"
-rm -rf pappice-release
-mkdir pappice-release
-tar -xzf "$ARCHIVE" -C pappice-release --strip-components=1
-sudo install -m 0755 pappice-release/pappice /usr/local/bin/pappice
+go run ./cmd/pappice demo
 ```
 
-See [deploy/](./deploy/README.md) for the full `systemd`, nginx, backup, and
-upgrade setup. The extracted archive also includes that guide at
-`pappice-release/deploy/README.md` together with the environment, systemd, and
-nginx files it references.
+Or, after installing the release binary:
+
+```sh
+pappice demo
+```
+
+The demo starts a temporary HTTPS instance with sample users, product, tickets,
+and replies. It prints the local URL and login credentials, and removes its
+temporary data when stopped. Use `pappice demo -keep` if you want to inspect the
+generated SQLite database and upload directory.
+
+## Install And Deploy
+
+For a persistent server, use [deploy/README.md](./deploy/README.md). It covers
+release archives, environment files, nginx, systemd, Docker Compose, backups,
+restore, and upgrades.
+
+Release archives include the `pappice` binary and the deploy templates
+referenced by that guide.
 
 ## Build From Source
 
@@ -84,32 +89,6 @@ scripts/build-release.sh
 
 Maintainers publish releases with `scripts/release.sh`; bump `VERSION` first
 because release tags are immutable.
-
-## Run Locally
-
-Browser sessions require HTTPS because cookies are marked `Secure`.
-
-```sh
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout localhost-key.pem \
-  -out localhost.pem \
-  -days 365 \
-  -subj /CN=127.0.0.1 \
-  -addext subjectAltName=IP:127.0.0.1,DNS:localhost
-
-go run ./cmd/pappice serve \
-  -tls-cert ./localhost.pem \
-  -tls-key ./localhost-key.pem
-```
-
-Open `https://127.0.0.1:8388` and create the first admin account.
-
-For persistent local configuration:
-
-```sh
-cp .env.example .env
-go run ./cmd/pappice serve
-```
 
 ## Configuration
 
