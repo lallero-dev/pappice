@@ -524,12 +524,12 @@ func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, aut
 			product.Role = role
 		}
 		if isAdmin(auth.User) {
-			product.Role = "owner"
+			product.Role = "manager"
 		}
 		respondJSON(w, http.StatusOK, product)
 	case http.MethodPatch:
 		if !s.canManageProduct(auth.User, productID) {
-			respondError(w, http.StatusForbidden, "product owner access is required")
+			respondError(w, http.StatusForbidden, "product manager access is required")
 			return
 		}
 		var patch store.UpdateProduct
@@ -564,7 +564,7 @@ func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, aut
 
 func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, rest []string) {
 	if !s.canManageProduct(auth.User, productID) {
-		respondError(w, http.StatusForbidden, "product owner access is required")
+		respondError(w, http.StatusForbidden, "product manager access is required")
 		return
 	}
 	if len(rest) == 0 {
@@ -839,7 +839,7 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 		return store.Ticket{}, false
 	}
 	if hasPatch && !s.canEditTicket(auth.User, ticket.ProductID) {
-		respondError(w, http.StatusForbidden, "agent access is required")
+		respondError(w, http.StatusForbidden, "staff access is required")
 		return store.Ticket{}, false
 	}
 	if hasComment && !s.canCommentTicket(auth.User, ticket.ProductID) {
@@ -852,7 +852,7 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 		next := *input.Comment
 		next.Visibility = defaultString(next.Visibility, "public")
 		if next.Visibility == "internal" && !s.canEditTicket(auth.User, ticket.ProductID) {
-			respondError(w, http.StatusForbidden, "agent access is required for internal notes")
+			respondError(w, http.StatusForbidden, "staff access is required for internal notes")
 			return store.Ticket{}, false
 		}
 		next.Author = defaultString(auth.User.DisplayName, auth.User.Email)
@@ -913,7 +913,7 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 	}
 	input.Visibility = defaultString(input.Visibility, "public")
 	if input.Visibility == "internal" && !s.canEditTicket(auth.User, ticket.ProductID) {
-		respondError(w, http.StatusForbidden, "agent access is required for internal notes")
+		respondError(w, http.StatusForbidden, "staff access is required for internal notes")
 		cleanupStoredUploads(uploads)
 		return
 	}
@@ -1113,7 +1113,7 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
 	if !s.canManageProduct(auth.User, productID) {
-		respondError(w, http.StatusForbidden, "product owner access is required")
+		respondError(w, http.StatusForbidden, "product manager access is required")
 		return
 	}
 	s.handleWebhookCollection(w, r, auth, &productID)
@@ -1171,7 +1171,7 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if !s.canManageProduct(auth.User, *hook.ProductID) {
-		respondError(w, http.StatusForbidden, "product owner access is required")
+		respondError(w, http.StatusForbidden, "product manager access is required")
 		return
 	}
 	if len(parts) == 2 && parts[1] == "secret" {
@@ -1383,7 +1383,7 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
 	if !s.canManageProduct(auth.User, productID) {
-		respondError(w, http.StatusForbidden, "product owner access is required")
+		respondError(w, http.StatusForbidden, "product manager access is required")
 		return
 	}
 	if r.Method != http.MethodGet {
@@ -1531,22 +1531,22 @@ func (s *Server) canManageProduct(user store.User, productID int64) bool {
 		return true
 	}
 	role, ok := s.store.ProductRole(user.ID, productID)
-	return ok && role == "owner"
+	return ok && role == "manager"
 }
 
 func (s *Server) canCreateTicket(user store.User, productID int64) bool {
-	return s.hasProductRole(user, productID, "owner", "agent", "customer")
+	return s.hasProductRole(user, productID, "manager", "staff", "customer")
 }
 
 func (s *Server) canCommentTicket(user store.User, productID int64) bool {
-	return s.hasProductRole(user, productID, "owner", "agent", "customer")
+	return s.hasProductRole(user, productID, "manager", "staff", "customer")
 }
 
 func (s *Server) canEditTicket(user store.User, productID int64) bool {
 	if isCustomer(user) {
 		return false
 	}
-	return s.hasProductRole(user, productID, "owner", "agent")
+	return s.hasProductRole(user, productID, "manager", "staff")
 }
 
 func (s *Server) isSupportTicketRequester(user store.User, ticket store.Ticket) bool {

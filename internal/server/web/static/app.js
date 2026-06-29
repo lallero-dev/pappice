@@ -1397,7 +1397,7 @@ function renderProductIndex() {
       title: "No products",
       body: isAdmin()
         ? "Create a product before inviting customers."
-        : "Ask an admin to grant owner access before managing product settings.",
+        : "Ask an admin to grant manager access before managing product settings.",
       actionLabel: isAdmin() ? "New Product" : "",
       onAction: isAdmin() ? openProductModal : null
     }));
@@ -1415,7 +1415,7 @@ function renderProductIndex() {
         el("strong", {}, product.name || product.key || `Product ${product.id}`),
         el("span", {}, product.key || `#${product.id}`)
       ]),
-      el("span", { className: "muted" }, `${labelize(product.role || "owner")} access`),
+      el("span", { className: "muted" }, `${labelize(product.role || "manager")} access`),
       open
     );
     els.productIndexList.append(row);
@@ -1437,7 +1437,7 @@ function renderProductContext() {
   els.productContextTitle.textContent = product.name || product.key || "Product";
   els.productContextMeta.append(
     el("span", { className: "product-key-pill" }, product.key || `#${product.id}`),
-    el("span", { className: "muted" }, `${labelize(product.role || "owner")} access`)
+    el("span", { className: "muted" }, `${labelize(product.role || "manager")} access`)
   );
   if (els.deleteProductButton) {
     els.deleteProductButton.hidden = !isAdmin();
@@ -3224,7 +3224,7 @@ function productRole(productId) {
 }
 
 function canManageProduct(productId) {
-  return Boolean(productId) && !isCustomer() && (isAdmin() || productRole(productId) === "owner");
+  return Boolean(productId) && !isCustomer() && (isAdmin() || productRole(productId) === "manager");
 }
 
 function manageableProducts() {
@@ -3239,7 +3239,7 @@ function canCreateTicket(productId = state.ticketProductId) {
   if (!productId) {
     return state.products.some((product) => canCreateTicket(product.id));
   }
-  return isAdmin() || ["owner", "agent", "customer"].includes(productRole(productId));
+  return isAdmin() || ["manager", "staff", "customer"].includes(productRole(productId));
 }
 
 function canCommentTicket(ticket = null) {
@@ -3248,7 +3248,7 @@ function canCommentTicket(ticket = null) {
 
 function canEditTicket(ticket = null) {
   const productId = ticket?.product_id || state.ticketProductId;
-  return Boolean(productId) && !isCustomer() && (isAdmin() || ["owner", "agent"].includes(productRole(productId)));
+  return Boolean(productId) && !isCustomer() && (isAdmin() || ["manager", "staff"].includes(productRole(productId)));
 }
 
 function showAuthError(error) {

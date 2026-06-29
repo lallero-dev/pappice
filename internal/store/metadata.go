@@ -5,7 +5,7 @@ var (
 	ticketSeverities          = []string{"support", "question", "incident", "task"}
 	ticketPriorities          = []string{"low", "normal", "high", "urgent"}
 	globalRoles               = []string{"admin", "staff", "customer"}
-	productRoles              = []string{"owner", "agent", "customer", "viewer"}
+	productRoles              = []string{"manager", "staff", "customer", "viewer"}
 	ticketSources             = []string{"staff", "portal"}
 	commentVisibilities       = []string{"public", "internal"}
 	webhookEvents             = []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}

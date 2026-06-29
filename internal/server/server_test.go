@@ -204,7 +204,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/products/"+itoa(productID)+"/members", map[string]any{
 		"user_id": bobID,
-		"role":    "agent",
+		"role":    "staff",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 
@@ -337,7 +337,7 @@ func TestAPIMethodContracts(t *testing.T) {
 		"password": "correct horse",
 		"role":     "staff",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, userID, "agent")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, userID, "staff")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"product_id":  productID,
@@ -495,18 +495,18 @@ func TestProductDeletionRequiresAdmin(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
 
-	ownerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+	managerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
 		"password": "correct horse",
-		"email":    "owner@example.test",
+		"email":    "manager@example.test",
 		"role":     "staff",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, ownerID, "owner")
-	ownerCookie, ownerCSRF := loginUser(t, client, server.URL, "owner", "correct horse")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, managerID, "manager")
+	managerCookie, managerCSRF := loginUser(t, client, server.URL, "manager", "correct horse")
 
-	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/products/"+itoa(productID), nil, ownerCookie, ownerCSRF, server.URL)
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/products/"+itoa(productID), nil, managerCookie, managerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusForbidden)
 	if _, err := tracker.GetProduct(productID); err != nil {
-		t.Fatalf("owner delete removed product: %v", err)
+		t.Fatalf("manager delete removed product: %v", err)
 	}
 
 	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/products/"+itoa(productID), nil, adminCookie, adminCSRF, server.URL)
@@ -531,13 +531,13 @@ func TestProductMemberRemovalAPI(t *testing.T) {
 	productID := decodeFirstProductID(t, body)
 
 	userID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
-		"display_name": "Removable Agent",
+		"display_name": "Removable Staff",
 		"email":        "removable@example.test",
 		"password":     "correct horse",
 		"role":         "staff",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, userID, "agent")
-	if role, ok := tracker.ProductRole(userID, productID); !ok || role != "agent" {
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, userID, "staff")
+	if role, ok := tracker.ProductRole(userID, productID); !ok || role != "staff" {
 		t.Fatalf("product role before delete = %q ok=%v", role, ok)
 	}
 
@@ -570,13 +570,13 @@ func TestTicketDeletionRequiresAdmin(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
 
-	ownerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+	managerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
 		"password": "correct horse",
-		"email":    "owner@example.test",
+		"email":    "manager@example.test",
 		"role":     "staff",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, ownerID, "owner")
-	ownerCookie, ownerCSRF := loginUser(t, client, server.URL, "owner", "correct horse")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, managerID, "manager")
+	managerCookie, managerCSRF := loginUser(t, client, server.URL, "manager", "correct horse")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"product_id": productID,
@@ -585,10 +585,10 @@ func TestTicketDeletionRequiresAdmin(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusCreated)
 	ticketID := decodeInt64(t, body, "id")
 
-	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(ticketID), nil, ownerCookie, ownerCSRF, server.URL)
+	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(ticketID), nil, managerCookie, managerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusForbidden)
 	if _, err := tracker.GetTicket(ticketID); err != nil {
-		t.Fatalf("owner delete removed ticket: %v", err)
+		t.Fatalf("manager delete removed ticket: %v", err)
 	}
 
 	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, adminCSRF, server.URL)
@@ -1016,11 +1016,11 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/users", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "agent")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "staff")
 	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, customerID, "customer")
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID)+"/members", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("agent")) || !bytes.Contains(body, []byte("customer")) {
+	if !bytes.Contains(body, []byte("staff")) || !bytes.Contains(body, []byte("customer")) {
 		t.Fatalf("members missing roles: %s", body)
 	}
 
@@ -1188,7 +1188,7 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 		"email":    "dev@example.test",
 		"role":     "staff",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "agent")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "staff")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"product_id":  productID,
@@ -1940,7 +1940,7 @@ func TestAdminOnlyEndpointsRejectStaffAndCustomers(t *testing.T) {
 		"password": "correct horse",
 		"role":     "customer",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, staffID, "agent")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, staffID, "staff")
 	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, customerID, "customer")
 	staffCookie, staffCSRF := loginUser(t, client, server.URL, "staff", "correct horse")
 	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
@@ -2151,7 +2151,7 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 		"password": "correct horse",
 		"role":     "staff",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "agent")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "staff")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
 		"product_id":  productID,
@@ -2264,7 +2264,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 		"password":     "correct horse",
 		"role":         "customer",
 	})
-	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "agent")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, devID, "staff")
 	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, customerID, "customer")
 
 	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")

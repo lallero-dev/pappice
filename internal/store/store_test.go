@@ -196,7 +196,7 @@ func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 			updated_at TEXT NOT NULL
 		);
 		INSERT INTO users (id, username, display_name, email, role, password_hash, created_at, updated_at)
-		VALUES (1, 'alice', 'Alice Agent', 'alice@example.test', 'staff', 'hash', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		VALUES (1, 'alice', 'Alice Staff', 'alice@example.test', 'staff', 'hash', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
 	`)
 	if err != nil {
 		t.Fatalf("seed legacy db: %v", err)
@@ -212,7 +212,7 @@ func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect migration: %v", err)
 	}
-	if status.CurrentVersion != 0 || len(status.Pending) != 1 || status.Pending[0].Name != "baseline_schema" {
+	if status.CurrentVersion != 0 || len(status.Pending) != 2 || status.Pending[0].Name != "baseline_schema" || status.Pending[1].Name != "rename_product_roles" {
 		t.Fatalf("migration status = %#v", status)
 	}
 	if _, err := Migrate(path, MigrationOptions{DryRun: true}); !errors.Is(err, ErrMigrationRequired) {
@@ -228,6 +228,106 @@ func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 	defer db.Close()
 	if exists, err := tableExists(db, "schema_migrations"); err != nil || exists {
 		t.Fatalf("schema_migrations exists after rejected migration = %v err=%v, want false", exists, err)
+	}
+}
+
+func TestMigrateRenamesProductRoles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "roles.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at TEXT NOT NULL
+		);
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			display_name TEXT NOT NULL,
+			email TEXT NOT NULL UNIQUE,
+			role TEXT NOT NULL,
+			password_hash TEXT NOT NULL,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			password_reset_required INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE products (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			key TEXT NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE product_members (
+			product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			role TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (product_id, user_id)
+		);
+		INSERT INTO schema_migrations (version, name, applied_at) VALUES (1, 'baseline_schema', '2026-01-01T00:00:00Z');
+		INSERT INTO users (id, display_name, email, role, password_hash, created_at, updated_at)
+		VALUES
+			(1, 'Alice Manager', 'manager@example.test', 'staff', 'hash', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(2, 'Bob Staff', 'staff@example.test', 'staff', 'hash', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(3, 'Client', 'client@example.test', 'customer', 'hash', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		INSERT INTO products (id, key, name, created_at, updated_at)
+		VALUES (1, 'SUP', 'Support', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		INSERT INTO product_members (product_id, user_id, role, created_at)
+		VALUES
+			(1, 1, 'owner', '2026-01-01T00:00:00Z'),
+			(1, 2, 'agent', '2026-01-01T00:00:00Z'),
+			(1, 3, 'customer', '2026-01-01T00:00:00Z');
+	`)
+	if err != nil {
+		t.Fatalf("seed db: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	status, err := InspectMigration(path)
+	if err != nil {
+		t.Fatalf("inspect before migration: %v", err)
+	}
+	if status.CurrentVersion != 1 || len(status.Pending) != 1 || status.Pending[0].Name != "rename_product_roles" {
+		t.Fatalf("before migration status = %#v", status)
+	}
+	result, err := Migrate(path, MigrationOptions{})
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if len(result.Applied) != 1 || result.Applied[0].Name != "rename_product_roles" {
+		t.Fatalf("applied migrations = %#v", result.Applied)
+	}
+
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT role FROM product_members ORDER BY user_id`)
+	if err != nil {
+		t.Fatalf("query product roles: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			t.Fatalf("scan role: %v", err)
+		}
+		got = append(got, role)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("roles rows: %v", err)
+	}
+	if want := []string{"manager", "staff", "customer"}; !slices.Equal(got, want) {
+		t.Fatalf("migrated product roles = %#v, want %#v", got, want)
 	}
 }
 
@@ -287,7 +387,7 @@ func TestMetadataAndPublicViews(t *testing.T) {
 	if got, want := Roles(), []string{"admin", "staff", "customer"}; !slices.Equal(got, want) {
 		t.Fatalf("roles = %#v, want %#v", got, want)
 	}
-	if got, want := ProductRoles(), []string{"owner", "agent", "customer", "viewer"}; !slices.Equal(got, want) {
+	if got, want := ProductRoles(), []string{"manager", "staff", "customer", "viewer"}; !slices.Equal(got, want) {
 		t.Fatalf("product roles = %#v, want %#v", got, want)
 	}
 	if got, want := Events(), []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}; !slices.Equal(got, want) {
@@ -1464,7 +1564,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	if _, err := tracker.UpsertProductMember(productID, UpsertProductMember{UserID: customer.ID, Role: "customer"}); err != nil {
 		t.Fatalf("add customer member: %v", err)
 	}
-	if _, err := tracker.UpsertProductMember(productID, UpsertProductMember{UserID: assignee.ID, Role: "agent"}); err != nil {
+	if _, err := tracker.UpsertProductMember(productID, UpsertProductMember{UserID: assignee.ID, Role: "staff"}); err != nil {
 		t.Fatalf("add assignee member: %v", err)
 	}
 	ticket, err := tracker.CreateTicket(CreateTicket{

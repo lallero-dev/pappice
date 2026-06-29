@@ -41,6 +41,7 @@ type migration struct {
 
 var orderedMigrations = []migration{
 	{Version: 1, Name: "baseline_schema", Up: migrateBaselineSchema},
+	{Version: 2, Name: "rename_product_roles", Up: migrateRenameProductRoles},
 }
 
 func CurrentSchemaVersion() int {
@@ -321,6 +322,23 @@ func migrateBaselineSchema(tx *sql.Tx) error {
 	}
 	if hasUsername {
 		return fmt.Errorf("%w: unsupported pre-v0.6 username schema", ErrMigrationRequired)
+	}
+	return nil
+}
+
+func migrateRenameProductRoles(tx *sql.Tx) error {
+	hasMembers, err := tableExists(tx, "product_members")
+	if err != nil {
+		return err
+	}
+	if !hasMembers {
+		return nil
+	}
+	if _, err := tx.Exec(`UPDATE product_members SET role = 'manager' WHERE role = 'owner'`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE product_members SET role = 'staff' WHERE role = 'agent'`); err != nil {
+		return err
 	}
 	return nil
 }

@@ -34,7 +34,7 @@ func (s *Store) ListProducts(user User) []Product {
 	var err error
 	if normalizeGlobalRole(user.Role) == "admin" {
 		rows, err = s.db.Query(`
-			SELECT id, key, name, description, 'owner', created_at, updated_at
+			SELECT id, key, name, description, 'manager', created_at, updated_at
 			FROM products
 			ORDER BY key`)
 	} else {

@@ -22,7 +22,7 @@ func (s *Store) TicketEmailRecipients(event string, ticket Ticket, actor User) [
 
 	switch event {
 	case "ticket.created":
-		for _, recipient := range s.productOwnerEmailRecipients(ticket.ProductID) {
+		for _, recipient := range s.productManagerEmailRecipients(ticket.ProductID) {
 			add(recipient)
 		}
 	case "ticket.updated", "ticket.commented":
@@ -439,7 +439,7 @@ func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNo
 	return notification, nil
 }
 
-func (s *Store) productOwnerEmailRecipients(productID int64) []EmailRecipient {
+func (s *Store) productManagerEmailRecipients(productID int64) []EmailRecipient {
 	rows, err := s.db.Query(`
 		SELECT DISTINCT u.id, u.display_name, u.email, u.role
 		FROM users u
@@ -447,7 +447,7 @@ func (s *Store) productOwnerEmailRecipients(productID int64) []EmailRecipient {
 		WHERE u.disabled = 0
 		  AND u.email IS NOT NULL
 		  AND trim(u.email) <> ''
-		  AND (u.role = 'admin' OR pm.role = 'owner')
+		  AND (u.role = 'admin' OR pm.role = 'manager')
 		ORDER BY u.email`, productID)
 	if err != nil {
 		return nil

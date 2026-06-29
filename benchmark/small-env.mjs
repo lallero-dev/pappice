@@ -175,7 +175,7 @@ async function seedScenario(appURL, config, clients) {
       role: "staff"
     }, 201);
     for (const productID of productIDs) {
-      await admin.post(`/api/products/${productID}/members`, { user_id: user.id, role: "agent" }, 201);
+      await admin.post(`/api/products/${productID}/members`, { user_id: user.id, role: "staff" }, 201);
     }
     const session = new APIClient(appURL, `staff ${i + 1}`);
     clients.push(session);

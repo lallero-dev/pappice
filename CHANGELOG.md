@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.9.0-alpha - 2026-06-29
+
+- Rename product roles from `owner` to `manager` and from `agent` to `staff`
+  for clearer staff/customer terminology.
+- Add a database migration that updates existing product memberships to the new
+  role names.
+
 ## v0.8.2-alpha - 2026-06-22
 
 - Prevent stale ticket-list responses from overwriting a freshly updated ticket

@@ -43,7 +43,7 @@ func (s *Store) CreateFirstAdmin(input CreateUser) (User, error) {
 		return User{}, err
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO product_members (product_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`,
+		`INSERT INTO product_members (product_id, user_id, role, created_at) VALUES (?, ?, 'manager', ?)`,
 		product.ID, user.ID, formatTime(time.Now().UTC()),
 	); err != nil {
 		return User{}, err
