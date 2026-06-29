@@ -16,13 +16,14 @@ listener directly to the public internet.
 
 ## First Install
 
-Choose the release and hostname used by the copy/paste commands:
+Choose the hostname and resolve the latest release tag:
 
 ```sh
-VERSION=v0.10.0
+DOMAIN=support.example.com
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
+VERSION="${LATEST_URL##*/}"
 ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
 BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
-DOMAIN=support.example.com
 ```
 
 Install OS packages:
@@ -120,7 +121,8 @@ sudo journalctl -u pappice-backup.service -n 50
 ## Upgrade
 
 ```sh
-VERSION=<release-tag>
+LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
+VERSION="${LATEST_URL##*/}"
 ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
 BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
 curl -fLO "${BASE_URL}/${ARCHIVE}"
