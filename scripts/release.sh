@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/release.sh [--dry-run] [--draft]
+Usage: scripts/release.sh [--dry-run] [--draft] [--prerelease]
 
 Build the release archive, verify it, tag the current commit from VERSION,
 push the branch and tag, then create or update the GitHub release assets.
@@ -14,12 +14,15 @@ push the branch and tag, then create or update the GitHub release assets.
 Options:
   --dry-run   Build and verify the archive, then print the publish steps.
   --draft     Create a draft GitHub release when the release does not exist.
+  --prerelease
+              Mark the GitHub release as a prerelease.
   -h, --help  Show this help.
 USAGE
 }
 
 dry_run=0
 draft=0
+prerelease=0
 
 while (($#)); do
   case "$1" in
@@ -28,6 +31,9 @@ while (($#)); do
       ;;
     --draft)
       draft=1
+      ;;
+    --prerelease)
+      prerelease=1
       ;;
     -h|--help)
       usage
@@ -98,7 +104,7 @@ latest_archive="dist/pappice-${target_os}-${target_arch}.tar.gz"
 latest_checksum="$latest_archive.sha256"
 
 release_flags=()
-if [[ "$version" == *-* ]]; then
+if ((prerelease)); then
   release_flags+=(--prerelease)
 fi
 if ((draft)); then

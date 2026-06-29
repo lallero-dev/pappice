@@ -1,11 +1,11 @@
 # Security Policy
 
-Pappice is alpha software and has not been externally security audited.
+Pappice is 0.x software and has not been externally security audited.
 
 ## Supported Versions
 
 Only the latest released version receives security fixes. There are no LTS
-branches while the project is in alpha.
+branches while the project is in 0.x.
 
 ## Reporting A Vulnerability
 

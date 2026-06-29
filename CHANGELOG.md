@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.10.0 - 2026-06-29
+
+- Add `pappice demo` for a temporary seeded local instance.
+- Simplify the root README around quick evaluation and defer production setup
+  to the deploy guide.
+- Publish regular GitHub releases by default; prerelease publishing is now an
+  explicit maintainer option.
+
 ## v0.9.0-alpha - 2026-06-29
 
 - Rename product roles from `owner` to `manager` and from `agent` to `staff`
