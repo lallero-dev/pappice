@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add linux/arm64 release archives alongside linux/amd64 and update release
+  tooling and deployment docs for architecture-specific downloads.
+
 ## v0.10.0 - 2026-06-29
 
 - Add `pappice demo` for a temporary seeded local instance.

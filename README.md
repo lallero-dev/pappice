@@ -21,7 +21,7 @@ Pappice is intentionally minimal and self-contained:
 - No external database, queue, or frontend build step at runtime.
 - Standard library first; the only direct Go dependency is the embedded SQLite
   driver.
-- Linux amd64 release binary around 12 MiB.
+- Linux release binaries around 12 MiB.
 - Small production instance measured at roughly 20-30 MiB of RAM.
 
 ## Project Status
@@ -81,14 +81,17 @@ Requires Go 1.26+.
 go build -trimpath -o dist/pappice ./cmd/pappice
 ```
 
-To create the same archive published in GitHub releases:
+To create a release archive:
 
 ```sh
 scripts/build-release.sh
 ```
 
-Maintainers publish releases with `scripts/release.sh`; bump `VERSION` first
-because release tags are immutable.
+Set `GOOS` and `GOARCH` for a specific target, for example
+`GOOS=linux GOARCH=arm64 scripts/build-release.sh`.
+
+Maintainers publish linux/amd64 and linux/arm64 archives with
+`scripts/release.sh`; bump `VERSION` first because release tags are immutable.
 
 ## Configuration
 

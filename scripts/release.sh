@@ -6,16 +6,20 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/release.sh [--dry-run] [--draft] [--prerelease]
+Usage: scripts/release.sh [--dry-run] [--draft] [--prerelease] [--target OS/ARCH]
 
-Build the release archive, verify it, tag the current commit from VERSION,
+Build the release archives, verify them, tag the current commit from VERSION,
 push the branch and tag, then create or update the GitHub release assets.
 
+By default, releases include linux/amd64 and linux/arm64 archives. Set GOOS and
+GOARCH, or pass --target one or more times, to publish a custom target set.
+
 Options:
-  --dry-run   Build and verify the archive, then print the publish steps.
+  --dry-run   Build and verify the archives, then print the publish steps.
   --draft     Create a draft GitHub release when the release does not exist.
   --prerelease
               Mark the GitHub release as a prerelease.
+  --target    Build and publish one OS/ARCH target; can be repeated.
   -h, --help  Show this help.
 USAGE
 }
@@ -23,6 +27,7 @@ USAGE
 dry_run=0
 draft=0
 prerelease=0
+targets=()
 
 while (($#)); do
   case "$1" in
@@ -34,6 +39,15 @@ while (($#)); do
       ;;
     --prerelease)
       prerelease=1
+      ;;
+    --target)
+      if (($# < 2)); then
+        echo "--target requires OS/ARCH" >&2
+        usage >&2
+        exit 1
+      fi
+      targets+=("$2")
+      shift
       ;;
     -h|--help)
       usage
@@ -55,6 +69,24 @@ require_cmd() {
   fi
 }
 
+validate_targets() {
+  local supported_targets target target_os target_arch target_extra
+
+  supported_targets="$(go tool dist list)"
+  for target in "${targets[@]}"; do
+    target_extra=""
+    IFS=/ read -r target_os target_arch target_extra <<< "$target"
+    if [[ -z "$target_os" || -z "$target_arch" || -n "$target_extra" ]]; then
+      echo "Invalid target '$target'; expected OS/ARCH" >&2
+      exit 1
+    fi
+    if ! grep -Fxq -- "$target" <<< "$supported_targets"; then
+      echo "Unsupported Go target '$target'" >&2
+      exit 1
+    fi
+  done
+}
+
 verify_checksum() {
   local checksum_file="$1"
   local checksum_dir checksum_name
@@ -70,7 +102,7 @@ verify_checksum() {
 }
 
 require_cmd git
-require_cmd gh
+require_cmd go
 
 version="$(tr -d '[:space:]' < VERSION)"
 if [[ -z "$version" ]]; then
@@ -95,11 +127,17 @@ if [[ -n "$dirty" ]]; then
   fi
 fi
 
-target_os="${GOOS:-linux}"
-target_arch="${GOARCH:-amd64}"
+if ((${#targets[@]} == 0)); then
+  if [[ -n "${GOOS:-}" || -n "${GOARCH:-}" ]]; then
+    targets+=("${GOOS:-linux}/${GOARCH:-amd64}")
+  else
+    targets+=(linux/amd64 linux/arm64)
+  fi
+fi
+validate_targets
+
 tag="$version"
-archive="dist/pappice-${version}-${target_os}-${target_arch}.tar.gz"
-checksum="$archive.sha256"
+artifacts=()
 
 release_flags=()
 if ((prerelease)); then
@@ -112,12 +150,10 @@ fi
 if ((dry_run)); then
   echo "Dry run: skipping git fetch and GitHub authentication." >&2
 else
+  require_cmd gh
   gh auth status >/dev/null
   git fetch --tags origin
 fi
-
-scripts/build-release.sh
-verify_checksum "$checksum"
 
 tag_exists=0
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
@@ -130,6 +166,17 @@ if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
   fi
 fi
 
+for target in "${targets[@]}"; do
+  IFS=/ read -r target_os target_arch target_extra <<< "$target"
+
+  archive="dist/pappice-${version}-${target_os}-${target_arch}.tar.gz"
+  checksum="$archive.sha256"
+
+  GOOS="$target_os" GOARCH="$target_arch" scripts/build-release.sh
+  verify_checksum "$checksum"
+  artifacts+=("$archive" "$checksum")
+done
+
 if ((dry_run)); then
   echo
   echo "Dry run publish steps:"
@@ -141,7 +188,12 @@ if ((dry_run)); then
   fi
   echo "+ git push origin $branch"
   echo "+ git push origin $tag"
-  echo "+ gh release create-or-upload $tag $archive $checksum ${release_flags[*]}"
+  printf "+ gh release create-or-upload %s" "$tag"
+  printf " %s" "${artifacts[@]}"
+  if ((${#release_flags[@]})); then
+    printf " %s" "${release_flags[@]}"
+  fi
+  printf "\n"
   exit 0
 fi
 
@@ -153,9 +205,9 @@ git push origin "$branch"
 git push origin "$tag"
 
 if gh release view "$tag" >/dev/null 2>&1; then
-  gh release upload "$tag" "$archive" "$checksum" --clobber
+  gh release upload "$tag" "${artifacts[@]}" --clobber
 else
-  gh release create "$tag" "$archive" "$checksum" \
+  gh release create "$tag" "${artifacts[@]}" \
     --title "Pappice $version" \
     --notes "See CHANGELOG.md for release notes." \
     "${release_flags[@]}"

@@ -22,7 +22,12 @@ Choose the hostname and resolve the latest release tag:
 DOMAIN=support.example.com
 LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
 VERSION="${LATEST_URL##*/}"
-ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
+case "$(uname -m)" in
+  x86_64|amd64) PAPPICE_ARCH=amd64 ;;
+  aarch64|arm64) PAPPICE_ARCH=arm64 ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+ARCHIVE=pappice-${VERSION}-linux-${PAPPICE_ARCH}.tar.gz
 BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
 ```
 
@@ -123,7 +128,12 @@ sudo journalctl -u pappice-backup.service -n 50
 ```sh
 LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
 VERSION="${LATEST_URL##*/}"
-ARCHIVE=pappice-${VERSION}-linux-amd64.tar.gz
+case "$(uname -m)" in
+  x86_64|amd64) PAPPICE_ARCH=amd64 ;;
+  aarch64|arm64) PAPPICE_ARCH=arm64 ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+ARCHIVE=pappice-${VERSION}-linux-${PAPPICE_ARCH}.tar.gz
 BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
 curl -fLO "${BASE_URL}/${ARCHIVE}"
 curl -fLO "${BASE_URL}/${ARCHIVE}.sha256"
@@ -143,11 +153,14 @@ sudo systemctl start pappice.service
 
 ## Build From Source
 
-Maintainers can create the same release archive from a source checkout with:
+Maintainers can create a release archive from a source checkout with:
 
 ```sh
 scripts/build-release.sh
 ```
+
+Set `GOOS` and `GOARCH` to build another target, for example
+`GOOS=linux GOARCH=arm64 scripts/build-release.sh`.
 
 ## Restore
 

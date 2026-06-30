@@ -2,7 +2,7 @@
 
 ARG GO_VERSION=1.26
 
-FROM golang:${GO_VERSION}-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -11,9 +11,11 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 RUN version="$VERSION"; \
     if [ -z "$version" ]; then version="$(tr -d '[:space:]' < VERSION)"; fi; \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build \
       -trimpath \
       -ldflags "-s -w -X main.version=$version" \
       -o /out/pappice \

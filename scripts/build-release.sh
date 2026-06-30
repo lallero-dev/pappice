@@ -13,11 +13,12 @@ fi
 target_os="${GOOS:-linux}"
 target_arch="${GOARCH:-amd64}"
 dist_dir="dist"
-binary="$dist_dir/pappice"
+binary="$dist_dir/pappice-${target_os}-${target_arch}"
 archive_root="pappice-${version}-${target_os}-${target_arch}"
 package_dir="$dist_dir/$archive_root"
 archive="$dist_dir/$archive_root.tar.gz"
 checksum="$archive.sha256"
+legacy_binary="$dist_dir/pappice"
 legacy_archive="$dist_dir/pappice-${target_os}-${target_arch}.tar.gz"
 legacy_checksum="$legacy_archive.sha256"
 
@@ -29,7 +30,7 @@ sha256_file() {
   fi
 }
 
-rm -rf "$package_dir" "$archive" "$checksum" "$legacy_archive" "$legacy_checksum"
+rm -rf "$package_dir" "$archive" "$checksum" "$binary" "$legacy_binary" "$legacy_archive" "$legacy_checksum"
 mkdir -p "$dist_dir" "$package_dir"
 
 CGO_ENABLED="${CGO_ENABLED:-0}" GOOS="$target_os" GOARCH="$target_arch" go build \
