@@ -15,6 +15,7 @@ import {
   ADMIN_SECTIONS,
   PRODUCT_SECTIONS,
   TICKET_AUTOSAVE_DELAY_MS,
+  TICKET_REFRESH_INTERVAL_MS,
   TICKET_SORT_LABELS,
   els,
   fullDateFormatter,
@@ -38,6 +39,8 @@ defineComponents();
 
 let appAlertTimer = 0;
 let ticketLoadRequestID = 0;
+let ticketRefreshTimer = 0;
+let ticketRefreshInFlight = false;
 const commentDrafts = new Map();
 
 function formatSeconds(seconds) {
@@ -270,9 +273,11 @@ async function enterApp() {
   }
   await loadProducts();
   await applyRoute();
+  startTicketRefreshLoop({ immediate: true });
 }
 
 function showAuth(mode) {
+  stopTicketRefreshLoop();
   state.user = null;
   state.csrf = "";
   state.selectedId = null;
@@ -407,7 +412,7 @@ async function loadTickets({ renderDetail = true } = {}) {
     state.ticketCounts = countTickets([]);
     renderTicketsUnreadBadge(0);
     renderTicketsView();
-    return;
+    return { selectedTicket: null, stale: false };
   }
   const params = new URLSearchParams();
   if (state.filters.q) params.set("q", state.filters.q);
@@ -425,8 +430,8 @@ async function loadTickets({ renderDetail = true } = {}) {
     request(`/api/tickets?${countParams.toString()}`),
     request(`/api/tickets?${unreadParams.toString()}`)
   ]);
-  if (requestID !== ticketLoadRequestID) return;
-  if (productID !== (state.ticketProductId || null)) return;
+  if (requestID !== ticketLoadRequestID) return { selectedTicket: null, stale: true };
+  if (productID !== (state.ticketProductId || null)) return { selectedTicket: null, stale: true };
   state.tickets = payload.tickets || [];
   state.ticketCounts = countTickets(countsPayload.tickets || []);
   renderTicketsUnreadBadge((unreadPayload.tickets || []).length);
@@ -444,6 +449,149 @@ async function loadTickets({ renderDetail = true } = {}) {
     renderSortHeaders();
     renderTicketList();
   }
+  return { selectedTicket: listedSelection || null, stale: false };
+}
+
+function startTicketRefreshLoop({ immediate = false } = {}) {
+  stopTicketRefreshLoop();
+  scheduleTicketRefresh(immediate ? 0 : TICKET_REFRESH_INTERVAL_MS);
+}
+
+function stopTicketRefreshLoop() {
+  window.clearTimeout(ticketRefreshTimer);
+  ticketRefreshTimer = 0;
+}
+
+function scheduleTicketRefresh(delay = TICKET_REFRESH_INTERVAL_MS) {
+  stopTicketRefreshLoop();
+  if (!state.user) return;
+  ticketRefreshTimer = window.setTimeout(() => {
+    ticketRefreshTimer = 0;
+    refreshTicketsInBackground()
+      .catch(handleTicketRefreshError)
+      .finally(() => scheduleTicketRefresh());
+  }, delay);
+}
+
+function refreshTicketsSoon() {
+  if ((ticketRefreshTimer || ticketRefreshInFlight) && canRefreshTicketsInBackground()) {
+    scheduleTicketRefresh(0);
+  }
+}
+
+function canRefreshTicketsInBackground() {
+  return Boolean(state.user) &&
+    state.products.length > 0 &&
+    state.view === "tickets" &&
+    !els.appView.hidden &&
+    document.visibilityState !== "hidden";
+}
+
+async function refreshTicketsInBackground() {
+  if (!canRefreshTicketsInBackground() || ticketRefreshInFlight) return;
+  ticketRefreshInFlight = true;
+  const selectedId = state.selectedId;
+  const previousConversationRevision = ticketConversationRevision(selectedTicket());
+  try {
+    const refreshedList = await loadTickets({ renderDetail: false });
+    if (!canRefreshTicketsInBackground() || refreshedList?.stale) return;
+    if (selectedId && state.selectedId === selectedId) {
+      if (refreshedList?.selectedTicket?.id === selectedId) {
+        applySelectedTicketRefresh(refreshedList.selectedTicket, previousConversationRevision);
+      } else {
+        await refreshSelectedTicket(selectedId, previousConversationRevision);
+      }
+    }
+  } finally {
+    ticketRefreshInFlight = false;
+  }
+}
+
+async function refreshSelectedTicket(ticketId, previousConversationRevision) {
+  let updated;
+  try {
+    updated = await request(`/api/tickets/${ticketId}`);
+  } catch (error) {
+    if (error?.status === 404 && state.selectedId === ticketId) {
+      setSelectedTicket(null, { updateRoute: false });
+      await loadTickets();
+      syncRoute({ replace: true });
+      return;
+    }
+    throw error;
+  }
+  if (state.selectedId !== ticketId || state.view !== "tickets") return;
+  applySelectedTicketRefresh(updated, previousConversationRevision);
+}
+
+function applySelectedTicketRefresh(updated, previousConversationRevision) {
+  if (!updated?.id || state.selectedId !== updated.id || state.view !== "tickets") return;
+  setSelectedTicket(updated, { updateRoute: false });
+  replaceTicket(updated);
+  if (ticketConversationRevision(updated) === previousConversationRevision) return;
+  if (replaceTicketConversation(updated)) {
+    markTicketRead(updated).catch(showError);
+    return;
+  }
+  renderTicketDetail();
+}
+
+function replaceTicketConversation(ticket) {
+  const form = els.ticketDetailPane?.querySelector(".ticket-detail-form");
+  const currentConversation = form?.querySelector(".conversation-stream");
+  if (!form || !currentConversation || state.renderedTicketDetailId !== ticket.id) return false;
+  const followLatest = isConversationNearBottom(currentConversation);
+  const previousScrollTop = currentConversation.scrollTop;
+  const updatedConversation = comments(ticket);
+  currentConversation.replaceWith(updatedConversation);
+  if (followLatest) {
+    scrollTicketConversationToBottom(form, { smooth: true });
+  } else {
+    updatedConversation.scrollTop = previousScrollTop;
+  }
+  return true;
+}
+
+function isConversationNearBottom(conversation) {
+  return conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 48;
+}
+
+function ticketConversationRevision(ticket) {
+  if (!ticket) return "";
+  return JSON.stringify([
+    ticket.id,
+    ticket.description || "",
+    ticket.requester || "",
+    ticket.requester_name || "",
+    ticket.requester_email || "",
+    ticket.created_at || "",
+    attachmentRevision(ticket.attachments),
+    (ticket.comments || []).map((comment) => [
+      comment.id,
+      comment.author || "",
+      comment.body || "",
+      comment.visibility || "",
+      comment.created_at || "",
+      attachmentRevision(comment.attachments)
+    ])
+  ]);
+}
+
+function attachmentRevision(attachments = []) {
+  return (attachments || []).map((attachment) => [
+    attachment.id,
+    attachment.filename || "",
+    attachment.content_type || "",
+    attachment.size_bytes || 0
+  ]);
+}
+
+function handleTicketRefreshError(error) {
+  if (error?.status === 401) {
+    showError(error);
+    return;
+  }
+  console.warn("Ticket refresh failed", error);
 }
 
 async function loadAdmin() {
@@ -3036,6 +3184,10 @@ function bindEvents() {
     if (!els.profileMenu.hidden && !els.profileMenu.contains(event.target)) closeProfileMenu();
   });
   document.addEventListener("keydown", handleGlobalKeydown);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshTicketsSoon();
+  });
+  window.addEventListener("focus", refreshTicketsSoon);
   router.listen((route) => applyRoute(route).catch(showError));
 
   els.ticketsTab.addEventListener("click", () => switchView("tickets"));
@@ -3156,6 +3308,7 @@ function switchView(view, options = {}) {
   if (options.updateRoute !== false) syncRoute({ replace: Boolean(options.replaceRoute) });
   if (view === "admin" && options.load !== false) loadAdmin().catch(showError);
   if (view === "product" && options.load !== false) loadProductAdmin().catch(showError);
+  if (view === "tickets") refreshTicketsSoon();
 }
 
 async function openProductsIndex() {

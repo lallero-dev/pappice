@@ -324,6 +324,22 @@ async function staffReplyAndResolve(cdp) {
     if (incomingAvatarRect.left > incomingConversationRect.left + parseFloat(incomingConversationStyle.paddingLeft || "0") + 4) {
       throw new Error("incoming message should be visually aligned to the left");
     }
+    const liveComposer = detail.querySelector(".comment-form");
+    setValue(detail.querySelector("[name='body']"), input.liveDraft);
+    const { request } = await import("/static/api.js");
+    const key = decodeURIComponent(window.location.hash.slice(1));
+    const current = await request(`/api/tickets/key/${encodeURIComponent(key)}`);
+    await request(`/api/tickets/${current.id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ body: input.liveReply, visibility: "internal" })
+    });
+    await waitFor(() => detail.textContent.includes(input.liveReply), "live ticket comment refresh", 15000);
+    if (detail.querySelector(".comment-form") !== liveComposer) {
+      throw new Error("live ticket refresh should keep the reply composer mounted");
+    }
+    if (detail.querySelector("[name='body']")?.value !== input.liveDraft) {
+      throw new Error("live ticket refresh should preserve the local reply draft");
+    }
     setValue(detail.querySelector("[name='status']"), "resolved");
     setValue(detail.querySelector("[name='body']"), input.reply);
     const composer = detail.querySelector(".comment-form");
@@ -421,7 +437,9 @@ async function staffReplyAndResolve(cdp) {
   }, {
     ...ticket,
     adminDisplayName: admin.displayName,
-    customerDisplayName: customer.displayName
+    customerDisplayName: customer.displayName,
+    liveDraft: "Draft while live refresh runs",
+    liveReply: "Live internal refresh reply from the API"
   });
 
   await pressKey(cdp, "Escape");
