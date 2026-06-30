@@ -427,13 +427,29 @@ async function staffReplyAndResolve(cdp) {
   await pressKey(cdp, "Escape");
 
   await runInPage(cdp, async (input) => {
-    const { openModalRoot, waitFor } = pageTools();
+    const { openModalRoot, setValue, waitFor } = pageTools();
     await waitFor(() => !document.querySelector(".image-preview-modal[open]"), "image preview closed with escape");
-    const detail = await waitFor(() => {
+    let detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
       return document.querySelector("#ticketList .ticket-row.active") &&
         pane?.textContent.includes(input.reply) ? pane : null;
     }, "ticket remains open after image preview escape");
+    setValue(detail.querySelector("[name='body']"), input.draft);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitFor(() => {
+      const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
+      return !document.querySelector("#ticketList .ticket-row.active") && detailText.includes("No ticket selected");
+    }, "ticket closed with local draft");
+    const row = await waitFor(() => {
+      return [...document.querySelectorAll("#ticketList .ticket-row")]
+        .find((candidate) => candidate.textContent.includes(input.title));
+    }, "ticket row for local draft restore");
+    row.click();
+    detail = await waitFor(() => {
+      const pane = document.querySelector("#ticketDetailPane");
+      return document.querySelector("#ticketList .ticket-row.active") &&
+        pane?.querySelector("[name='body']")?.value === input.draft ? pane : null;
+    }, "local comment draft restored after reopening ticket");
     const deleteButton = detail.querySelector("[data-delete-ticket]");
     if (!deleteButton || !deleteButton.classList.contains("danger")) {
       throw new Error("admin ticket detail should expose a danger delete action");
@@ -453,6 +469,7 @@ async function staffReplyAndResolve(cdp) {
     return true;
   }, {
     ...ticket,
+    draft: "Draft reply kept locally",
     adminDisplayName: admin.displayName,
     customerDisplayName: customer.displayName
   });

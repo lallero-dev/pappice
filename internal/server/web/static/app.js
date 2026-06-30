@@ -38,6 +38,7 @@ defineComponents();
 
 let appAlertTimer = 0;
 let ticketLoadRequestID = 0;
+const commentDrafts = new Map();
 
 function formatSeconds(seconds) {
   const value = Number(seconds || 0);
@@ -276,6 +277,7 @@ function showAuth(mode) {
   state.csrf = "";
   state.selectedId = null;
   state.selectedTicket = null;
+  commentDrafts.clear();
   syncTicketMobileState();
   document.body.classList.remove("app-mode");
   clearAppAlert();
@@ -1981,10 +1983,15 @@ function bindCommentComposer(form, ticket) {
   if (!composer) return;
   const sendButton = composer.querySelector("[data-comment-send]");
   const body = composer.querySelector("[name='body']");
+  const visibility = composer.querySelector("[name='visibility']");
   const update = () => {
     sendButton.disabled = String(body.value || "").trim() === "" && selectedCommentFiles(composer).length === 0;
   };
-  body.addEventListener("input", update);
+  body.addEventListener("input", () => {
+    saveCommentDraft(ticket, composer);
+    update();
+  });
+  visibility?.addEventListener("change", () => saveCommentDraft(ticket, composer));
   composer.querySelectorAll("input[type='file']").forEach((input) => input.addEventListener("change", update));
   form.addEventListener("submit", async (event) => {
     if (event.submitter !== sendButton) return;
@@ -2026,9 +2033,36 @@ async function sendTicketComment(ticket, composer) {
     await request(`/api/tickets/${ticket.id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   }
   const updated = await request(`/api/tickets/${ticket.id}`);
+  clearCommentDraft(ticket);
   setSelectedTicket(updated, { updateRoute: false });
   replaceTicket(updated);
   await loadTickets();
+}
+
+function commentDraftKey(ticket) {
+  return ticket?.id ? String(ticket.id) : "";
+}
+
+function commentDraft(ticket) {
+  const key = commentDraftKey(ticket);
+  return key ? commentDrafts.get(key) || null : null;
+}
+
+function saveCommentDraft(ticket, composer) {
+  const key = commentDraftKey(ticket);
+  if (!key) return;
+  const body = composer.querySelector("[name='body']")?.value || "";
+  const visibility = composer.querySelector("[name='visibility']")?.value || "public";
+  if (String(body).trim() === "" && visibility === "public") {
+    commentDrafts.delete(key);
+    return;
+  }
+  commentDrafts.set(key, { body, visibility });
+}
+
+function clearCommentDraft(ticket) {
+  const key = commentDraftKey(ticket);
+  if (key) commentDrafts.delete(key);
 }
 
 function bindTicketCreateState({ root, submitButton }) {
@@ -2214,12 +2248,14 @@ function normalizeAuthor(value) {
 
 function commentComposer(ticket) {
   const wrap = el("div", { className: "comment-form" });
+  const draft = commentDraft(ticket);
   const body = document.createElement("textarea");
   body.name = "body";
   body.rows = 3;
   body.className = "comment-input";
   body.dataset.ticketControl = "true";
   body.placeholder = "Write a reply";
+  body.value = draft?.body || "";
   const send = el("button", {
     className: "comment-send-button",
     type: "submit",
@@ -2231,7 +2267,7 @@ function commentComposer(ticket) {
   visibility.dataset.ticketControl = "true";
   visibility.setAttribute("aria-label", "Reply visibility");
   visibility.append(new Option("Public reply", "public"), new Option("Internal note", "internal"));
-  visibility.value = "public";
+  visibility.value = draft?.visibility || "public";
   const attachments = ticketAttachmentField("Attachments", "attachments");
   const actions = [send];
   if (canEditTicket(ticket)) {
