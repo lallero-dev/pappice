@@ -1,5 +1,5 @@
 import { admin, customer, ticket } from "./fixtures.mjs";
-import { runInPage, waitForDocumentReady } from "../tools/browser-page.mjs";
+import { pressKey, runInPage, waitForDocumentReady } from "../tools/browser-page.mjs";
 
 async function createCustomerTicket(cdp) {
   return runInPage(cdp, async (input) => {
@@ -411,6 +411,29 @@ async function staffReplyAndResolve(cdp) {
       const preview = document.querySelector(".attachment-image-preview");
       return preview?.getAttribute("src")?.includes("?preview=1");
     }, "image attachment inline preview");
+    const imagePreviewButton = document.querySelector(".attachment-image-link");
+    if (!imagePreviewButton) {
+      throw new Error("image attachment should expose a preview button");
+    }
+    imagePreviewButton.click();
+    await waitFor(() => document.querySelector(".image-preview-modal[open]"), "image preview modal");
+    return true;
+  }, {
+    ...ticket,
+    adminDisplayName: admin.displayName,
+    customerDisplayName: customer.displayName
+  });
+
+  await pressKey(cdp, "Escape");
+
+  await runInPage(cdp, async (input) => {
+    const { openModalRoot, waitFor } = pageTools();
+    await waitFor(() => !document.querySelector(".image-preview-modal[open]"), "image preview closed with escape");
+    const detail = await waitFor(() => {
+      const pane = document.querySelector("#ticketDetailPane");
+      return document.querySelector("#ticketList .ticket-row.active") &&
+        pane?.textContent.includes(input.reply) ? pane : null;
+    }, "ticket remains open after image preview escape");
     const deleteButton = detail.querySelector("[data-delete-ticket]");
     if (!deleteButton || !deleteButton.classList.contains("danger")) {
       throw new Error("admin ticket detail should expose a danger delete action");

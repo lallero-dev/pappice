@@ -3082,6 +3082,7 @@ function bindEvents() {
 
 function handleGlobalKeydown(event) {
   if (event.key !== "Escape") return;
+  if (hasOpenModalDialog()) return;
   if (!els.profilePopover.hidden) {
     closeProfileMenu();
     return;
@@ -3090,10 +3091,13 @@ function handleGlobalKeydown(event) {
     closeTicketPopovers();
     return;
   }
-  if (els.modalHost?.isOpen?.()) return;
   if (state.view !== "tickets" || !state.selectedId || els.appView.hidden) return;
   event.preventDefault();
   closeSelectedTicket();
+}
+
+function hasOpenModalDialog() {
+  return Boolean(els.modalHost?.isOpen?.() || document.querySelector("dialog[open]"));
 }
 
 function closeSelectedTicket() {

@@ -90,11 +90,64 @@ function formatException(details) {
 }
 
 async function waitForDocumentReady(cdp) {
-  await runInPage(cdp, async () => {
-    const { waitFor } = pageTools();
-    await waitFor(() => document.readyState === "complete", "document ready", 12000);
-    return true;
+  const deadline = Date.now() + 12000;
+  while (Date.now() < deadline) {
+    try {
+      await runInPage(cdp, async () => {
+        const { waitFor } = pageTools();
+        await waitFor(() => document.readyState === "complete" && window.location.href !== "about:blank", "document ready", 12000);
+        return true;
+      });
+      return;
+    } catch (error) {
+      if (!isTransientNavigationError(error)) throw error;
+      await sleep(100);
+    }
+  }
+  throw new Error("Timed out waiting for document ready after navigation");
+}
+
+async function pressKey(cdp, key) {
+  const params = keyEventParams(key);
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    ...params
+  });
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    ...params
   });
 }
 
-export { runInPage, waitForDocumentReady };
+function keyEventParams(key) {
+  if (key === "Escape") {
+    return {
+      key,
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+      nativeVirtualKeyCode: 27
+    };
+  }
+  if (/^[a-z0-9]$/i.test(key)) {
+    const upper = key.toUpperCase();
+    const code = /[A-Z]/.test(upper) ? `Key${upper}` : `Digit${upper}`;
+    const virtualKeyCode = upper.charCodeAt(0);
+    return {
+      key,
+      code,
+      windowsVirtualKeyCode: virtualKeyCode,
+      nativeVirtualKeyCode: virtualKeyCode
+    };
+  }
+  throw new Error(`Unsupported test key: ${key}`);
+}
+
+function isTransientNavigationError(error) {
+  return /Execution context was destroyed|Cannot find context with specified id/.test(error?.message || "");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export { pressKey, runInPage, waitForDocumentReady };
