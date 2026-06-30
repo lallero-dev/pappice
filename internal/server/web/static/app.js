@@ -1136,6 +1136,7 @@ async function deleteCurrentTicket(ticket, button) {
   button.setAttribute("aria-busy", "true");
   try {
     await request(`/api/tickets/${ticket.id}`, { method: "DELETE" });
+    clearCommentDraft(ticket);
     state.tickets = state.tickets.filter((candidate) => candidate.id !== ticket.id);
     setSelectedTicket(null, { updateRoute: false });
     await loadTickets();

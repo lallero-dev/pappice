@@ -56,7 +56,7 @@ async function startLocalPappice(options = {}) {
       userDataDir: path.join(tempDir, "chrome"),
       viewport: options.viewport
     });
-    state.page = await connectToPage(chromePort);
+    state.page = await connectToPage(chromePort, appURL);
     await state.page.send("Page.enable");
     await state.page.send("Runtime.enable");
 
@@ -130,21 +130,25 @@ class CDPClient {
   }
 }
 
-async function connectToPage(port) {
+async function connectToPage(port, appURL) {
   const deadline = Date.now() + 12000;
   let target = null;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`);
       const targets = await response.json();
-      target = targets.find((candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl);
+      target = targets.find((candidate) => {
+        return candidate.type === "page" &&
+          candidate.webSocketDebuggerUrl &&
+          String(candidate.url || "").startsWith(appURL);
+      });
       if (target) break;
     } catch {
       // Chromium is still starting.
     }
     await sleep(100);
   }
-  if (!target) throw new Error("Chromium DevTools page target was not available");
+  if (!target) throw new Error("Chromium DevTools app page target was not available");
   const socket = await connectWebSocket(target.webSocketDebuggerUrl);
   return new CDPClient(socket);
 }
