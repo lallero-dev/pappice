@@ -474,9 +474,7 @@ function scheduleTicketRefresh(delay = TICKET_REFRESH_INTERVAL_MS) {
 }
 
 function refreshTicketsSoon() {
-  if ((ticketRefreshTimer || ticketRefreshInFlight) && canRefreshTicketsInBackground()) {
-    scheduleTicketRefresh(0);
-  }
+  if (canRefreshTicketsInBackground()) scheduleTicketRefresh(0);
 }
 
 function canRefreshTicketsInBackground() {
