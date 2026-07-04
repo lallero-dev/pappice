@@ -2,8 +2,16 @@
 
 ## Unreleased
 
+## v0.11.0 - 2026-07-04
+
 - Add linux/arm64 release archives alongside linux/amd64 and update release
   tooling and deployment docs for architecture-specific downloads.
+- Keep release assets versioned and resolve the latest tag from deploy docs.
+- Keep local ticket reply drafts when navigating or refreshing tickets.
+- Refresh open ticket conversations in the background without replacing the
+  reply composer.
+- Improve image-preview escape handling.
+- Fix mobile admin menu spacing.
 
 ## v0.10.0 - 2026-06-29
 
