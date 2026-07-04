@@ -2688,8 +2688,14 @@ button:focus-visible {
     padding: 0;
   }
 
+  .admin-shell {
+    align-items: start;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   .admin-sidebar {
     align-items: flex-start;
+    align-self: start;
     border-left: 0;
     border-radius: 0;
     border-right: 0;
