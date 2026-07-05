@@ -106,8 +106,8 @@ func splitHealthcheckAddr(addr string) (string, string, error) {
 	if err == nil {
 		return strings.Trim(host, "[]"), port, nil
 	}
-	if strings.HasPrefix(addr, ":") {
-		return "127.0.0.1", strings.TrimPrefix(addr, ":"), nil
+	if after, ok := strings.CutPrefix(addr, ":"); ok {
+		return "127.0.0.1", after, nil
 	}
 	return "", "", fmt.Errorf("invalid listen address %q", addr)
 }

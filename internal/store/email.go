@@ -280,9 +280,7 @@ func (s *Store) MarkEmailFailed(id int64, sendErr error, maxAttempts int) error 
 	if sendErr != nil {
 		message = sendErr.Error()
 	}
-	if len(message) > 1000 {
-		message = message[:1000]
-	}
+	message = truncateString(message, 1000)
 	result, err := s.db.Exec(`
 		UPDATE email_notifications
 		SET status = ?, attempts = ?, next_attempt_at = ?, locked_until = NULL, last_error = ?
@@ -562,11 +560,6 @@ func scanEmailNotification(rows scanner) (EmailNotification, error) {
 }
 
 func emailRetryDelay(attempts int) time.Duration {
-	if attempts < 1 {
-		attempts = 1
-	}
-	if attempts > 6 {
-		attempts = 6
-	}
+	attempts = min(max(attempts, 1), 6)
 	return time.Duration(1<<(attempts-1)) * time.Minute
 }

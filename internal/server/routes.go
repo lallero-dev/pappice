@@ -73,11 +73,11 @@ func isAppIndexPath(path string) bool {
 	case "/", "/tickets", "/admin", "/products":
 		return true
 	}
-	if strings.HasPrefix(path, "/admin/") {
-		return slices.Contains(appAdminSections, strings.TrimPrefix(path, "/admin/"))
+	if after, ok := strings.CutPrefix(path, "/admin/"); ok {
+		return slices.Contains(appAdminSections, after)
 	}
-	if strings.HasPrefix(path, "/products/") {
-		parts := strings.Split(strings.Trim(strings.TrimPrefix(path, "/products/"), "/"), "/")
+	if after, ok := strings.CutPrefix(path, "/products/"); ok {
+		parts := strings.Split(strings.Trim(after, "/"), "/")
 		if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
 			return false
 		}

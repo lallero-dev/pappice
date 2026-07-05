@@ -17,7 +17,7 @@ import (
 func queryStatuses(query url.Values) []string {
 	statuses := make([]string, 0, len(query["status"]))
 	for _, value := range query["status"] {
-		for _, status := range strings.Split(value, ",") {
+		for status := range strings.SplitSeq(value, ",") {
 			status = strings.TrimSpace(status)
 			if status != "" {
 				statuses = append(statuses, status)
@@ -43,9 +43,7 @@ func paginationParams(r *http.Request, defaultLimit, maxLimit int) (int, int) {
 	if err != nil || limit < 1 {
 		limit = defaultLimit
 	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
+	limit = min(limit, maxLimit)
 	offset, err := strconv.Atoi(query.Get("offset"))
 	if err != nil || offset < 0 {
 		offset = 0
@@ -206,18 +204,31 @@ func clientIP(r *http.Request) string {
 	return strings.TrimSpace(r.RemoteAddr)
 }
 
+func trimRoutePrefix(path, prefix string) string {
+	path, _ = strings.CutPrefix(path, prefix)
+	return strings.Trim(path, "/")
+}
+
+func routeParts(path, prefix string) []string {
+	return strings.Split(trimRoutePrefix(path, prefix), "/")
+}
+
+func parsePositiveID(w http.ResponseWriter, raw, message string) (int64, bool) {
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id < 1 {
+		respondError(w, http.StatusBadRequest, message)
+		return 0, false
+	}
+	return id, true
+}
+
 func parseTrailingID(w http.ResponseWriter, path, prefix string) (int64, bool) {
-	raw := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	raw := trimRoutePrefix(path, prefix)
 	if raw == "" || strings.Contains(raw, "/") {
 		respondError(w, http.StatusNotFound, "not found")
 		return 0, false
 	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id < 1 {
-		respondError(w, http.StatusBadRequest, "invalid id")
-		return 0, false
-	}
-	return id, true
+	return parsePositiveID(w, raw, "invalid id")
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {

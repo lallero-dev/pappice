@@ -500,9 +500,7 @@ func (s *Store) MarkWebhookNotificationFailed(id int64, sendErr error, maxAttemp
 	if sendErr != nil {
 		message = sendErr.Error()
 	}
-	if len(message) > 1000 {
-		message = message[:1000]
-	}
+	message = truncateString(message, 1000)
 	result, err := s.db.Exec(`
 		UPDATE webhook_notifications
 		SET status = ?, next_attempt_at = ?, locked_until = NULL, last_error = ?

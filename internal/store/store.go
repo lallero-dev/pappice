@@ -473,19 +473,15 @@ func normalizePage(limit, offset, defaultLimit, maxLimit int) (int, int) {
 	if defaultLimit < 1 {
 		defaultLimit = 25
 	}
-	if maxLimit < defaultLimit {
-		maxLimit = defaultLimit
-	}
+	maxLimit = max(maxLimit, defaultLimit)
 	if limit < 1 {
 		limit = defaultLimit
 	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return limit, offset
+	return min(limit, maxLimit), max(offset, 0)
+}
+
+func truncateString(value string, maximum int) string {
+	return value[:min(len(value), maximum)]
 }
 
 var productKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}$`)
@@ -642,7 +638,7 @@ func normalizeFilterStatuses(single string, values []string) []string {
 	seen := make(map[string]struct{}, len(values)+1)
 	result := make([]string, 0, len(values)+1)
 	appendStatus := func(value string) {
-		for _, part := range strings.Split(value, ",") {
+		for part := range strings.SplitSeq(value, ",") {
 			status := strings.TrimSpace(part)
 			if status == "" {
 				continue

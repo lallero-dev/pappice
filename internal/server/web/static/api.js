@@ -11,7 +11,7 @@ async function requestWithCSRFRefresh(path, options, retryCSRF) {
   if (!bodyIsFormData && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  if (state.csrf && ["POST", "PATCH", "PUT", "DELETE"].includes(method)) {
+  if (state.csrf && isUnsafeMethod(method)) {
     headers["X-Pappice-CSRF"] = state.csrf;
   }
   const response = await fetch(path, {

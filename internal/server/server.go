@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -345,7 +346,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request) {
-	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/account-links/"), "/")
+	token := trimRoutePrefix(r.URL.Path, "/api/account-links/")
 	if token == "" || strings.Contains(token, "/") {
 		http.NotFound(w, r)
 		return
@@ -480,14 +481,13 @@ func (s *Server) handleProductByID(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/products/"), "/"), "/")
+	parts := routeParts(r.URL.Path, "/api/products/")
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
 	}
-	productID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || productID < 1 {
-		respondError(w, http.StatusBadRequest, "invalid product id")
+	productID, ok := parsePositiveID(w, parts[0], "invalid product id")
+	if !ok {
 		return
 	}
 	if len(parts) == 1 {
@@ -590,9 +590,8 @@ func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, au
 		return
 	}
 	if len(rest) == 1 && r.Method == http.MethodDelete {
-		userID, err := strconv.ParseInt(rest[0], 10, 64)
-		if err != nil || userID < 1 {
-			respondError(w, http.StatusBadRequest, "invalid user id")
+		userID, ok := parsePositiveID(w, rest[0], "invalid user id")
+		if !ok {
 			return
 		}
 		if err := s.store.DeleteProductMember(productID, userID, s.eventContext(r, auth.User)); err != nil {
@@ -724,7 +723,7 @@ func (s *Server) handleTicketPath(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tickets/"), "/"), "/")
+	parts := routeParts(r.URL.Path, "/api/tickets/")
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
@@ -733,9 +732,8 @@ func (s *Server) handleTicketPath(w http.ResponseWriter, r *http.Request) {
 		s.handleTicketByKey(w, r, auth, parts[1])
 		return
 	}
-	id, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || id < 1 {
-		respondError(w, http.StatusBadRequest, "invalid ticket id")
+	id, ok := parsePositiveID(w, parts[0], "invalid ticket id")
+	if !ok {
 		return
 	}
 	ticket, err := s.store.GetTicket(id)
@@ -993,14 +991,13 @@ func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/users/"), "/"), "/")
+	parts := routeParts(r.URL.Path, "/api/users/")
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
 	}
-	id, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || id < 1 {
-		respondError(w, http.StatusBadRequest, "invalid user id")
+	id, ok := parsePositiveID(w, parts[0], "invalid user id")
+	if !ok {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "password-reset" {
@@ -1150,14 +1147,13 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/webhooks/"), "/"), "/")
+	parts := routeParts(r.URL.Path, "/api/webhooks/")
 	if len(parts) == 0 || parts[0] == "" {
 		http.NotFound(w, r)
 		return
 	}
-	id, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || id < 1 {
-		respondError(w, http.StatusBadRequest, "invalid webhook id")
+	id, ok := parsePositiveID(w, parts[0], "invalid webhook id")
+	if !ok {
 		return
 	}
 	hook, err := s.store.GetWebhook(id)
@@ -1286,7 +1282,7 @@ func (s *Server) handleEmailNotificationByID(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/email-notifications/"), "/")
+	rest := trimRoutePrefix(r.URL.Path, "/api/email-notifications/")
 	if rest == "test" {
 		s.handleEmailNotificationTest(w, r, auth)
 		return
@@ -1300,9 +1296,8 @@ func (s *Server) handleEmailNotificationByID(w http.ResponseWriter, r *http.Requ
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	id, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || id < 1 {
-		respondError(w, http.StatusBadRequest, "invalid email notification id")
+	id, ok := parsePositiveID(w, parts[0], "invalid email notification id")
+	if !ok {
 		return
 	}
 	notification, err := s.store.RetryEmailNotification(id, s.eventContext(r, auth.User))
@@ -1397,9 +1392,7 @@ func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request,
 			filtered = append(filtered, delivery)
 		}
 	}
-	if len(filtered) > 50 {
-		filtered = filtered[:50]
-	}
+	filtered = filtered[:min(len(filtered), 50)]
 	respondJSON(w, http.StatusOK, map[string]any{"deliveries": filtered})
 }
 
@@ -1758,12 +1751,7 @@ func (s *Server) hasProductRole(user store.User, productID int64, allowed ...str
 	if !ok {
 		return false
 	}
-	for _, item := range allowed {
-		if role == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, role)
 }
 
 func (s *Server) eventContext(r *http.Request, actor store.User) store.EventContext {

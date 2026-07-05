@@ -28,10 +28,7 @@ func normalizeBrandMark(mark, name string) string {
 		return "P"
 	}
 	runes := []rune(mark)
-	if len(runes) > 3 {
-		runes = runes[:3]
-	}
-	return string(runes)
+	return string(runes[:min(len(runes), 3)])
 }
 
 func isHexColor(value string) bool {

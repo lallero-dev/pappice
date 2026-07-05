@@ -280,10 +280,7 @@ func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHea
 				return storedUpload{}, fmt.Errorf("%w: attachment %q exceeds %d bytes", store.ErrValidation, filename, s.options.MaxUploadSize)
 			}
 			if len(sniff) < 512 {
-				remaining := 512 - len(sniff)
-				if n < remaining {
-					remaining = n
-				}
+				remaining := min(n, 512-len(sniff))
 				sniff = append(sniff, buffer[:remaining]...)
 			}
 			if _, err := hash.Write(buffer[:n]); err != nil {
