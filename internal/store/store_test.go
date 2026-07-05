@@ -1257,7 +1257,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	if _, err := tracker.UpdateUser(admin.ID, UpdateUser{Disabled: boolPtr(true)}); !errors.Is(err, ErrValidation) {
+	if _, err := tracker.UpdateUser(admin.ID, UpdateUser{Disabled: new(true)}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("disable sole admin error = %v, want ErrValidation", err)
 	}
 	user, err := tracker.CreateUser(CreateUser{Password: "correct horse", Email: "bob@example.test"})
@@ -1265,10 +1265,10 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	updatedUser, err := tracker.UpdateUser(user.ID, UpdateUser{
-		DisplayName: strPtr("Customer Bob"),
-		Email:       strPtr("customer-bob@example.test"),
-		Role:        strPtr("customer"),
-		Password:    strPtr("new password"),
+		DisplayName: new("Customer Bob"),
+		Email:       new("customer-bob@example.test"),
+		Role:        new("customer"),
+		Password:    new("new password"),
 	})
 	if err != nil {
 		t.Fatalf("update user: %v", err)
@@ -1285,7 +1285,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create product: %v", err)
 	}
-	product, err = tracker.UpdateProduct(product.ID, UpdateProduct{Name: strPtr("Operations Desk")})
+	product, err = tracker.UpdateProduct(product.ID, UpdateProduct{Name: new("Operations Desk")})
 	if err != nil {
 		t.Fatalf("update product: %v", err)
 	}
@@ -1322,7 +1322,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	}
 	enabled = true
 	hook, err = tracker.UpdateWebhook(hook.ID, UpdateWebhook{
-		Name:    strPtr("renamed hook"),
+		Name:    new("renamed hook"),
 		Enabled: &enabled,
 	})
 	if err != nil {
@@ -1334,7 +1334,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	events := []string{"ticket.updated"}
 	secret := "manual-secret"
 	hook, err = tracker.UpdateWebhook(hook.ID, UpdateWebhook{
-		URL:    strPtr("https://hooks.example.test/renamed"),
+		URL:    new("https://hooks.example.test/renamed"),
 		Secret: &secret,
 		Events: &events,
 	})
@@ -1721,12 +1721,4 @@ func hasRecipient(recipients []EmailRecipient, email string) bool {
 		}
 	}
 	return false
-}
-
-func strPtr(value string) *string {
-	return &value
-}
-
-func boolPtr(value bool) *bool {
-	return &value
 }
