@@ -1386,7 +1386,7 @@ func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	deliveries := s.store.ListDeliveries(200)
-	filtered := make([]store.WebhookDelivery, 0)
+	filtered := make([]store.WebhookDelivery, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		if delivery.ProductID != nil && *delivery.ProductID == productID {
 			filtered = append(filtered, delivery)
