@@ -97,7 +97,7 @@ func latestBackupPath(backupDir string) (string, error) {
 }
 
 func availablePath(parent, name string) (string, error) {
-	for index := 0; index < 100; index++ {
+	for index := range 100 {
 		candidate := filepath.Join(parent, name)
 		if index > 0 {
 			candidate = filepath.Join(parent, fmt.Sprintf("%s-%d", name, index))
@@ -114,7 +114,7 @@ func availablePath(parent, name string) (string, error) {
 }
 
 func createUniqueDir(parent, name string) (string, error) {
-	for index := 0; index < 100; index++ {
+	for index := range 100 {
 		candidate := filepath.Join(parent, name)
 		if index > 0 {
 			candidate = filepath.Join(parent, fmt.Sprintf("%s-%d", name, index))

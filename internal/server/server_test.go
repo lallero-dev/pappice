@@ -928,7 +928,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	})
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 			"email":    "missing@example.test",
 			"password": "wrong password",
@@ -950,7 +950,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	token := accountLinkTokenFromURL(t, decodeNestedString(t, body, "account_link", "url"))
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+token, map[string]any{
 			"password": "short",
 		}, nil, "", "")
@@ -1126,7 +1126,7 @@ func TestAdminHistoryPaginationAndFilters(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/test", map[string]any{}, adminCookie, adminCSRF, server.URL)
 		requireStatus(t, resp, body, http.StatusCreated)
 	}
