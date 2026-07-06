@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, exec } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import https from "node:https";
 import net from "node:net";
@@ -22,10 +22,6 @@ const defaults = {
 };
 
 async function main() {
-  if (os.platform() !== "linux") {
-    throw new Error("small-env benchmark currently requires Linux /proc RSS metrics");
-  }
-
   const config = parseConfig(process.argv.slice(2));
   if (config.help) {
     printHelp();
@@ -480,10 +476,23 @@ async function freePort() {
 }
 
 async function readRSS(pid) {
-  const status = await readFile(`/proc/${pid}/status`, "utf8");
-  const match = status.match(/^VmRSS:\s+(\d+)\s+kB$/m);
-  if (!match) throw new Error(`VmRSS not found for pid ${pid}`);
-  return Number(match[1]) * 1024;
+  if (os.platform() === "linux") {
+    const status = await readFile(`/proc/${pid}/status`, "utf8");
+    const match = status.match(/^VmRSS:\s+(\d+)\s+kB$/m);
+    if (!match) throw new Error(`VmRSS not found for pid ${pid}`);
+    return Number(match[1]) * 1024;
+  }
+  if (os.platform() === "darwin") {
+    return new Promise((resolve, reject) => {
+      exec(`ps -o rss= -p ${pid}`, (error, stdout, stderr) => {
+        if (error) return reject(error);
+        const rssKiB = parseInt(stdout.trim(), 10);
+        if (isNaN(rssKiB)) return reject(new Error("Failed to parse RSS from ps"));
+        resolve(rssKiB * 1024);
+      });
+    });
+  }
+  throw new Error(`Platform ${os.platform()} is not supported for RSS metrics.`);
 }
 
 function summarize(values) {
