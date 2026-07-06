@@ -265,4 +265,4 @@ request.
 Pappice is released under the GNU General Public License v3.0 only
 (`GPL-3.0-only`). See [LICENSE](./LICENSE).
 
-Copyright 2026 Paolo Marrone.
+Copyright 2026 Paolo Marrone and contributors.
