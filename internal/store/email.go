@@ -345,7 +345,7 @@ func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) Email
 
 func emailNotificationWhere(filter EmailNotificationFilter) (string, []any) {
 	clauses := make([]string, 0, 2)
-	args := make([]any, 0)
+	args := make([]any, 0, 6)
 	status := strings.ToLower(strings.TrimSpace(filter.Status))
 	if status != "" && isValid(validEmailNotificationStatuses, status) {
 		clauses = append(clauses, "status = ?")
