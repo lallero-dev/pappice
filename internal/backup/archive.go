@@ -97,7 +97,7 @@ func extractUploadsArchive(archivePath, destinationDir string) error {
 			if err := os.MkdirAll(target, modeOrDefault(header.FileInfo().Mode().Perm(), 0o750)); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
