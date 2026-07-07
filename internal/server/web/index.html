@@ -322,12 +322,13 @@
               <h1 id="productContextTitle">Product</h1>
               <div class="product-context-meta" id="productContextMeta"></div>
             </div>
-            <div class="product-context-actions">
-              <button class="danger" id="deleteProductButton" type="button" hidden>Delete Product</button>
-            </div>
           </header>
           <div class="admin-shell product-shell">
             <aside class="admin-sidebar" aria-label="Product sections">
+              <button class="admin-side-button" data-product-section="general" type="button">
+                <strong>General</strong>
+                <span>Product details</span>
+              </button>
               <button class="admin-side-button" data-product-section="members" type="button">
                 <strong>Members</strong>
                 <span>Access and roles</span>
@@ -343,7 +344,37 @@
             </aside>
 
             <div class="admin-section-stage">
-              <section class="admin-panel product-section-panel" data-product-panel="members">
+              <section class="admin-panel product-section-panel" data-product-panel="general">
+                <div class="panel-head">
+                  <h2>General</h2>
+                  <button class="primary-button" id="saveProductButton" form="productGeneralForm" type="submit">Save Changes</button>
+                </div>
+                <form class="product-general-form" id="productGeneralForm">
+                  <div class="product-general-grid">
+                    <label>
+                      Key
+                      <input id="productGeneralKey" name="key" maxlength="16" autocomplete="off" disabled>
+                    </label>
+                    <label>
+                      Name
+                      <input id="productGeneralName" name="name" required autocomplete="off">
+                    </label>
+                  </div>
+                  <label>
+                    Description
+                    <textarea id="productGeneralDescription" name="description" rows="4"></textarea>
+                  </label>
+                </form>
+                <section class="danger-zone product-danger-zone" id="productDangerZone" hidden>
+                  <div>
+                    <strong>Delete Product</strong>
+                    <p>Permanently remove this product, its tickets, members, webhooks, notifications, and delivery history.</p>
+                  </div>
+                  <button class="danger" id="deleteProductButton" type="button">Delete Product</button>
+                </section>
+              </section>
+
+              <section class="admin-panel product-section-panel" data-product-panel="members" hidden>
                 <div class="panel-head">
                   <h2>Members</h2>
                   <button class="ghost-button" id="addMemberButton" type="button">Add</button>

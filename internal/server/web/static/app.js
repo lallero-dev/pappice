@@ -633,6 +633,9 @@ async function loadProductAdmin() {
 async function loadProductSection(section) {
   switch (validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION) {
     case DEFAULT_PRODUCT_SECTION:
+      renderProductGeneral();
+      return;
+    case "members":
       await Promise.all([loadUsers(), loadMembers()]);
       return;
     case "webhooks":
@@ -644,7 +647,7 @@ async function loadProductSection(section) {
     default:
       state.productSection = DEFAULT_PRODUCT_SECTION;
       renderProductSections();
-      await Promise.all([loadUsers(), loadMembers()]);
+      renderProductGeneral();
   }
 }
 
@@ -1521,6 +1524,7 @@ function renderProductsView() {
     return;
   }
   renderProductContext();
+  renderProductGeneral();
   renderProductSections();
 }
 
@@ -1575,7 +1579,6 @@ function renderProductContext() {
   const product = currentProductDetail();
   if (!els.productContextTitle || !els.productContextMeta) return;
   els.productContextMeta.replaceChildren();
-  if (els.deleteProductButton) els.deleteProductButton.hidden = true;
 
   if (!product) {
     els.productContextTitle.textContent = "No product selected";
@@ -1588,10 +1591,31 @@ function renderProductContext() {
     el("span", { className: "product-key-pill" }, product.key || `#${product.id}`),
     el("span", { className: "muted" }, `${labelize(product.role || "manager")} access`)
   );
-  if (els.deleteProductButton) {
-    els.deleteProductButton.hidden = !isAdmin();
-    els.deleteProductButton.dataset.productId = String(product.id);
+}
+
+function renderProductGeneral() {
+  const product = currentProductDetail();
+  if (!els.productGeneralForm) return;
+  const controls = [
+    els.productGeneralName,
+    els.productGeneralDescription,
+    els.saveProductButton
+  ].filter(Boolean);
+
+  if (!product) {
+    els.productGeneralForm.reset();
+    for (const control of controls) control.disabled = true;
+    if (els.productDangerZone) els.productDangerZone.hidden = true;
+    return;
   }
+
+  if (els.productGeneralKey) els.productGeneralKey.value = product.key || "";
+  if (els.productGeneralKey) els.productGeneralKey.disabled = true;
+  if (els.productGeneralName) els.productGeneralName.value = product.name || "";
+  if (els.productGeneralDescription) els.productGeneralDescription.value = product.description || "";
+  for (const control of controls) control.disabled = !canManageProduct(product.id);
+  if (els.productDangerZone) els.productDangerZone.hidden = !isAdmin();
+  if (els.deleteProductButton) els.deleteProductButton.dataset.productId = String(product.id);
 }
 
 function renderUsers() {
@@ -2339,8 +2363,9 @@ function conversationTimestamp(value) {
 }
 
 function firstUnreadMessageIndex(ticket, messages) {
-  if (!ticket.has_unread) return -1;
-  const lastRead = timestampValue(ticket.last_read_at);
+  const selectedBoundary = state.selectedId === ticket.id ? state.selectedUnreadBoundary : null;
+  if (!ticket.has_unread && selectedBoundary === null) return -1;
+  const lastRead = timestampValue(selectedBoundary ?? ticket.last_read_at);
   return messages.findIndex((message) => {
     return message.side !== "current" && timestampValue(message.createdAt) > lastRead;
   });
@@ -2578,6 +2603,19 @@ function openProductModal() {
       await openProductDetail(product.id);
     }
   });
+}
+
+async function updateCurrentProduct(data) {
+  const product = currentProductDetail();
+  if (!product || !canManageProduct(product.id)) return;
+  const patch = {
+    name: String(data.name || "").trim(),
+    description: String(data.description || "").trim()
+  };
+  await request(`/api/products/${product.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  await loadProducts();
+  renderProductsView();
+  showAppAlert("Product updated.");
 }
 
 function openUserModal(user = null) {
@@ -3250,6 +3288,20 @@ function bindEvents() {
   });
   els.auditSearchInput.addEventListener("input", runAuditSearch);
   els.addProductButton.addEventListener("click", () => openProductModal());
+  els.productGeneralForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!canManageProduct(state.productDetailId)) return;
+    if (els.saveProductButton) els.saveProductButton.disabled = true;
+    if (els.saveProductButton) els.saveProductButton.setAttribute("aria-busy", "true");
+    try {
+      await updateCurrentProduct(formObject(new FormData(els.productGeneralForm)));
+    } catch (error) {
+      showError(error);
+    } finally {
+      if (els.saveProductButton) els.saveProductButton.disabled = false;
+      if (els.saveProductButton) els.saveProductButton.removeAttribute("aria-busy");
+    }
+  });
   els.productIndexList.addEventListener("click", (event) => {
     const open = event.target.closest?.("[data-product-open]");
     if (!open) return;
@@ -3387,8 +3439,12 @@ function selectedTicket() {
 }
 
 function setSelectedTicket(ticket, { updateRoute = true } = {}) {
+  const previousId = state.selectedId;
   state.selectedId = ticket?.id || null;
   state.selectedTicket = ticket || null;
+  if (!ticket || ticket.id !== previousId) {
+    state.selectedUnreadBoundary = ticket?.has_unread ? ticket.last_read_at || "" : null;
+  }
   syncTicketMobileState();
   if (updateRoute) syncRoute();
 }

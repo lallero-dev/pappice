@@ -33,14 +33,22 @@ async function addCustomerToProduct(cdp, productID) {
       return document.querySelector(`[data-product-open='${selectedProductID}']`);
     }, "product index open button");
     openButton.click();
-    await waitFor(() => window.location.pathname === `/products/${selectedProductID}/members`, "product members route");
+    await waitFor(() => window.location.pathname === `/products/${selectedProductID}/general`, "product general route");
     await waitFor(() => {
       const title = document.querySelector("#productContextTitle")?.textContent.trim();
       return title === selectedProductName;
     }, "selected product context");
+    await waitFor(() => {
+      return document.querySelector("[data-product-section='general']")?.classList.contains("active") &&
+        !document.querySelector("[data-product-panel='general']")?.hidden;
+    }, "product general section");
+    setValue(document.querySelector("#productGeneralDescription"), "E2E product description");
+    document.querySelector("#productGeneralForm").requestSubmit();
+    await waitFor(() => document.querySelector("#appAlertText")?.textContent.includes("Product updated."), "product update notice");
     const deleteProduct = await waitFor(() => {
       const button = document.querySelector("#deleteProductButton");
-      return button && !button.hidden ? button : null;
+      const zone = document.querySelector("#productDangerZone");
+      return button && zone && !zone.hidden ? button : null;
     }, "admin product delete control");
     deleteProduct.click();
     const deleteConfirmRoot = await waitFor(() => {
@@ -52,6 +60,8 @@ async function addCustomerToProduct(cdp, productID) {
     }
     deleteConfirmRoot.querySelector("footer .ghost").click();
     await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "product delete confirmation dismissed");
+    document.querySelector("[data-product-section='members']").click();
+    await waitFor(() => window.location.pathname === `/products/${selectedProductID}/members`, "product members route");
     await waitFor(() => {
       return document.querySelector("[data-product-section='members']")?.classList.contains("active") &&
         !document.querySelector("[data-product-panel='members']")?.hidden;

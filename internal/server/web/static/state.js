@@ -2,8 +2,8 @@ import { createRouter } from "./router.js";
 
 export const DEFAULT_ADMIN_SECTION = "accounts";
 export const ADMIN_SECTIONS = [DEFAULT_ADMIN_SECTION, "tokens", "webhooks", "email", "maintenance", "audit"];
-export const DEFAULT_PRODUCT_SECTION = "members";
-export const PRODUCT_SECTIONS = [DEFAULT_PRODUCT_SECTION, "webhooks", "deliveries"];
+export const DEFAULT_PRODUCT_SECTION = "general";
+export const PRODUCT_SECTIONS = [DEFAULT_PRODUCT_SECTION, "members", "webhooks", "deliveries"];
 export const DEFAULT_TICKET_STATUSES = ["new", "assigned"];
 export const TICKET_AUTOSAVE_DELAY_MS = 450;
 export const TICKET_REFRESH_INTERVAL_MS = 5000;
@@ -55,6 +55,7 @@ export const state = {
   ticketProductId: null,
   selectedId: null,
   selectedTicket: null,
+  selectedUnreadBoundary: null,
   renderedTicketDetailId: null,
   sort: {
     key: "updated_at",
@@ -140,6 +141,12 @@ export const els = {
   productDetailView: document.querySelector("#productDetailView"),
   productContextTitle: document.querySelector("#productContextTitle"),
   productContextMeta: document.querySelector("#productContextMeta"),
+  productGeneralForm: document.querySelector("#productGeneralForm"),
+  productGeneralKey: document.querySelector("#productGeneralKey"),
+  productGeneralName: document.querySelector("#productGeneralName"),
+  productGeneralDescription: document.querySelector("#productGeneralDescription"),
+  saveProductButton: document.querySelector("#saveProductButton"),
+  productDangerZone: document.querySelector("#productDangerZone"),
   deleteProductButton: document.querySelector("#deleteProductButton"),
   ticketList: document.querySelector("#ticketList"),
   ticketDetailPane: document.querySelector("#ticketDetailPane"),

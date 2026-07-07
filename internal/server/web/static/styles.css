@@ -2047,14 +2047,6 @@ button:focus-visible {
   min-width: 0;
 }
 
-.product-context-actions {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
-  margin-left: auto;
-}
-
 .product-context-kicker {
   color: var(--blue-dark);
   font-size: 12px;
@@ -2107,6 +2099,43 @@ button:focus-visible {
 .admin-section-panel,
 .product-section-panel {
   align-self: start;
+}
+
+.product-general-form {
+  display: grid;
+  gap: 12px;
+}
+
+.product-general-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+}
+
+.product-general-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.product-general-form textarea {
+  resize: vertical;
+}
+
+.product-danger-zone {
+  align-items: center;
+  background: #fff7f7;
+  border: 1px solid #f0b6b6;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 12px;
+}
+
+.product-danger-zone p {
+  color: var(--muted);
+  margin: 2px 0 0;
 }
 
 #productIndexPanel {
@@ -2715,6 +2744,16 @@ button:focus-visible {
     padding: 8px;
   }
 
+  .product-general-grid,
+  .product-danger-zone {
+    grid-template-columns: 1fr;
+  }
+
+  .product-danger-zone {
+    align-items: stretch;
+    display: grid;
+  }
+
   .product-context {
     align-items: stretch;
     border-left: 0;
@@ -2722,11 +2761,6 @@ button:focus-visible {
     border-right: 0;
     display: grid;
     margin-bottom: 8px;
-  }
-
-  .product-context-actions {
-    flex-wrap: wrap;
-    margin-left: 0;
   }
 
   .panel-actions {
