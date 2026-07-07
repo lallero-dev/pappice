@@ -430,6 +430,7 @@ func TestAPIAuthAndCSRFContracts(t *testing.T) {
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/tokens", map[string]any{"name": "contract"}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	tokenValue := decodeString(t, body, "value")
+	tokenID := decodeNestedInt64(t, body, "token", "id")
 
 	for _, path := range []string{
 		"/api/products",
@@ -478,13 +479,30 @@ func TestAPIAuthAndCSRFContracts(t *testing.T) {
 	}, tokenValue)
 	requireStatus(t, resp, body, http.StatusCreated)
 
-	resp, body = doJSONBearer(t, client, http.MethodPost, server.URL+"/api/me/password", map[string]any{
-		"current_password": "correct horse",
-		"new_password":     "better password",
-	}, tokenValue)
-	requireStatus(t, resp, body, http.StatusForbidden)
-	if !bytes.Contains(body, []byte("browser session")) {
-		t.Fatalf("token password change response = %s", body)
+	browserOnlyWithToken := []struct {
+		name    string
+		method  string
+		path    string
+		payload any
+	}{
+		{"profile update", http.MethodPatch, "/api/me", map[string]any{"display_name": "Token Rename"}},
+		{"password change", http.MethodPost, "/api/me/password", map[string]any{
+			"current_password": "correct horse",
+			"new_password":     "better password",
+		}},
+		{"logout", http.MethodPost, "/api/logout", nil},
+		{"list tokens", http.MethodGet, "/api/tokens", nil},
+		{"create token", http.MethodPost, "/api/tokens", map[string]any{"name": "nested-token"}},
+		{"delete token", http.MethodDelete, "/api/tokens/" + itoa(tokenID), nil},
+	}
+	for _, tt := range browserOnlyWithToken {
+		t.Run("token cannot "+tt.name, func(t *testing.T) {
+			resp, body := doJSONBearer(t, client, tt.method, server.URL+tt.path, tt.payload, tokenValue)
+			requireStatus(t, resp, body, http.StatusForbidden)
+			if !bytes.Contains(body, []byte("browser session")) {
+				t.Fatalf("token browser-only response = %s", body)
+			}
+		})
 	}
 }
 

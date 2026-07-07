@@ -200,6 +200,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet, http.MethodPatch)
 		return
 	}
+	if !s.requireBrowserSession(w, auth) {
+		return
+	}
 	var input struct {
 		DisplayName *string `json:"display_name"`
 		Email       *string `json:"email"`
@@ -229,8 +232,7 @@ func (s *Server) handleMePassword(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if auth.ViaToken || strings.TrimSpace(auth.SessionToken) == "" {
-		respondError(w, http.StatusForbidden, "browser session is required")
+	if !s.requireBrowserSession(w, auth) {
 		return
 	}
 	var input struct {
@@ -329,6 +331,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	_ = auth
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
+		return
+	}
+	if !s.requireBrowserSession(w, auth) {
 		return
 	}
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
@@ -1059,6 +1064,9 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.requireBrowserSession(w, auth) {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		respondJSON(w, http.StatusOK, map[string]any{"tokens": s.store.ListAPITokens(auth.User.ID)})
@@ -1083,6 +1091,9 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 	auth, ok := s.requireStaff(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireBrowserSession(w, auth) {
 		return
 	}
 	id, ok := parseTrailingID(w, r.URL.Path, "/api/tokens/")
@@ -1474,6 +1485,14 @@ func (s *Server) requireStaff(w http.ResponseWriter, r *http.Request) (authConte
 		return authContext{}, false
 	}
 	return auth, true
+}
+
+func (s *Server) requireBrowserSession(w http.ResponseWriter, auth authContext) bool {
+	if auth.ViaToken || strings.TrimSpace(auth.SessionToken) == "" {
+		respondError(w, http.StatusForbidden, "browser session is required")
+		return false
+	}
+	return true
 }
 
 func (s *Server) requireHTTPS(w http.ResponseWriter, r *http.Request) bool {
