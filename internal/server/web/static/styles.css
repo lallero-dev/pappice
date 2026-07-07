@@ -2020,16 +2020,11 @@ button:focus-visible {
   font-size: 12px;
 }
 
-.admin-section-stage,
-.admin-grid {
+.admin-section-stage {
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr);
   min-height: 0;
-  overflow: hidden;
-}
-
-.admin-section-stage {
   overflow: auto;
 }
 
@@ -2427,8 +2422,7 @@ button:focus-visible {
 
   .shell,
   .ticket-layout,
-  .admin-shell,
-  .admin-grid {
+  .admin-shell {
     grid-template-columns: 1fr;
   }
 

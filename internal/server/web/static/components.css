@@ -329,23 +329,6 @@ button:disabled {
   }
 }
 
-.ticket-detail {
-  display: grid;
-  gap: 16px;
-  min-height: 0;
-}
-
-.detail-header {
-  display: grid;
-  gap: 10px;
-}
-
-.detail-header h3 {
-  font-size: 24px;
-  line-height: 1.2;
-  margin: 0;
-}
-
 .ticket-form-field {
   display: grid;
   gap: 6px;
@@ -514,18 +497,9 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
-.ticket-detail-grid {
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 310px);
-  min-height: 0;
-}
-
-.ticket-main,
 .ticket-side {
   align-content: start;
   display: grid;
-  gap: 12px;
   min-width: 0;
 }
 
@@ -554,11 +528,6 @@ button:disabled {
   font-weight: 750;
   margin: 0;
   text-transform: uppercase;
-}
-
-.muted {
-  color: #667085;
-  margin: 0;
 }
 
 .detail-controls {
@@ -818,62 +787,6 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-.comment-list {
-  display: grid;
-  gap: 10px;
-}
-
-.comment {
-  background: #fff;
-  border: 1px solid #dde4ec;
-  border-left: 3px solid #b8c7d7;
-  border-radius: 6px;
-  padding: 10px;
-}
-
-.comment.internal {
-  background: #fffaf0;
-  border-color: #e6c777;
-  border-left-color: #b7791f;
-}
-
-.comment-head {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-bottom: 5px;
-}
-
-.comment strong {
-  font-size: 12px;
-}
-
-.comment-time {
-  color: #667085;
-  font-size: 12px;
-}
-
-.comment p {
-  line-height: 1.5;
-  margin: 0;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.comment-form {
-  background: #f8fafc;
-  border: 1px solid #dde4ec;
-  border-radius: 8px;
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-}
-
-.comment-input {
-  min-height: 90px;
-}
-
 .badge {
   border-radius: 999px;
   display: inline-flex;
@@ -1031,10 +944,6 @@ button:disabled {
 
 @media (max-width: 760px) {
   .grid {
-    grid-template-columns: 1fr;
-  }
-
-  .ticket-detail-grid {
     grid-template-columns: 1fr;
   }
 
