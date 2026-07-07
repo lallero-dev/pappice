@@ -1,8 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"io/fs"
 	"net/http"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +24,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/session", s.handleSession)
 	s.mux.HandleFunc("/api/me", s.handleMe)
 	s.mux.HandleFunc("/api/me/password", s.handleMePassword)
+	s.mux.HandleFunc("/api/mem", s.handleGetMemoryStats)
 	s.mux.HandleFunc("/api/setup", s.handleSetup)
 	s.mux.HandleFunc("/api/login", s.handleLogin)
 	s.mux.HandleFunc("/api/logout", s.handleLogout)
@@ -112,4 +115,24 @@ func (s *Server) handleAccountIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write(content)
+}
+
+func (s *Server) handleGetMemoryStats(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("force_gc") == "true" {
+		runtime.GC()
+	}
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	stats := map[string]interface{}{
+		"live_objects":    m.Mallocs - m.Frees,
+		"total_mallocs":   m.Mallocs,
+		"heap_in_use_mib": m.HeapInuse / 1024 / 1024,
+		"gc_cycles":       m.NumGC,
+		"gc_cpu_fraction": m.GCCPUFraction,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
