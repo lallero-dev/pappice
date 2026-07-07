@@ -1,6 +1,8 @@
 package security
 
 import (
+	"crypto/pbkdf2"
+	"crypto/sha256"
 	"encoding/base64"
 	"strconv"
 	"strings"
@@ -24,7 +26,7 @@ func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	if PasswordNeedsRehash(hash) {
 		t.Fatal("fresh password hash should not need rehash")
 	}
-	legacyHash := hashPasswordWithIterations("correct horse", 60000)
+	legacyHash := hashPasswordWithIterations(t, "correct horse", 60000)
 	if !VerifyPassword(legacyHash, "correct horse") {
 		t.Fatal("legacy password hash should verify")
 	}
@@ -56,9 +58,13 @@ func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	}
 }
 
-func hashPasswordWithIterations(password string, iterations int) string {
+func hashPasswordWithIterations(t *testing.T, password string, iterations int) string {
+	t.Helper()
 	salt := []byte("0123456789abcdef")
-	key := pbkdf2SHA256([]byte(password), salt, iterations, passwordKeyBytes)
+	key, err := pbkdf2.Key(sha256.New, password, salt, iterations, passwordKeyBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return passwordAlgorithm + "$" +
 		strconv.Itoa(iterations) + "$" +
 		base64.RawStdEncoding.EncodeToString(salt) + "$" +

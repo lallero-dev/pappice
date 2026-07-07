@@ -2,11 +2,11 @@ package security
 
 import (
 	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -36,7 +36,10 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := pbkdf2SHA256([]byte(password), salt, passwordIterations, passwordKeyBytes)
+	key, err := pbkdf2.Key(sha256.New, password, salt, passwordIterations, passwordKeyBytes)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("%s$%d$%s$%s",
 		passwordAlgorithm,
 		passwordIterations,
@@ -50,7 +53,10 @@ func VerifyPassword(encoded, password string) bool {
 	if !ok {
 		return false
 	}
-	actual := pbkdf2SHA256([]byte(password), params.salt, params.iterations, len(params.expected))
+	actual, err := pbkdf2.Key(sha256.New, password, params.salt, params.iterations, len(params.expected))
+	if err != nil {
+		return false
+	}
 	return subtle.ConstantTimeCompare(actual, params.expected) == 1
 }
 
@@ -105,31 +111,4 @@ func HMACSHA256(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func pbkdf2SHA256(password, salt []byte, iterations, keyLen int) []byte {
-	hashLen := 32
-	blockCount := (keyLen + hashLen - 1) / hashLen
-	key := make([]byte, 0, blockCount*hashLen)
-
-	for block := 1; block <= blockCount; block++ {
-		mac := hmac.New(sha256.New, password)
-		_, _ = mac.Write(salt)
-		var counter [4]byte
-		binary.BigEndian.PutUint32(counter[:], uint32(block))
-		_, _ = mac.Write(counter[:])
-		u := mac.Sum(nil)
-		t := append([]byte(nil), u...)
-
-		for i := 1; i < iterations; i++ {
-			mac = hmac.New(sha256.New, password)
-			_, _ = mac.Write(u)
-			u = mac.Sum(nil)
-			for j := range t {
-				t[j] ^= u[j]
-			}
-		}
-		key = append(key, t...)
-	}
-	return key[:keyLen]
 }
