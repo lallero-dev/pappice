@@ -1537,7 +1537,7 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 
 	makePendingWebhookNotificationsDue(t, tracker)
-	if err := app.dispatchPendingEvents(context.TODO(), 10); err != nil {
+	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
 		t.Fatalf("dispatch coalesced webhook: %v", err)
 	}
 	select {
@@ -1599,7 +1599,7 @@ func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T)
 		t.Fatalf("webhook deliveries = %d, want 1", webhookHits.Load())
 	}
 
-	if err := app.dispatchPendingEvents(context.TODO(), 10); err != nil {
+	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
 		t.Fatalf("dispatch pending events again: %v", err)
 	}
 	if webhookHits.Load() != 1 {

@@ -1769,7 +1769,7 @@ func (s *Server) eventContext(r *http.Request, actor store.User) store.EventCont
 }
 
 func (s *Server) dispatchEventsSoon() {
-	_ = s.dispatchPendingEvents(context.TODO(), 10)
+	_ = s.dispatchPendingEvents(context.Background(), 10)
 }
 
 func (s *Server) accountLinkEmailRequested(user store.User, token string) bool {
