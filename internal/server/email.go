@@ -114,7 +114,8 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 	link := s.ticketURL()
 
 	intro := "We received your ticket."
-	if strings.TrimSpace(actorName) != "" && event == "ticket.commented" {
+	actorName = strings.TrimSpace(actorName)
+	if actorName != "" && event == "ticket.commented" {
 		intro = fmt.Sprintf("%s replied to your ticket.", actorName)
 	}
 	if event == "ticket.updated" && requesterTerminalStatus(ticket.Status) {
@@ -171,8 +172,8 @@ func (s *Server) ticketEmailContent(event string, product store.Product, ticket 
 		{Label: "Requester", Value: ticket.Reporter},
 	}
 	blocks := make([]emailBlock, 0, 2)
-	if strings.TrimSpace(ticket.Description) != "" {
-		blocks = append(blocks, emailBlock{Title: "Description", Body: ticket.Description})
+	if desc := strings.TrimSpace(ticket.Description); desc != "" {
+		blocks = append(blocks, emailBlock{Title: "Description", Body: desc})
 	}
 	if event != "ticket.created" {
 		if comment, ok := latestPublicComment(ticket); ok {
@@ -216,17 +217,20 @@ type emailBlock struct {
 
 func renderEmailText(layout emailLayout) string {
 	var text strings.Builder
-	if strings.TrimSpace(layout.Title) != "" {
-		fmt.Fprintf(&text, "%s\n\n", strings.TrimSpace(layout.Title))
+	if title := strings.TrimSpace(layout.Title); title != "" {
+		fmt.Fprintf(&text, "%s\n\n", title)
 	}
-	if strings.TrimSpace(layout.Intro) != "" {
-		fmt.Fprintf(&text, "%s\n\n", strings.TrimSpace(layout.Intro))
+	if intro := strings.TrimSpace(layout.Intro); intro != "" {
+		fmt.Fprintf(&text, "%s\n\n", intro)
 	}
+
 	for _, field := range layout.Fields {
-		if strings.TrimSpace(field.Label) == "" || strings.TrimSpace(field.Value) == "" {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		if label == "" || value == "" {
 			continue
 		}
-		fmt.Fprintf(&text, "%s: %s\n", strings.TrimSpace(field.Label), strings.TrimSpace(field.Value))
+		fmt.Fprintf(&text, "%s: %s\n", label, value)
 	}
 	if len(layout.Fields) > 0 {
 		text.WriteString("\n")
@@ -238,19 +242,19 @@ func renderEmailText(layout emailLayout) string {
 		}
 		if strings.TrimSpace(block.Title) != "" {
 			title := strings.TrimSpace(block.Title)
-			if strings.TrimSpace(block.Meta) != "" {
-				title += " " + strings.TrimSpace(block.Meta)
+			if meta := strings.TrimSpace(block.Meta); meta != "" {
+				title += " " + meta
 			}
 			fmt.Fprintf(&text, "%s:\n", title)
 		}
 		fmt.Fprintf(&text, "%s\n\n", body)
 	}
-	if strings.TrimSpace(layout.ActionURL) != "" {
+	if actionURL := strings.TrimSpace(layout.ActionURL); actionURL != "" {
 		label := defaultString(layout.ActionLabel, "Open")
-		fmt.Fprintf(&text, "%s:\n%s\n\n", label, strings.TrimSpace(layout.ActionURL))
+		fmt.Fprintf(&text, "%s:\n%s\n\n", label, actionURL)
 	}
-	if strings.TrimSpace(layout.Footer) != "" {
-		fmt.Fprintf(&text, "%s\n", strings.TrimSpace(layout.Footer))
+	if footer := strings.TrimSpace(layout.Footer); footer != "" {
+		fmt.Fprintf(&text, "%s\n", footer)
 	}
 	return strings.TrimSpace(text.String())
 }
@@ -265,24 +269,28 @@ func renderEmailHTML(layout emailLayout) string {
 	htmlBody.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f4f6f8;"><tr><td align="center" style="padding:24px 12px;">`)
 	htmlBody.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;max-width:640px;background:#ffffff;border:1px solid #d8e0e8;border-radius:6px;">`)
 	htmlBody.WriteString(`<tr><td style="padding:24px 28px 20px;">`)
-	if strings.TrimSpace(layout.Kicker) != "" {
-		fmt.Fprintf(&htmlBody, `<div style="font-size:12px;font-weight:700;letter-spacing:0;text-transform:uppercase;color:#52647a;margin-bottom:8px;">%s</div>`, html.EscapeString(strings.TrimSpace(layout.Kicker)))
+	if kicker := strings.TrimSpace(layout.Kicker); kicker != "" {
+		fmt.Fprintf(&htmlBody, `<div style="font-size:12px;font-weight:700;letter-spacing:0;text-transform:uppercase;color:#52647a;margin-bottom:8px;">%s</div>`, html.EscapeString(kicker))
 	}
 	fmt.Fprintf(&htmlBody, `<h1 style="margin:0;color:#111827;font-size:22px;line-height:1.25;font-weight:700;">%s</h1>`, html.EscapeString(strings.TrimSpace(layout.Title)))
-	if strings.TrimSpace(layout.Intro) != "" {
-		fmt.Fprintf(&htmlBody, `<p style="margin:14px 0 0;color:#334155;">%s</p>`, html.EscapeString(strings.TrimSpace(layout.Intro)))
+	if intro := strings.TrimSpace(layout.Intro); intro != "" {
+		fmt.Fprintf(&htmlBody, `<p style="margin:14px 0 0;color:#334155;">%s</p>`, html.EscapeString(intro))
 	}
 	htmlBody.WriteString(`</td></tr>`)
 	writeEmailFieldsHTML(&htmlBody, layout.Fields)
 	writeEmailBlocksHTML(&htmlBody, layout.Blocks)
-	if strings.TrimSpace(layout.ActionURL) != "" || strings.TrimSpace(layout.Footer) != "" {
+
+	actionURL := strings.TrimSpace(layout.ActionURL)
+	footer := strings.TrimSpace(layout.Footer)
+
+	if actionURL != "" || footer != "" {
 		htmlBody.WriteString(`<tr><td style="padding:20px 28px 24px;border-top:1px solid #e5ebf1;">`)
-		if strings.TrimSpace(layout.ActionURL) != "" {
+		if actionURL != "" {
 			label := defaultString(layout.ActionLabel, "Open")
-			fmt.Fprintf(&htmlBody, `<p style="margin:0 0 14px;"><a href="%s" style="color:#1b5f9e;font-weight:700;text-decoration:none;">%s</a></p>`, html.EscapeString(strings.TrimSpace(layout.ActionURL)), html.EscapeString(label))
+			fmt.Fprintf(&htmlBody, `<p style="margin:0 0 14px;"><a href="%s" style="color:#1b5f9e;font-weight:700;text-decoration:none;">%s</a></p>`, html.EscapeString(actionURL), html.EscapeString(label))
 		}
-		if strings.TrimSpace(layout.Footer) != "" {
-			fmt.Fprintf(&htmlBody, `<p style="margin:0;color:#64748b;font-size:13px;">%s</p>`, html.EscapeString(strings.TrimSpace(layout.Footer)))
+		if footer != "" {
+			fmt.Fprintf(&htmlBody, `<p style="margin:0;color:#64748b;font-size:13px;">%s</p>`, html.EscapeString(footer))
 		}
 		htmlBody.WriteString(`</td></tr>`)
 	}
@@ -333,8 +341,8 @@ func writeEmailBlocksHTML(out *strings.Builder, blocks []emailBlock) {
 		title := defaultString(block.Title, "Details")
 		out.WriteString(`<div style="border-top:1px solid #e5ebf1;padding:14px 0;">`)
 		fmt.Fprintf(out, `<div style="margin:0 0 8px;color:#64748b;font-size:13px;line-height:1.4;"><span style="font-weight:700;">%s</span>`, html.EscapeString(strings.TrimSpace(title)))
-		if strings.TrimSpace(block.Meta) != "" {
-			fmt.Fprintf(out, ` <span>%s</span>`, html.EscapeString(strings.TrimSpace(block.Meta)))
+		if meta := strings.TrimSpace(block.Meta); meta != "" {
+			fmt.Fprintf(out, ` <span>%s</span>`, html.EscapeString(meta))
 		}
 		out.WriteString(`</div>`)
 		fmt.Fprintf(out, `<div style="margin:0;padding:14px 16px;background:#f8fafc;border:1px solid #dfe7ef;border-radius:6px;color:#1f2933;white-space:pre-wrap;">%s</div>`, emailHTMLLines(body))
@@ -364,13 +372,14 @@ func requesterTerminalStatus(status string) bool {
 }
 
 func requesterStatusLabel(status string) string {
-	switch strings.TrimSpace(strings.ToLower(status)) {
+	s := strings.TrimSpace(status)
+	switch strings.ToLower(s) {
 	case "resolved":
 		return "Resolved"
 	case "rejected":
 		return "Rejected"
 	default:
-		return strings.TrimSpace(status)
+		return s
 	}
 }
 
