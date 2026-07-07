@@ -108,23 +108,26 @@ func HMACSHA256(secret string, body []byte) string {
 }
 
 func pbkdf2SHA256(password, salt []byte, iterations, keyLen int) []byte {
-	hashLen := 32
+	const hashLen = 32
 	blockCount := (keyLen + hashLen - 1) / hashLen
 	key := make([]byte, 0, blockCount*hashLen)
 
+	mac := hmac.New(sha256.New, password)
+
 	for block := 1; block <= blockCount; block++ {
-		mac := hmac.New(sha256.New, password)
-		_, _ = mac.Write(salt)
+		mac.Reset()
+		mac.Write(salt)
 		var counter [4]byte
 		binary.BigEndian.PutUint32(counter[:], uint32(block))
-		_, _ = mac.Write(counter[:])
+		mac.Write(counter[:])
 		u := mac.Sum(nil)
-		t := append([]byte(nil), u...)
+		t := make([]byte, hashLen)
+		copy(t, u)
 
 		for i := 1; i < iterations; i++ {
-			mac = hmac.New(sha256.New, password)
-			_, _ = mac.Write(u)
-			u = mac.Sum(nil)
+			mac.Reset()
+			mac.Write(u)
+			u = mac.Sum(u[:0])
 			for j := range t {
 				t[j] ^= u[j]
 			}
