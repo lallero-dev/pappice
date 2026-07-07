@@ -159,7 +159,17 @@ func serve(cfg appConfig, stderr io.Writer) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	errs := make(chan error, 1)
+	errs := make(chan error, 2)
+	debugSrv, err := startDebugServer(cfg.DebugAddr, logger, errs)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if debugSrv != nil {
+			_ = debugSrv.Close()
+		}
+	}()
+
 	go func() {
 		if useTLS {
 			logger.Printf("pappice listening on https://%s", cfg.Addr)
@@ -184,6 +194,11 @@ func serve(cfg appConfig, stderr io.Writer) error {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+	if debugSrv != nil {
+		if err := debugSrv.Shutdown(ctx); err != nil {
+			return fmt.Errorf("shutdown debug: %w", err)
+		}
 	}
 	return nil
 }

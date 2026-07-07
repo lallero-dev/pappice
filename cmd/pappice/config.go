@@ -13,6 +13,7 @@ import (
 
 type appConfig struct {
 	Addr                  string
+	DebugAddr             string
 	DBPath                string
 	TLSCert               string
 	TLSKey                string
@@ -93,6 +94,7 @@ func newConfigFlagSet(name string, cfg *appConfig, output io.Writer) *flag.FlagS
 		fs.PrintDefaults()
 	}
 	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "HTTP listen address")
+	fs.StringVar(&cfg.DebugAddr, "debug-addr", cfg.DebugAddr, "optional local-only pprof listen address; requires a debug build")
 	fs.StringVar(&cfg.DBPath, "db", cfg.DBPath, "path to SQLite database file")
 	fs.StringVar(&cfg.TLSCert, "tls-cert", cfg.TLSCert, "TLS certificate path")
 	fs.StringVar(&cfg.TLSKey, "tls-key", cfg.TLSKey, "TLS private key path")
@@ -137,6 +139,9 @@ func visitedFlags(fs *flag.FlagSet) map[string]bool {
 func applyEnv(cfg *appConfig, flags map[string]bool) {
 	if !flags["addr"] {
 		cfg.Addr = envOr("PAPPICE_ADDR", cfg.Addr)
+	}
+	if !flags["debug-addr"] {
+		cfg.DebugAddr = envOr("PAPPICE_DEBUG_ADDR", cfg.DebugAddr)
 	}
 	if !flags["db"] {
 		cfg.DBPath = envOr("PAPPICE_DB", cfg.DBPath)

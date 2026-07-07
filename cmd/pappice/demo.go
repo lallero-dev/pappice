@@ -34,6 +34,7 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pappice demo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:8388", "HTTPS listen address")
+	debugAddr := fs.String("debug-addr", "", "optional local-only pprof listen address; requires a debug build")
 	keep := fs.Bool("keep", false, "keep the temporary demo directory after shutdown")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: pappice demo [flags]")
@@ -73,6 +74,7 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 
 	cfg := defaultAppConfig()
 	cfg.Addr = *addr
+	cfg.DebugAddr = *debugAddr
 	cfg.DBPath = filepath.Join(dir, "pappice.db")
 	cfg.UploadDir = filepath.Join(dir, "uploads")
 	cfg.BackupDir = filepath.Join(dir, "backups")

@@ -255,6 +255,11 @@ machine, the default scenario reported about 22 MiB RSS mean and 23 MiB RSS max
 for 2 products, 2 staff sessions, 8 customer sessions, and 24 tickets. Treat
 this as an indicative local measurement; compare runs on the same host.
 
+For local profiling, build with `go build -tags debug ./cmd/pappice`, start
+Pappice with `PAPPICE_DEBUG_ADDR=127.0.0.1:8390`, and use Go's standard
+`/debug/pprof/` endpoints. The debug listener is disabled by default and only
+accepts loopback addresses.
+
 ## Contributing
 
 Keep changes small and focused. Run the tests above before opening a pull

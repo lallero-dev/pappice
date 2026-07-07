@@ -389,10 +389,23 @@ func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
 	}
 }
 
+func TestDemoHelpIncludesDebugAddr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"pappice", "demo", "-h"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("demo help exit = %d", code)
+	}
+	output := stdout.String() + stderr.String()
+	if !strings.Contains(output, "-debug-addr") {
+		t.Fatalf("demo help output missing debug flag:\n%s", output)
+	}
+}
+
 func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	t.Setenv("PAPPICE_ADDR", "127.0.0.1:9000")
 	t.Setenv("PAPPICE_DB", "env.db")
 	t.Setenv("PAPPICE_SMTP_PASSWORD", "configured-secret")
+	t.Setenv("PAPPICE_DEBUG_ADDR", "127.0.0.1:8390")
 	t.Setenv("PAPPICE_NOTIFICATION_DELAY", "45s")
 	t.Setenv("PAPPICE_DOMAIN_EVENT_RETENTION", "720h")
 	t.Setenv("PAPPICE_TRUST_PROXY_HEADERS", "true")
@@ -410,6 +423,9 @@ func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	}
 	if cfg.SMTPPassword != "configured-secret" {
 		t.Fatalf("env smtp password was not applied")
+	}
+	if cfg.DebugAddr != "127.0.0.1:8390" {
+		t.Fatalf("env debug addr was not applied: %q", cfg.DebugAddr)
 	}
 	if cfg.NotificationDelay != 45*time.Second {
 		t.Fatalf("env notification delay = %s", cfg.NotificationDelay)
