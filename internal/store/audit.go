@@ -80,7 +80,7 @@ func (s *Store) ListAuditEventsPage(filter AuditEventFilter) AuditEventPage {
 	}
 	defer rows.Close()
 
-	page.Events = make([]AuditEvent, 0)
+	page.Events = make([]AuditEvent, 0, page.Total)
 	for rows.Next() {
 		event, err := scanAuditEvent(rows)
 		if err == nil {

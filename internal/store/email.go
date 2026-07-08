@@ -333,7 +333,7 @@ func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) Email
 	}
 	defer rows.Close()
 
-	page.Notifications = make([]EmailNotification, 0)
+	page.Notifications = make([]EmailNotification, 0, page.Total)
 	for rows.Next() {
 		notification, err := scanEmailNotification(rows)
 		if err == nil {
