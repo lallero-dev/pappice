@@ -197,11 +197,12 @@ func originMatches(raw, host string) bool {
 }
 
 func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	remoteAddr := strings.TrimSpace(r.RemoteAddr)
+	host, _, err := net.SplitHostPort(remoteAddr)
 	if err == nil {
 		return host
 	}
-	return strings.TrimSpace(r.RemoteAddr)
+	return remoteAddr
 }
 
 func trimRoutePrefix(path, prefix string) string {
