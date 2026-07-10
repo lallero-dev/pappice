@@ -234,6 +234,30 @@ func seedDemoStore(dbPath string) (demoSeed, error) {
 	}); err != nil {
 		return demoSeed{}, err
 	}
+	for _, example := range []struct {
+		title       string
+		description string
+		priority    string
+	}{
+		{"Mobile menu covers account settings", "The account settings are hidden behind the navigation menu on my phone.", "normal"},
+		{"Webhook delivery is delayed", "Order notifications are reaching our integration several minutes late.", "high"},
+		{"Cannot update billing address", "Saving a new billing address returns an error without changing the account.", "high"},
+		{"Question about team permissions", "Which role should we use for colleagues who only need to view requests?", "low"},
+		{"Export contains duplicate rows", "The latest CSV export contains some invoices more than once.", "normal"},
+	} {
+		if _, err := tracker.CreateTicket(store.CreateTicket{
+			ProductID:      product.ID,
+			Title:          example.title,
+			Description:    example.description,
+			Priority:       example.priority,
+			Source:         "portal",
+			RequesterName:  customer.DisplayName,
+			RequesterEmail: customer.Email,
+			Actor:          store.EventActorFromUser(customer),
+		}); err != nil {
+			return demoSeed{}, err
+		}
+	}
 
 	return demoSeed{
 		Admin:    admin.Email,
