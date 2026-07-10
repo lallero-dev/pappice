@@ -630,6 +630,58 @@ func TestTicketDeletionRequiresAdmin(t *testing.T) {
 	}
 }
 
+func TestTicketListPaginationAndSorting(t *testing.T) {
+	_, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+	for _, ticket := range []struct{ title, priority string }{
+		{"Zulu", "urgent"},
+		{"Alpha", "low"},
+		{"Mike", "normal"},
+	} {
+		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+			"product_id": productID,
+			"title":      ticket.title,
+			"priority":   ticket.priority,
+		}, adminCookie, adminCSRF, server.URL)
+		requireStatus(t, resp, body, http.StatusCreated)
+	}
+
+	getPage := func(path string) ticketListResult {
+		t.Helper()
+		resp, body := doJSON(t, client, http.MethodGet, server.URL+path, nil, adminCookie, "", "")
+		requireStatus(t, resp, body, http.StatusOK)
+		var page ticketListResult
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("decode ticket page: %v", err)
+		}
+		return page
+	}
+
+	first := getPage("/api/tickets?status=new&sort=title&direction=asc&limit=2")
+	if len(first.Tickets) != 2 || first.Tickets[0].Title != "Alpha" || first.Tickets[1].Title != "Mike" {
+		t.Fatalf("first ticket page = %#v", first.Tickets)
+	}
+	if !first.HasMore || first.Limit != 2 || first.Offset != 0 {
+		t.Fatalf("first ticket pagination = %#v", first)
+	}
+	if first.Counts["all"] != 3 || first.Counts["new"] != 3 {
+		t.Fatalf("ticket aggregates changed by pagination: %#v", first.Counts)
+	}
+
+	second := getPage("/api/tickets?status=new&sort=title&direction=asc&limit=2&offset=2")
+	if len(second.Tickets) != 1 || second.Tickets[0].Title != "Zulu" || second.HasMore {
+		t.Fatalf("second ticket page = %#v", second)
+	}
+	byPriority := getPage("/api/tickets?status=new&sort=priority&direction=desc")
+	if len(byPriority.Tickets) != 3 || byPriority.Tickets[0].Title != "Zulu" || byPriority.Tickets[2].Title != "Alpha" {
+		t.Fatalf("priority-sorted tickets = %#v", byPriority.Tickets)
+	}
+}
+
 func TestAPIValidationContracts(t *testing.T) {
 	_, server, client := newTestServer(t)
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")

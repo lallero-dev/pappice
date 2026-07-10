@@ -828,6 +828,26 @@ button:focus-visible {
   overflow: auto;
 }
 
+.ticket-pagination {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 90px minmax(0, 1fr) 90px;
+  padding: 12px;
+}
+
+.ticket-page-number {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.ticket-pagination .ghost-button {
+  width: 100%;
+}
+
 .ticket-row {
   background: #ffffff;
   border: 1px solid transparent;

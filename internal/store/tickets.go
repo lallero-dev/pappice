@@ -109,23 +109,35 @@ func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []Cr
 	return s.GetTicket(ticket.ID)
 }
 
-func (s *Store) ListTicketSummariesForUser(user User, filter TicketSummaryFilter) ([]TicketSummary, error) {
+func (s *Store) ListTicketSummariesPage(user User, filter TicketSummaryFilter) (TicketSummaryPage, error) {
+	filter.Limit, filter.Offset = normalizePage(filter.Limit, filter.Offset, 50, 500)
 	query, args := ticketSummaryListQuery(user, filter)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, err
+		return TicketSummaryPage{}, err
 	}
 	defer rows.Close()
 
-	var summaries []TicketSummary
+	page := TicketSummaryPage{
+		Tickets: make([]TicketSummary, 0, filter.Limit),
+		Limit:   filter.Limit,
+		Offset:  filter.Offset,
+	}
 	for rows.Next() {
 		summary, err := scanTicketSummary(rows)
 		if err != nil {
-			return nil, err
+			return TicketSummaryPage{}, err
 		}
-		summaries = append(summaries, summary)
+		page.Tickets = append(page.Tickets, summary)
 	}
-	return summaries, rows.Err()
+	if err := rows.Err(); err != nil {
+		return TicketSummaryPage{}, err
+	}
+	if len(page.Tickets) > page.Limit {
+		page.Tickets = page.Tickets[:page.Limit]
+		page.HasMore = true
+	}
+	return page, nil
 }
 
 func (s *Store) TicketSummaryAggregatesForUser(user User, productID int64) (TicketSummaryAggregates, error) {
@@ -939,11 +951,47 @@ func ticketSummaryListQuery(user User, filter TicketSummaryFilter) (string, []an
 	case statusMatch != "":
 		conditions = append(conditions, statusMatch)
 	}
+	order, orderArgs := ticketSummaryOrder(filter.Sort, filter.Direction)
+	args = append(args, orderArgs...)
+	args = append(args, filter.Limit+1, filter.Offset)
 
 	return `WITH ticket_summaries AS (` + base + `)
 		SELECT * FROM ticket_summaries
 		WHERE ` + strings.Join(conditions, " AND ") + `
-		ORDER BY updated_at DESC`, args
+		ORDER BY ` + order + `
+		LIMIT ? OFFSET ?`, args
+}
+
+func ticketSummaryOrder(key, direction string) (string, []any) {
+	direction = strings.ToUpper(strings.TrimSpace(direction))
+	if direction != "ASC" {
+		direction = "DESC"
+	}
+	column := "updated_at"
+	var args []any
+	switch strings.TrimSpace(key) {
+	case "created_at":
+		column = "created_at"
+	case "priority":
+		column, args = enumOrderSQL("priority", Priorities())
+	case "status":
+		column, args = enumOrderSQL("status", Statuses())
+	case "title":
+		column = "title COLLATE NOCASE"
+	}
+	return column + " " + direction + ", updated_at DESC, id ASC", args
+}
+
+func enumOrderSQL(column string, values []string) (string, []any) {
+	parts := make([]string, 0, len(values)+2)
+	parts = append(parts, "CASE "+column)
+	args := make([]any, 0, len(values))
+	for index, value := range values {
+		parts = append(parts, fmt.Sprintf("WHEN ? THEN %d", index))
+		args = append(args, value)
+	}
+	parts = append(parts, fmt.Sprintf("ELSE %d END", len(values)))
+	return strings.Join(parts, " "), args
 }
 
 func compactStrings(values []string) []string {

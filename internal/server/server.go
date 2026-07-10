@@ -619,7 +619,8 @@ func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, au
 	switch r.Method {
 	case http.MethodGet:
 		query := r.URL.Query()
-		result, err := s.listTicketsForQuery(auth.User, ticketSummaryFilter(query, productID))
+		limit, offset := paginationParams(r, 50, 500)
+		result, err := s.listTicketsForQuery(auth.User, ticketSummaryFilter(query, productID, limit, offset))
 		if err != nil {
 			respondStoreError(w, err)
 			return
@@ -628,6 +629,9 @@ func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, au
 			"tickets":      result.Tickets,
 			"counts":       result.Counts,
 			"unread_total": result.UnreadTotal,
+			"limit":        result.Limit,
+			"offset":       result.Offset,
+			"has_more":     result.HasMore,
 			"statuses":     store.Statuses(),
 			"priorities":   store.Priorities(),
 		})
@@ -652,7 +656,8 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		query := r.URL.Query()
 		productID, _ := strconv.ParseInt(query.Get("product_id"), 10, 64)
-		result, err := s.listTicketsForQuery(auth.User, ticketSummaryFilter(query, productID))
+		limit, offset := paginationParams(r, 50, 500)
+		result, err := s.listTicketsForQuery(auth.User, ticketSummaryFilter(query, productID, limit, offset))
 		if err != nil {
 			respondStoreError(w, err)
 			return
@@ -1617,9 +1622,12 @@ type ticketListResult struct {
 	Tickets     []store.TicketSummary `json:"tickets"`
 	Counts      map[string]int        `json:"counts"`
 	UnreadTotal int                   `json:"unread_total"`
+	Limit       int                   `json:"limit"`
+	Offset      int                   `json:"offset"`
+	HasMore     bool                  `json:"has_more"`
 }
 
-func ticketSummaryFilter(query url.Values, productID int64) store.TicketSummaryFilter {
+func ticketSummaryFilter(query url.Values, productID int64, limit, offset int) store.TicketSummaryFilter {
 	return store.TicketSummaryFilter{
 		Query:                      query.Get("q"),
 		Statuses:                   queryStatuses(query),
@@ -1627,6 +1635,10 @@ func ticketSummaryFilter(query url.Values, productID int64) store.TicketSummaryF
 		Assignee:                   query.Get("assignee"),
 		UnreadOnly:                 queryUnread(query),
 		IncludeUnreadOutsideStatus: queryIncludeUnreadOutsideStatus(query),
+		Sort:                       query.Get("sort"),
+		Direction:                  query.Get("direction"),
+		Limit:                      limit,
+		Offset:                     offset,
 	}
 }
 
@@ -1634,7 +1646,7 @@ func (s *Server) listTicketsForQuery(user store.User, filter store.TicketSummary
 	if isCustomer(user) {
 		filter.Assignee = ""
 	}
-	summaries, err := s.store.ListTicketSummariesForUser(user, filter)
+	page, err := s.store.ListTicketSummariesPage(user, filter)
 	if err != nil {
 		return ticketListResult{}, err
 	}
@@ -1642,15 +1654,18 @@ func (s *Server) listTicketsForQuery(user store.User, filter store.TicketSummary
 	if err != nil {
 		return ticketListResult{}, err
 	}
-	for i := range summaries {
-		if !s.canViewTicketSummaryAssignee(user, summaries[i]) {
-			summaries[i].Assignee = ""
+	for i := range page.Tickets {
+		if !s.canViewTicketSummaryAssignee(user, page.Tickets[i]) {
+			page.Tickets[i].Assignee = ""
 		}
 	}
 	return ticketListResult{
-		Tickets:     summaries,
+		Tickets:     page.Tickets,
 		Counts:      aggregates.Counts,
 		UnreadTotal: aggregates.UnreadTotal,
+		Limit:       page.Limit,
+		Offset:      page.Offset,
+		HasMore:     page.HasMore,
 	}, nil
 }
 

@@ -121,15 +121,15 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	summaries, err := reloaded.ListTicketSummariesForUser(admin, TicketSummaryFilter{})
+	page, err := reloaded.ListTicketSummariesPage(admin, TicketSummaryFilter{})
 	if err != nil {
 		t.Fatalf("list ticket summaries: %v", err)
 	}
-	if len(summaries) != 1 {
-		t.Fatalf("ticket summaries = %d, want 1", len(summaries))
+	if len(page.Tickets) != 1 {
+		t.Fatalf("ticket summaries = %d, want 1", len(page.Tickets))
 	}
-	if summaries[0].RequesterName != "Alice Admin" {
-		t.Fatalf("summary requester name = %q, want display name", summaries[0].RequesterName)
+	if page.Tickets[0].RequesterName != "Alice Admin" {
+		t.Fatalf("summary requester name = %q, want display name", page.Tickets[0].RequesterName)
 	}
 	reloadedTicket, err := reloaded.GetTicket(ticket.ID)
 	if err != nil {
@@ -1542,12 +1542,12 @@ func TestProductMembershipFiltersTickets(t *testing.T) {
 		t.Fatalf("create hidden ticket: %v", err)
 	}
 
-	tickets, err := tracker.ListTicketSummariesForUser(user, TicketSummaryFilter{})
+	page, err := tracker.ListTicketSummariesPage(user, TicketSummaryFilter{})
 	if err != nil {
 		t.Fatalf("list visible tickets: %v", err)
 	}
-	if len(tickets) != 1 || tickets[0].Title != "Visible" {
-		t.Fatalf("visible tickets = %#v", tickets)
+	if len(page.Tickets) != 1 || page.Tickets[0].Title != "Visible" {
+		t.Fatalf("visible tickets = %#v", page.Tickets)
 	}
 	products := tracker.ListProducts(user)
 	if len(products) != 1 || products[0].ID != visibleProduct.ID {

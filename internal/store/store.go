@@ -82,6 +82,17 @@ type TicketSummaryFilter struct {
 	Assignee                   string
 	UnreadOnly                 bool
 	IncludeUnreadOutsideStatus bool
+	Sort                       string
+	Direction                  string
+	Limit                      int
+	Offset                     int
+}
+
+type TicketSummaryPage struct {
+	Tickets []TicketSummary
+	Limit   int
+	Offset  int
+	HasMore bool
 }
 
 type TicketSummaryAggregates struct {

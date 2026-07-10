@@ -15,6 +15,7 @@ import {
   ADMIN_SECTIONS,
   PRODUCT_SECTIONS,
   TICKET_AUTOSAVE_DELAY_MS,
+  TICKET_PAGE_SIZE,
   TICKET_REFRESH_INTERVAL_MS,
   TICKET_SORT_LABELS,
   els,
@@ -204,6 +205,7 @@ async function applyTicketRouteSelection(key) {
     setSelectedTicket(ticket, { updateRoute: false });
     return true;
   } catch (error) {
+    if (requestID !== ticketDetailRequestID) return false;
     setSelectedTicket(null, { updateRoute: false });
     showError(error);
     return false;
@@ -410,11 +412,12 @@ async function loadProducts() {
   await loadTickets();
 }
 
-async function loadTickets({ renderDetail = true } = {}) {
+async function loadTickets({ renderDetail = true, resetPage = false, offset = null } = {}) {
   const requestID = ++ticketLoadRequestID;
   if (state.products.length === 0) {
     state.tickets = [];
     state.ticketCounts = emptyTicketCounts();
+    state.ticketPage = { limit: TICKET_PAGE_SIZE, offset: 0, hasMore: false };
     renderTicketsUnreadBadge(0);
     renderTicketsView();
     return { stale: false };
@@ -427,11 +430,28 @@ async function loadTickets({ renderDetail = true } = {}) {
   if (usesDefaultStatusView()) params.set("include_unread_outside_status", "1");
   const productID = state.ticketProductId || null;
   if (productID) params.set("product_id", String(productID));
+  params.set("sort", state.sort.key);
+  params.set("direction", state.sort.dir);
+  const requestedOffset = resetPage ? 0 : Math.max(0, offset ?? state.ticketPage.offset);
+  params.set("limit", String(TICKET_PAGE_SIZE));
+  params.set("offset", String(requestedOffset));
   const payload = await request(`/api/tickets?${params.toString()}`);
   if (requestID !== ticketLoadRequestID) return { stale: true };
   if (productID !== (state.ticketProductId || null)) return { stale: true };
-  state.tickets = payload.tickets || [];
+  const tickets = payload.tickets || [];
+  if (tickets.length === 0 && requestedOffset > 0) {
+    return loadTickets({
+      renderDetail,
+      offset: Math.max(0, requestedOffset - TICKET_PAGE_SIZE)
+    });
+  }
+  state.tickets = tickets;
   state.ticketCounts = { ...emptyTicketCounts(), ...(payload.counts || {}) };
+  state.ticketPage = {
+    limit: Number(payload.limit || TICKET_PAGE_SIZE),
+    offset: Number(payload.offset ?? requestedOffset),
+    hasMore: Boolean(payload.has_more)
+  };
   renderTicketsUnreadBadge(Number(payload.unread_total || 0));
   const previousSelectedId = state.selectedId;
   if (state.selectedId && !state.selectedTicket) {
@@ -764,7 +784,7 @@ function renderCounts() {
     button.setAttribute("aria-pressed", String(active));
     button.addEventListener("click", () => {
       toggleStatusFilter(status);
-      loadTickets().catch(showError);
+      loadTickets({ resetPage: true }).catch(showError);
     });
     els.statusFilterList.append(button);
   }
@@ -902,7 +922,7 @@ function clearTicketFilters() {
   els.unreadFilter.checked = false;
   updateProductActions();
   renderCounts();
-  loadTickets().catch(showError);
+  loadTickets({ resetPage: true }).catch(showError);
 }
 
 function renderTicketList() {
@@ -918,7 +938,7 @@ function renderTicketList() {
     }));
     return;
   }
-  const tickets = sortedTickets();
+  const tickets = state.tickets;
   if (tickets.length === 0) {
     if (hasActiveTicketFilters()) {
       els.ticketList.append(emptyState({
@@ -963,6 +983,36 @@ function renderTicketList() {
     );
     els.ticketList.append(row);
   }
+  if (state.ticketPage.offset > 0 || state.ticketPage.hasMore) {
+    els.ticketList.append(ticketPagination());
+  }
+}
+
+function ticketPagination() {
+  const { limit, offset, hasMore } = state.ticketPage;
+  const previous = el("button", { className: "ghost-button", type: "button" }, "Previous");
+  const next = el("button", { className: "ghost-button", type: "button" }, "Next");
+  previous.disabled = offset === 0;
+  next.disabled = !hasMore;
+  const goToPage = async (nextOffset, button) => {
+    previous.disabled = true;
+    next.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    try {
+      await loadTickets({ renderDetail: false, offset: nextOffset });
+      els.ticketList.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    } catch (error) {
+      showError(error);
+      renderTicketList();
+    }
+  };
+  previous.addEventListener("click", () => goToPage(Math.max(0, offset - limit), previous));
+  next.addEventListener("click", () => goToPage(offset + limit, next));
+  return el("div", { className: "ticket-pagination" }, [
+    previous,
+    el("span", { className: "ticket-page-number" }, `Page ${Math.floor(offset / limit) + 1}`),
+    next
+  ]);
 }
 
 async function toggleTicketSelection(summary) {
@@ -1014,53 +1064,8 @@ function setTicketSortValue(value) {
   if (!key) return;
   state.sort.key = key;
   state.sort.dir = dir === "asc" ? "asc" : "desc";
-  renderTicketsView();
-}
-
-function sortedTickets() {
-  return [...state.tickets].sort(compareTickets);
-}
-
-function compareTickets(a, b) {
-  const direction = state.sort.dir === "desc" ? -1 : 1;
-  let result = 0;
-  switch (state.sort.key) {
-    case "created_at":
-    case "updated_at":
-      result = compareTime(a[state.sort.key], b[state.sort.key]);
-      break;
-    case "product":
-      result = compareText(ticketProductLabel(a), ticketProductLabel(b));
-      break;
-    case "status":
-      result = compareOrdered(a.status, b.status, state.meta.statuses);
-      break;
-    case "priority":
-      result = compareOrdered(a.priority, b.priority, state.meta.priorities);
-      break;
-    case "title":
-    default:
-      result = compareText(a.title, b.title);
-      break;
-  }
-  if (result !== 0) return result * direction;
-  result = compareTime(b.updated_at, a.updated_at);
-  if (result !== 0) return result;
-  return Number(a.id || 0) - Number(b.id || 0);
-}
-
-function compareTime(left, right) {
-  return new Date(left).getTime() - new Date(right).getTime();
-}
-
-function compareText(left, right) {
-  return String(left || "").localeCompare(String(right || ""), undefined, { numeric: true, sensitivity: "base" });
-}
-
-function compareOrdered(left, right, order) {
-  const leftIndex = order.indexOf(left);
-  const rightIndex = order.indexOf(right);
-  return (leftIndex === -1 ? order.length : leftIndex) - (rightIndex === -1 ? order.length : rightIndex);
+  renderSortHeaders();
+  loadTickets({ resetPage: true }).catch(showError);
 }
 
 function ticketProductParts(ticket) {
@@ -3245,24 +3250,24 @@ function bindEvents() {
   els.searchInput.addEventListener("input", debounce(() => {
     state.filters.q = els.searchInput.value.trim();
     renderTicketFilterButton();
-    loadTickets().catch(showError);
+    loadTickets({ resetPage: true }).catch(showError);
   }, 180));
   els.productFilter.addEventListener("change", async () => {
     state.ticketProductId = Number(els.productFilter.value) || null;
     setSelectedTicket(null);
     renderProductFilter();
     updateProductActions();
-    await loadTickets();
+    await loadTickets({ resetPage: true });
   });
   els.assigneeFilter.addEventListener("change", () => {
     state.filters.assignee = els.assigneeFilter.value.trim();
     renderTicketFilterButton();
-    loadTickets().catch(showError);
+    loadTickets({ resetPage: true }).catch(showError);
   });
   els.unreadFilter.addEventListener("change", () => {
     state.filters.unread = els.unreadFilter.checked;
     renderTicketFilterButton();
-    loadTickets().catch(showError);
+    loadTickets({ resetPage: true }).catch(showError);
   });
   els.ticketSortSelect.addEventListener("change", () => setTicketSortValue(els.ticketSortSelect.value));
   els.clearTicketFiltersButton.addEventListener("click", () => {
