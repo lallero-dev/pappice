@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"pappice/internal/store"
 )
@@ -504,8 +505,21 @@ func sanitizeAttachmentFilename(value string) string {
 	}, value)
 	value = strings.Trim(value, " .")
 	if len(value) > 180 {
-		value = value[:180]
+		extension := filepath.Ext(value)
+		if len(extension) < 180 {
+			value = truncateUTF8Bytes(strings.TrimSuffix(value, extension), 180-len(extension)) + extension
+		} else {
+			value = truncateUTF8Bytes(value, 180)
+		}
 		value = strings.Trim(value, " .")
+	}
+	return value
+}
+
+func truncateUTF8Bytes(value string, maximum int) string {
+	for len(value) > maximum {
+		_, size := utf8.DecodeLastRuneInString(value)
+		value = value[:len(value)-size]
 	}
 	return value
 }

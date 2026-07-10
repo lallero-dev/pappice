@@ -381,6 +381,9 @@ func TestMigrateRollsBackFailedPlan(t *testing.T) {
 }
 
 func TestMetadataAndPublicViews(t *testing.T) {
+	if got := truncateString("èèè", 5); got != "èè" {
+		t.Fatalf("UTF-8 truncation = %q, want %q", got, "èè")
+	}
 	if got, want := Priorities(), []string{"low", "normal", "high", "urgent"}; !slices.Equal(got, want) {
 		t.Fatalf("priorities = %#v, want %#v", got, want)
 	}

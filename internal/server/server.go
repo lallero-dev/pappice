@@ -35,7 +35,7 @@ const (
 
 var (
 	appAdminSections   = []string{"accounts", "tokens", "webhooks", "email", "maintenance", "audit"}
-	appProductSections = []string{"members", "webhooks", "deliveries"}
+	appProductSections = []string{"general", "members", "webhooks", "deliveries"}
 )
 
 type RateLimit struct {

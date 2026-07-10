@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"pappice/internal/security"
 	"pappice/internal/store"
@@ -253,6 +254,8 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	if !bytes.Contains(body, []byte("Pappice")) {
 		t.Fatalf("product section route should serve the main app: %s", body)
 	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/products/1/general", nil, nil, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/products/1/unknown", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/missing", nil, nil, "", "")
@@ -2153,6 +2156,16 @@ func TestAttachmentFilePathRejectsTraversal(t *testing.T) {
 	}
 	if path != filepath.Join(uploadDir, "ab", "cd", "hash") {
 		t.Fatalf("valid attachment path = %q", path)
+	}
+}
+
+func TestSanitizeAttachmentFilenamePreservesUnicodeAndExtension(t *testing.T) {
+	filename := sanitizeAttachmentFilename(strings.Repeat("è", 100) + ".png")
+	if !strings.HasSuffix(filename, ".png") {
+		t.Fatalf("sanitized filename = %q, want preserved extension", filename)
+	}
+	if len(filename) > 180 || !utf8.ValidString(filename) {
+		t.Fatalf("sanitized filename = %q, bytes=%d, want valid UTF-8 within limit", filename, len(filename))
 	}
 }
 

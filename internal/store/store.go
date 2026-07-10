@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 )
@@ -481,7 +482,11 @@ func normalizePage(limit, offset, defaultLimit, maxLimit int) (int, int) {
 }
 
 func truncateString(value string, maximum int) string {
-	return value[:min(len(value), maximum)]
+	for len(value) > maximum {
+		_, size := utf8.DecodeLastRuneInString(value)
+		value = value[:len(value)-size]
+	}
+	return value
 }
 
 var productKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}$`)

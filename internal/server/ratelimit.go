@@ -6,11 +6,14 @@ import (
 	"time"
 )
 
+const defaultRateLimitMaxEntries = 10_000
+
 type requestLimiter struct {
-	limit   int
-	window  time.Duration
-	mu      sync.Mutex
-	entries map[string][]time.Time
+	limit      int
+	window     time.Duration
+	maxEntries int
+	mu         sync.Mutex
+	entries    map[string][]time.Time
 }
 
 func withDefaultRateLimit(config RateLimit, limit int, window time.Duration) RateLimit {
@@ -25,9 +28,10 @@ func withDefaultRateLimit(config RateLimit, limit int, window time.Duration) Rat
 
 func newRequestLimiter(config RateLimit) *requestLimiter {
 	return &requestLimiter{
-		limit:   config.Limit,
-		window:  config.Window,
-		entries: make(map[string][]time.Time),
+		limit:      config.Limit,
+		window:     config.Window,
+		maxEntries: defaultRateLimitMaxEntries,
+		entries:    make(map[string][]time.Time),
 	}
 }
 
@@ -40,6 +44,12 @@ func (limiter *requestLimiter) Allow(key string, now time.Time) bool {
 	defer limiter.mu.Unlock()
 
 	cutoff := now.Add(-limiter.window)
+	if _, exists := limiter.entries[key]; !exists && len(limiter.entries) >= limiter.maxEntries {
+		limiter.pruneExpired(cutoff)
+		if len(limiter.entries) >= limiter.maxEntries {
+			return false
+		}
+	}
 	attempts := limiter.entries[key]
 	index := 0
 	for index < len(attempts) && attempts[index].Before(cutoff) {
@@ -55,6 +65,22 @@ func (limiter *requestLimiter) Allow(key string, now time.Time) bool {
 	attempts = append(attempts, now)
 	limiter.entries[key] = attempts
 	return true
+}
+
+func (limiter *requestLimiter) pruneExpired(cutoff time.Time) {
+	for key, attempts := range limiter.entries {
+		index := 0
+		for index < len(attempts) && attempts[index].Before(cutoff) {
+			index++
+		}
+		if index == len(attempts) {
+			delete(limiter.entries, key)
+			continue
+		}
+		if index > 0 {
+			limiter.entries[key] = attempts[index:]
+		}
+	}
 }
 
 func (limiter *requestLimiter) Reset(key string) {
