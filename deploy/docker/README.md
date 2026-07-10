@@ -85,9 +85,10 @@ Rebuild the image:
 docker compose -f deploy/docker/compose.yaml build --pull
 ```
 
-Run migrations explicitly, as with the non-Docker deploy:
+Stop the running app, then run migrations explicitly with the new image:
 
 ```sh
+docker compose -f deploy/docker/compose.yaml stop pappice
 docker compose -f deploy/docker/compose.yaml run --rm pappice db migrate --dry-run
 docker compose -f deploy/docker/compose.yaml run --rm pappice db migrate
 ```
