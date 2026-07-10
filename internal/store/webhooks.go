@@ -127,8 +127,9 @@ func (s *Store) ListWebhooksForEvent(event string, productID int64) []Webhook {
 	}
 	defer rows.Close()
 
-	hooks := make([]Webhook, 0)
-	for _, hook := range scanWebhooks(rows) {
+	scannedRows := scanWebhooks(rows)
+	hooks := make([]Webhook, 0, len(scannedRows))
+	for _, hook := range scannedRows {
 		if eventMatches(hook.Events, event) {
 			hooks = append(hooks, hook)
 		}
