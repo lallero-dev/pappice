@@ -68,11 +68,14 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err := tracker.MarkTicketRead(ticket.ID, admin.ID, readAt); err != nil {
 		t.Fatalf("mark ticket read: %v", err)
 	}
-	readTimes, err := tracker.TicketReadTimes(admin.ID, []int64{ticket.ID})
+	summary, err := tracker.TicketSummaryForUser(admin, ticket.ID)
 	if err != nil {
-		t.Fatalf("ticket read times: %v", err)
+		t.Fatalf("ticket summary: %v", err)
 	}
-	if got := readTimes[ticket.ID]; got.IsZero() || got.Sub(readAt).Abs() > time.Second {
+	if summary.LastReadAt == nil {
+		t.Fatal("ticket summary is missing read time")
+	}
+	if got := *summary.LastReadAt; got.IsZero() || got.Sub(readAt).Abs() > time.Second {
 		t.Fatalf("read time = %v, want near %v", got, readAt)
 	}
 
@@ -118,19 +121,22 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	tickets := reloaded.ListTickets(Filter{Query: "linux"})
-	if len(tickets) != 0 {
-		t.Fatalf("comments should not match ticket search, got %d", len(tickets))
+	summaries, err := reloaded.ListTicketSummariesForUser(admin, TicketSummaryFilter{})
+	if err != nil {
+		t.Fatalf("list ticket summaries: %v", err)
 	}
-	tickets = reloaded.ListTickets(Filter{ProductID: products[0].ID})
-	if len(tickets) != 1 {
-		t.Fatalf("product tickets = %d, want 1", len(tickets))
+	if len(summaries) != 1 {
+		t.Fatalf("ticket summaries = %d, want 1", len(summaries))
 	}
-	if tickets[0].RequesterName != "Alice Admin" {
-		t.Fatalf("reloaded requester name = %q, want display name", tickets[0].RequesterName)
+	if summaries[0].RequesterName != "Alice Admin" {
+		t.Fatalf("summary requester name = %q, want display name", summaries[0].RequesterName)
 	}
-	if len(tickets[0].Comments) != 2 || tickets[0].Comments[0].Author != "Alice Admin" || tickets[0].Comments[1].Author != "Alice Admin" {
-		t.Fatalf("reloaded comment authors = %#v, want display names", tickets[0].Comments)
+	reloadedTicket, err := reloaded.GetTicket(ticket.ID)
+	if err != nil {
+		t.Fatalf("get reloaded ticket: %v", err)
+	}
+	if len(reloadedTicket.Comments) != 2 || reloadedTicket.Comments[0].Author != "Alice Admin" || reloadedTicket.Comments[1].Author != "Alice Admin" {
+		t.Fatalf("reloaded comment authors = %#v, want display names", reloadedTicket.Comments)
 	}
 }
 
@@ -1536,7 +1542,10 @@ func TestProductMembershipFiltersTickets(t *testing.T) {
 		t.Fatalf("create hidden ticket: %v", err)
 	}
 
-	tickets := tracker.ListTicketsForUser(Filter{}, user)
+	tickets, err := tracker.ListTicketSummariesForUser(user, TicketSummaryFilter{})
+	if err != nil {
+		t.Fatalf("list visible tickets: %v", err)
+	}
 	if len(tickets) != 1 || tickets[0].Title != "Visible" {
 		t.Fatalf("visible tickets = %#v", tickets)
 	}

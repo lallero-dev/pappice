@@ -200,7 +200,10 @@ func TestSeedDemoStore(t *testing.T) {
 	if len(products) != 1 || products[0].Key != "WEB" || products[0].Name != "Website Support" {
 		t.Fatalf("customer products = %#v", products)
 	}
-	tickets := tracker.ListTicketsForUser(store.Filter{}, admin)
+	tickets, err := tracker.ListTicketSummariesForUser(admin, store.TicketSummaryFilter{})
+	if err != nil {
+		t.Fatalf("list seeded tickets: %v", err)
+	}
 	if len(tickets) < 2 {
 		t.Fatalf("seeded tickets = %#v", tickets)
 	}

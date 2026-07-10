@@ -619,16 +619,17 @@ func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, au
 	switch r.Method {
 	case http.MethodGet:
 		query := r.URL.Query()
-		tickets := s.listTicketsForQuery(auth.User, query, store.Filter{
-			ProductID: productID,
-			Query:     query.Get("q"),
-			Statuses:  queryStatuses(query),
-			Assignee:  query.Get("assignee"),
-		})
+		result, err := s.listTicketsForQuery(auth.User, ticketSummaryFilter(query, productID))
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
 		respondJSON(w, http.StatusOK, map[string]any{
-			"tickets":    tickets,
-			"statuses":   store.Statuses(),
-			"priorities": store.Priorities(),
+			"tickets":      result.Tickets,
+			"counts":       result.Counts,
+			"unread_total": result.UnreadTotal,
+			"statuses":     store.Statuses(),
+			"priorities":   store.Priorities(),
 		})
 	case http.MethodPost:
 		ticket, ok := s.createTicketFromRequest(w, r, auth, productID)
@@ -651,13 +652,12 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		query := r.URL.Query()
 		productID, _ := strconv.ParseInt(query.Get("product_id"), 10, 64)
-		tickets := s.listTicketsForQuery(auth.User, query, store.Filter{
-			ProductID: productID,
-			Query:     query.Get("q"),
-			Statuses:  queryStatuses(query),
-			Assignee:  query.Get("assignee"),
-		})
-		respondJSON(w, http.StatusOK, map[string]any{"tickets": tickets})
+		result, err := s.listTicketsForQuery(auth.User, ticketSummaryFilter(query, productID))
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		respondJSON(w, http.StatusOK, result)
 	case http.MethodPost:
 		ticket, ok := s.createTicketFromRequest(w, r, auth, 0)
 		if !ok {
@@ -1599,45 +1599,66 @@ func (s *Server) isCustomerTicketCreator(user store.User, productID int64) bool 
 }
 
 func (s *Server) ticketForUser(user store.User, ticket store.Ticket) store.Ticket {
-	tickets := s.ticketsForUser(user, []store.Ticket{ticket})
-	if len(tickets) == 0 {
-		return ticket
+	if !s.canEditTicket(user, ticket.ProductID) {
+		ticket.Comments = publicComments(ticket.Comments)
 	}
-	return tickets[0]
+	if !s.canViewTicketAssignee(user, ticket.ProductID) {
+		ticket.Assignee = ""
+	}
+	if summary, err := s.store.TicketSummaryForUser(user, ticket.ID); err == nil {
+		ticket.UnreadCount = summary.UnreadCount
+		ticket.HasUnread = summary.HasUnread
+		ticket.LastReadAt = summary.LastReadAt
+	}
+	return ticket
 }
 
-func (s *Server) listTicketsForQuery(user store.User, query url.Values, filter store.Filter) []store.Ticket {
+type ticketListResult struct {
+	Tickets     []store.TicketSummary `json:"tickets"`
+	Counts      map[string]int        `json:"counts"`
+	UnreadTotal int                   `json:"unread_total"`
+}
+
+func ticketSummaryFilter(query url.Values, productID int64) store.TicketSummaryFilter {
+	return store.TicketSummaryFilter{
+		Query:                      query.Get("q"),
+		Statuses:                   queryStatuses(query),
+		ProductID:                  productID,
+		Assignee:                   query.Get("assignee"),
+		UnreadOnly:                 queryUnread(query),
+		IncludeUnreadOutsideStatus: queryIncludeUnreadOutsideStatus(query),
+	}
+}
+
+func (s *Server) listTicketsForQuery(user store.User, filter store.TicketSummaryFilter) (ticketListResult, error) {
 	if isCustomer(user) {
 		filter.Assignee = ""
 	}
-	statuses := append([]string(nil), filter.Statuses...)
-	if queryIncludeUnreadOutsideStatus(query) && len(statuses) > 0 && !queryUnread(query) {
-		filter.Statuses = nil
+	summaries, err := s.store.ListTicketSummariesForUser(user, filter)
+	if err != nil {
+		return ticketListResult{}, err
 	}
-	tickets := s.store.ListTicketsForUser(filter, user)
-	tickets = s.ticketsForUser(user, tickets)
-	if queryUnread(query) {
-		return unreadTickets(tickets)
+	aggregates, err := s.store.TicketSummaryAggregatesForUser(user, filter.ProductID)
+	if err != nil {
+		return ticketListResult{}, err
 	}
-	if queryIncludeUnreadOutsideStatus(query) && len(statuses) > 0 {
-		return ticketsMatchingStatusOrUnread(tickets, statuses)
+	for i := range summaries {
+		if !s.canViewTicketSummaryAssignee(user, summaries[i]) {
+			summaries[i].Assignee = ""
+		}
 	}
-	return tickets
+	return ticketListResult{
+		Tickets:     summaries,
+		Counts:      aggregates.Counts,
+		UnreadTotal: aggregates.UnreadTotal,
+	}, nil
 }
 
-func (s *Server) ticketsForUser(user store.User, tickets []store.Ticket) []store.Ticket {
-	result := make([]store.Ticket, 0, len(tickets))
-	for _, ticket := range tickets {
-		if !s.canEditTicket(user, ticket.ProductID) {
-			ticket.Comments = publicComments(ticket.Comments)
-		}
-		if !s.canViewTicketAssignee(user, ticket.ProductID) {
-			ticket.Assignee = ""
-		}
-		result = append(result, ticket)
+func (s *Server) canViewTicketSummaryAssignee(user store.User, summary store.TicketSummary) bool {
+	if isCustomer(user) {
+		return false
 	}
-	s.annotateUnread(user, result)
-	return result
+	return isAdmin(user) || summary.ProductRole != "customer"
 }
 
 func (s *Server) canViewTicketAssignee(user store.User, productID int64) bool {
@@ -1649,109 +1670,6 @@ func (s *Server) canViewTicketAssignee(user store.User, productID int64) bool {
 	}
 	role, ok := s.store.ProductRole(user.ID, productID)
 	return ok && role != "customer"
-}
-
-func (s *Server) annotateUnread(user store.User, tickets []store.Ticket) {
-	ids := make([]int64, 0, len(tickets))
-	for _, ticket := range tickets {
-		ids = append(ids, ticket.ID)
-	}
-	readTimes, err := s.store.TicketReadTimes(user.ID, ids)
-	if err != nil {
-		return
-	}
-	for index := range tickets {
-		lastRead := readTimes[tickets[index].ID]
-		if !lastRead.IsZero() {
-			readAt := lastRead
-			tickets[index].LastReadAt = &readAt
-		}
-		tickets[index].UnreadCount = unreadActivityCount(user, tickets[index], lastRead)
-		tickets[index].HasUnread = tickets[index].UnreadCount > 0
-	}
-}
-
-func ticketsMatchingStatusOrUnread(tickets []store.Ticket, statuses []string) []store.Ticket {
-	active := make(map[string]struct{}, len(statuses))
-	for _, status := range statuses {
-		active[strings.TrimSpace(status)] = struct{}{}
-	}
-	result := make([]store.Ticket, 0, len(tickets))
-	for _, ticket := range tickets {
-		if ticket.HasUnread {
-			result = append(result, ticket)
-			continue
-		}
-		if _, ok := active[ticket.Status]; ok {
-			result = append(result, ticket)
-		}
-	}
-	return result
-}
-
-func unreadTickets(tickets []store.Ticket) []store.Ticket {
-	result := make([]store.Ticket, 0, len(tickets))
-	for _, ticket := range tickets {
-		if ticket.HasUnread {
-			result = append(result, ticket)
-		}
-	}
-	return result
-}
-
-func unreadActivityCount(user store.User, ticket store.Ticket, lastRead time.Time) int {
-	count := 0
-	if ticket.CreatedAt.After(lastRead) && !ticketOpenedByUser(user, ticket) {
-		count++
-	}
-	if ticket.UpdatedAt.After(lastRead) && requesterTerminalStatus(ticket.Status) {
-		count++
-	}
-	for _, comment := range ticket.Comments {
-		if comment.CreatedAt.After(lastRead) && !commentByUser(user, comment) {
-			count++
-		}
-	}
-	return count
-}
-
-func ticketOpenedByUser(user store.User, ticket store.Ticket) bool {
-	values := userAuthorValues(user)
-	for _, value := range []string{ticket.Reporter, ticket.RequesterName, ticket.RequesterEmail, emailLocalPart(ticket.RequesterEmail)} {
-		if values[normalizeAuthor(value)] {
-			return true
-		}
-	}
-	return false
-}
-
-func commentByUser(user store.User, comment store.Comment) bool {
-	if comment.AuthorUserID > 0 {
-		return comment.AuthorUserID == user.ID
-	}
-	return userAuthorValues(user)[normalizeAuthor(comment.Author)]
-}
-
-func userAuthorValues(user store.User) map[string]bool {
-	values := map[string]bool{}
-	for _, value := range []string{user.DisplayName, user.Email, emailLocalPart(user.Email)} {
-		if normalized := normalizeAuthor(value); normalized != "" {
-			values[normalized] = true
-		}
-	}
-	return values
-}
-
-func normalizeAuthor(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
-}
-
-func emailLocalPart(email string) string {
-	local, _, ok := strings.Cut(strings.TrimSpace(email), "@")
-	if !ok {
-		return ""
-	}
-	return local
 }
 
 func publicComments(comments []store.Comment) []store.Comment {

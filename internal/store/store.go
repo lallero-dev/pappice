@@ -53,6 +53,42 @@ type Ticket struct {
 	ClosedAt       *time.Time   `json:"closed_at,omitempty"`
 }
 
+type TicketSummary struct {
+	ID             int64      `json:"id"`
+	ProductID      int64      `json:"product_id"`
+	ProductKey     string     `json:"product_key"`
+	ProductName    string     `json:"product_name"`
+	Number         int64      `json:"number"`
+	Key            string     `json:"key"`
+	Title          string     `json:"title"`
+	Status         string     `json:"status"`
+	Priority       string     `json:"priority"`
+	Assignee       string     `json:"assignee,omitempty"`
+	Reporter       string     `json:"requester"`
+	RequesterName  string     `json:"requester_name,omitempty"`
+	RequesterEmail string     `json:"requester_email,omitempty"`
+	ProductRole    string     `json:"-"`
+	UnreadCount    int        `json:"unread_count"`
+	HasUnread      bool       `json:"has_unread"`
+	LastReadAt     *time.Time `json:"last_read_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type TicketSummaryFilter struct {
+	Query                      string
+	Statuses                   []string
+	ProductID                  int64
+	Assignee                   string
+	UnreadOnly                 bool
+	IncludeUnreadOutsideStatus bool
+}
+
+type TicketSummaryAggregates struct {
+	Counts      map[string]int
+	UnreadTotal int
+}
+
 type Comment struct {
 	ID           int64        `json:"id"`
 	Author       string       `json:"author"`
@@ -111,14 +147,6 @@ type SaveTicketResult struct {
 	PublicComment     bool
 	AssignmentChanged bool
 	CommentID         int64
-}
-
-type Filter struct {
-	Query     string
-	Status    string
-	Statuses  []string
-	ProductID int64
-	Assignee  string
 }
 
 type User struct {
@@ -637,29 +665,6 @@ func normalizeRequiredEmail(value string) (string, error) {
 func isValid(allowed map[string]struct{}, value string) bool {
 	_, ok := allowed[value]
 	return ok
-}
-
-func normalizeFilterStatuses(single string, values []string) []string {
-	seen := make(map[string]struct{}, len(values)+1)
-	result := make([]string, 0, len(values)+1)
-	appendStatus := func(value string) {
-		for part := range strings.SplitSeq(value, ",") {
-			status := strings.TrimSpace(part)
-			if status == "" {
-				continue
-			}
-			if _, ok := seen[status]; ok {
-				continue
-			}
-			seen[status] = struct{}{}
-			result = append(result, status)
-		}
-	}
-	appendStatus(single)
-	for _, value := range values {
-		appendStatus(value)
-	}
-	return result
 }
 
 func placeholders(count int) string {

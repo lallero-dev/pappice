@@ -15,13 +15,19 @@ import (
 )
 
 func queryStatuses(query url.Values) []string {
+	seen := make(map[string]struct{}, len(query["status"]))
 	statuses := make([]string, 0, len(query["status"]))
 	for _, value := range query["status"] {
 		for status := range strings.SplitSeq(value, ",") {
 			status = strings.TrimSpace(status)
-			if status != "" {
-				statuses = append(statuses, status)
+			if status == "" {
+				continue
 			}
+			if _, ok := seen[status]; ok {
+				continue
+			}
+			seen[status] = struct{}{}
+			statuses = append(statuses, status)
 		}
 	}
 	return statuses

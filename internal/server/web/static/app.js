@@ -39,6 +39,7 @@ defineComponents();
 
 let appAlertTimer = 0;
 let ticketLoadRequestID = 0;
+let ticketDetailRequestID = 0;
 let ticketRefreshTimer = 0;
 let ticketRefreshInFlight = false;
 const commentDrafts = new Map();
@@ -193,9 +194,13 @@ async function applyTicketRouteSelection(key) {
     renderTicketsView();
     return true;
   }
-  let ticket = state.tickets.find((item) => item.key === key);
+  const summary = state.tickets.find((item) => item.key === key);
+  const requestID = ++ticketDetailRequestID;
   try {
-    if (!ticket) ticket = await request(`/api/tickets/key/${encodeURIComponent(key)}`);
+    const ticket = await request(summary
+      ? `/api/tickets/${summary.id}`
+      : `/api/tickets/key/${encodeURIComponent(key)}`);
+    if (requestID !== ticketDetailRequestID) return false;
     setSelectedTicket(ticket, { updateRoute: false });
     return true;
   } catch (error) {
@@ -409,10 +414,10 @@ async function loadTickets({ renderDetail = true } = {}) {
   const requestID = ++ticketLoadRequestID;
   if (state.products.length === 0) {
     state.tickets = [];
-    state.ticketCounts = countTickets([]);
+    state.ticketCounts = emptyTicketCounts();
     renderTicketsUnreadBadge(0);
     renderTicketsView();
-    return { selectedTicket: null, stale: false };
+    return { stale: false };
   }
   const params = new URLSearchParams();
   if (state.filters.q) params.set("q", state.filters.q);
@@ -422,24 +427,14 @@ async function loadTickets({ renderDetail = true } = {}) {
   if (usesDefaultStatusView()) params.set("include_unread_outside_status", "1");
   const productID = state.ticketProductId || null;
   if (productID) params.set("product_id", String(productID));
-  const countParams = new URLSearchParams();
-  if (productID) countParams.set("product_id", String(productID));
-  const unreadParams = new URLSearchParams({ unread: "1" });
-  const [payload, countsPayload, unreadPayload] = await Promise.all([
-    request(`/api/tickets?${params.toString()}`),
-    request(`/api/tickets?${countParams.toString()}`),
-    request(`/api/tickets?${unreadParams.toString()}`)
-  ]);
-  if (requestID !== ticketLoadRequestID) return { selectedTicket: null, stale: true };
-  if (productID !== (state.ticketProductId || null)) return { selectedTicket: null, stale: true };
+  const payload = await request(`/api/tickets?${params.toString()}`);
+  if (requestID !== ticketLoadRequestID) return { stale: true };
+  if (productID !== (state.ticketProductId || null)) return { stale: true };
   state.tickets = payload.tickets || [];
-  state.ticketCounts = countTickets(countsPayload.tickets || []);
-  renderTicketsUnreadBadge((unreadPayload.tickets || []).length);
+  state.ticketCounts = { ...emptyTicketCounts(), ...(payload.counts || {}) };
+  renderTicketsUnreadBadge(Number(payload.unread_total || 0));
   const previousSelectedId = state.selectedId;
-  const listedSelection = state.tickets.find((ticket) => ticket.id === state.selectedId);
-  if (listedSelection) {
-    state.selectedTicket = listedSelection;
-  } else if (state.selectedId && !state.selectedTicket) {
+  if (state.selectedId && !state.selectedTicket) {
     setSelectedTicket(null, { updateRoute: false });
   }
   if (renderDetail || state.selectedId !== previousSelectedId) {
@@ -449,7 +444,7 @@ async function loadTickets({ renderDetail = true } = {}) {
     renderSortHeaders();
     renderTicketList();
   }
-  return { selectedTicket: listedSelection || null, stale: false };
+  return { stale: false };
 }
 
 function startTicketRefreshLoop({ immediate = false } = {}) {
@@ -494,11 +489,7 @@ async function refreshTicketsInBackground() {
     const refreshedList = await loadTickets({ renderDetail: false });
     if (!canRefreshTicketsInBackground() || refreshedList?.stale) return;
     if (selectedId && state.selectedId === selectedId) {
-      if (refreshedList?.selectedTicket?.id === selectedId) {
-        applySelectedTicketRefresh(refreshedList.selectedTicket, previousConversationRevision);
-      } else {
-        await refreshSelectedTicket(selectedId, previousConversationRevision);
-      }
+      await refreshSelectedTicket(selectedId, previousConversationRevision);
     }
   } finally {
     ticketRefreshInFlight = false;
@@ -819,12 +810,9 @@ function renderAssigneeFilter() {
   renderTicketFilterButton();
 }
 
-function countTickets(tickets) {
-  const counts = { all: tickets.length };
+function emptyTicketCounts() {
+  const counts = { all: 0 };
   for (const status of state.meta.statuses) counts[status] = 0;
-  for (const ticket of tickets) {
-    counts[ticket.status] = (counts[ticket.status] || 0) + 1;
-  }
   return counts;
 }
 
@@ -957,10 +945,7 @@ function renderTicketList() {
     row.className = "ticket-row";
     row.classList.toggle("active", ticket.id === state.selectedId);
     row.classList.toggle("unread", Boolean(ticket.has_unread));
-    row.addEventListener("click", () => {
-      setSelectedTicket(state.selectedId === ticket.id ? null : ticket);
-      renderTicketsView();
-    });
+    row.addEventListener("click", () => toggleTicketSelection(ticket).catch(showError));
     const product = ticketProductParts(ticket);
     const productLabel = el("span", { className: "ticket-row-product" }, product.name);
     if (ticket.has_unread) {
@@ -978,6 +963,18 @@ function renderTicketList() {
     );
     els.ticketList.append(row);
   }
+}
+
+async function toggleTicketSelection(summary) {
+  if (state.selectedId === summary.id) {
+    closeSelectedTicket();
+    return;
+  }
+  const requestID = ++ticketDetailRequestID;
+  const ticket = await request(`/api/tickets/${summary.id}`);
+  if (requestID !== ticketDetailRequestID) return;
+  setSelectedTicket(ticket);
+  renderTicketsView();
 }
 
 function ticketPersonLabel(ticket) {
@@ -2145,7 +2142,14 @@ async function saveTicketPatch(ticket, patch) {
 }
 
 function replaceTicket(updated) {
-  state.tickets = state.tickets.map((ticket) => ticket.id === updated.id ? updated : ticket);
+  state.tickets = state.tickets.map((ticket) => {
+    if (ticket.id !== updated.id) return ticket;
+    const summary = { ...ticket };
+    for (const key of Object.keys(summary)) {
+      if (Object.hasOwn(updated, key)) summary[key] = updated[key];
+    }
+    return summary;
+  });
   if (state.selectedId === updated.id) state.selectedTicket = updated;
 }
 
@@ -3340,6 +3344,7 @@ function hasOpenModalDialog() {
 }
 
 function closeSelectedTicket() {
+  ticketDetailRequestID += 1;
   setSelectedTicket(null);
   renderTicketsView();
 }
@@ -3434,8 +3439,7 @@ function currentProductDetail() {
 }
 
 function selectedTicket() {
-  return state.tickets.find((ticket) => ticket.id === state.selectedId) ||
-    (state.selectedTicket?.id === state.selectedId ? state.selectedTicket : null);
+  return state.selectedTicket?.id === state.selectedId ? state.selectedTicket : null;
 }
 
 function setSelectedTicket(ticket, { updateRoute = true } = {}) {

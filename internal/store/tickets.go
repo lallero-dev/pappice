@@ -109,103 +109,67 @@ func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []Cr
 	return s.GetTicket(ticket.ID)
 }
 
-func (s *Store) ListTickets(filter Filter) []Ticket {
-	return s.listTickets(filter, User{Role: "admin"})
-}
-
-func (s *Store) ListTicketsForUser(filter Filter, user User) []Ticket {
-	return s.listTickets(filter, user)
-}
-
-func (s *Store) listTickets(filter Filter, user User) []Ticket {
-	filter.Query = strings.ToLower(strings.TrimSpace(filter.Query))
-	filter.Status = strings.TrimSpace(filter.Status)
-	filter.Statuses = normalizeFilterStatuses(filter.Status, filter.Statuses)
-	filter.Assignee = strings.TrimSpace(filter.Assignee)
-
-	conditions := []string{"1 = 1"}
-	args := []any{}
-	role := normalizeGlobalRole(user.Role)
-	if role != "admin" {
-		staffScope := 0
-		if role == "staff" {
-			staffScope = 1
-		}
-		userEmail := strings.ToLower(strings.TrimSpace(user.Email))
-		conditions = append(conditions, `EXISTS (
-			SELECT 1
-			FROM product_members pm
-			WHERE pm.product_id = i.product_id
-			  AND pm.user_id = ?
-			  AND (
-			    (? = 1 AND pm.role != 'customer') OR
-			    lower(i.reporter) = ? OR
-			    lower(i.requester_email) = ?
-			  )
-		)`)
-		args = append(args, user.ID, staffScope, userEmail, userEmail)
-	}
-	if filter.ProductID > 0 {
-		conditions = append(conditions, "i.product_id = ?")
-		args = append(args, filter.ProductID)
-	}
-	if len(filter.Statuses) == 1 {
-		conditions = append(conditions, "i.status = ?")
-		args = append(args, filter.Statuses[0])
-	} else if len(filter.Statuses) > 1 {
-		conditions = append(conditions, fmt.Sprintf("i.status IN (%s)", placeholders(len(filter.Statuses))))
-		for _, status := range filter.Statuses {
-			args = append(args, status)
-		}
-	}
-	if filter.Assignee != "" {
-		conditions = append(conditions, "i.assignee = ?")
-		args = append(args, filter.Assignee)
-	}
-	if filter.Query != "" {
-		q := "%" + filter.Query + "%"
-		if role == "customer" {
-			conditions = append(conditions, `(
-				lower(i.title) LIKE ? OR lower(i.description) LIKE ? OR lower(p.key) LIKE ? OR lower(p.name) LIKE ? OR
-				lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ?
-			)`)
-			args = append(args, q, q, q, q, q, q, q)
-		} else {
-			conditions = append(conditions, `(
-				lower(i.title) LIKE ? OR lower(i.description) LIKE ? OR lower(p.key) LIKE ? OR lower(p.name) LIKE ? OR
-				lower(i.assignee) LIKE ? OR lower(i.reporter) LIKE ? OR lower(i.requester_name) LIKE ? OR lower(i.requester_email) LIKE ?
-			)`)
-			args = append(args, q, q, q, q, q, q, q, q)
-		}
-	}
-
-	query := `
-		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
-		       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
-		       i.created_at, i.updated_at, i.closed_at
-		FROM tickets i
-		JOIN products p ON p.id = i.product_id
-		LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)
-		WHERE ` + strings.Join(conditions, " AND ") + `
-		ORDER BY i.updated_at DESC`
+func (s *Store) ListTicketSummariesForUser(user User, filter TicketSummaryFilter) ([]TicketSummary, error) {
+	query, args := ticketSummaryListQuery(user, filter)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
-	var tickets []Ticket
+	var summaries []TicketSummary
 	for rows.Next() {
-		ticket, err := scanTicket(rows)
-		if err == nil {
-			tickets = append(tickets, ticket)
+		summary, err := scanTicketSummary(rows)
+		if err != nil {
+			return nil, err
 		}
+		summaries = append(summaries, summary)
 	}
-	rows.Close()
-	for i := range tickets {
-		_ = s.hydrateTicket(&tickets[i])
+	return summaries, rows.Err()
+}
+
+func (s *Store) TicketSummaryAggregatesForUser(user User, productID int64) (TicketSummaryAggregates, error) {
+	base, args := ticketSummarySelect(user, 0, nil)
+	statuses := Statuses()
+	columns := []string{
+		"(SELECT COUNT(*) FROM ticket_summaries WHERE unread_count > 0)",
+		"COUNT(*)",
 	}
-	return tickets
+	for range statuses {
+		columns = append(columns, "COUNT(*) FILTER (WHERE status = ?)")
+	}
+	args = append(args, productID, productID)
+	for _, status := range statuses {
+		args = append(args, status)
+	}
+
+	query := `WITH ticket_summaries AS (` + base + `),
+		selected AS (SELECT * FROM ticket_summaries WHERE ? = 0 OR product_id = ?)
+		SELECT ` + strings.Join(columns, ", ") + ` FROM selected`
+	result := TicketSummaryAggregates{Counts: make(map[string]int, len(statuses)+1)}
+	all := 0
+	destinations := []any{&result.UnreadTotal, &all}
+	counts := make([]int, len(statuses))
+	for i := range counts {
+		destinations = append(destinations, &counts[i])
+	}
+	if err := s.db.QueryRow(query, args...).Scan(destinations...); err != nil {
+		return TicketSummaryAggregates{}, err
+	}
+	result.Counts["all"] = all
+	for i, status := range statuses {
+		result.Counts[status] = counts[i]
+	}
+	return result, nil
+}
+
+func (s *Store) TicketSummaryForUser(user User, ticketID int64) (TicketSummary, error) {
+	query, args := ticketSummarySelect(user, ticketID, nil)
+	summary, err := scanTicketSummary(s.db.QueryRow(query, args...))
+	if errors.Is(err, sql.ErrNoRows) {
+		return TicketSummary{}, ErrNotFound
+	}
+	return summary, err
 }
 
 func (s *Store) GetTicket(id int64) (Ticket, error) {
@@ -843,6 +807,196 @@ func scanTicket(rows scanner) (Ticket, error) {
 		ticket.Product = ticket.ProductKey
 	}
 	return ticket, nil
+}
+
+func ticketSummarySelect(user User, ticketID int64, filter *TicketSummaryFilter) (string, []any) {
+	role := normalizeGlobalRole(user.Role)
+	email := strings.ToLower(strings.TrimSpace(user.Email))
+	identities := compactIdentityValues(user.DisplayName, email, emailLocalPart(email))
+	if len(identities) == 0 {
+		identities = []string{"\x00"}
+	}
+
+	args := make([]any, 0, 24)
+	identityMatch := func(expression string) string {
+		for _, identity := range identities {
+			args = append(args, identity)
+		}
+		return "lower(trim(" + expression + ")) IN (" + placeholders(len(identities)) + ")"
+	}
+	requesterName := "COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), '')"
+	requesterLocal := "CASE WHEN instr(i.requester_email, '@') > 1 THEN substr(i.requester_email, 1, instr(i.requester_email, '@') - 1) ELSE '' END"
+	openedByUser := strings.Join([]string{
+		identityMatch("i.reporter"),
+		identityMatch(requesterName),
+		identityMatch("i.requester_email"),
+		identityMatch(requesterLocal),
+	}, " OR ")
+	args = append(args, user.ID)
+	commentByUser := "c.author_user_id = ? OR (c.author_user_id IS NULL AND " + identityMatch("c.author") + ")"
+
+	internalComments := "0 = 1"
+	if role == "admin" {
+		internalComments = "1 = 1"
+	} else if role == "staff" {
+		internalComments = "pm.role IN ('manager', 'staff')"
+	}
+	afterRead := func(column string) string {
+		return "(tr.last_read_at IS NULL OR " + timestampKeySQL(column) + " > " + timestampKeySQL("tr.last_read_at") + ")"
+	}
+	unreadCount := `(
+		CASE WHEN ` + afterRead("i.created_at") + ` AND NOT (` + openedByUser + `) THEN 1 ELSE 0 END +
+		CASE WHEN ` + afterRead("i.updated_at") + ` AND i.status IN ('resolved', 'rejected') THEN 1 ELSE 0 END +
+		(SELECT COUNT(*) FROM comments c
+		 WHERE c.ticket_id = i.id
+		   AND ` + afterRead("c.created_at") + `
+		   AND (` + internalComments + ` OR c.visibility = '' OR c.visibility = 'public')
+		   AND NOT (` + commentByUser + `))
+	)`
+
+	conditions := []string{"1 = 1"}
+	args = append(args, user.ID, user.ID)
+	if role != "admin" {
+		ownTicket := "lower(i.reporter) = ? OR lower(i.requester_email) = ?"
+		if role == "staff" {
+			conditions = append(conditions, "pm.user_id IS NOT NULL AND (pm.role != 'customer' OR "+ownTicket+")")
+		} else {
+			conditions = append(conditions, "pm.user_id IS NOT NULL AND ("+ownTicket+")")
+		}
+		args = append(args, email, email)
+	}
+	if ticketID > 0 {
+		conditions = append(conditions, "i.id = ?")
+		args = append(args, ticketID)
+	}
+	if filter != nil {
+		if filter.ProductID > 0 {
+			conditions = append(conditions, "i.product_id = ?")
+			args = append(args, filter.ProductID)
+		}
+		if assignee := strings.TrimSpace(filter.Assignee); assignee != "" && role != "customer" {
+			condition := "i.assignee = ?"
+			if role != "admin" {
+				condition = "pm.role != 'customer' AND " + condition
+			}
+			conditions = append(conditions, condition)
+			args = append(args, assignee)
+		}
+		if search := strings.ToLower(strings.TrimSpace(filter.Query)); search != "" {
+			q := "%" + search + "%"
+			searches := []string{
+				"lower(i.title) LIKE ?", "lower(i.description) LIKE ?", "lower(p.key) LIKE ?",
+				"lower(p.name) LIKE ?", "lower(i.reporter) LIKE ?", "lower(" + requesterName + ") LIKE ?",
+				"lower(i.requester_email) LIKE ?",
+			}
+			for range searches {
+				args = append(args, q)
+			}
+			if role != "customer" {
+				assigneeSearch := "lower(i.assignee) LIKE ?"
+				if role != "admin" {
+					assigneeSearch = "(pm.role != 'customer' AND " + assigneeSearch + ")"
+				}
+				searches = append(searches, assigneeSearch)
+				args = append(args, q)
+			}
+			conditions = append(conditions, "("+strings.Join(searches, " OR ")+")")
+		}
+	}
+
+	query := `SELECT i.id, i.product_id, p.key AS product_key, p.name AS product_name,
+		       i.number, i.title, i.status, i.priority, i.assignee, i.reporter,
+		       ` + requesterName + ` AS requester_name, i.requester_email,
+		       COALESCE(pm.role, '') AS product_role, tr.last_read_at,
+		       ` + unreadCount + ` AS unread_count, i.created_at, i.updated_at
+		FROM tickets i
+		JOIN products p ON p.id = i.product_id
+		LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)
+		LEFT JOIN product_members pm ON pm.product_id = i.product_id AND pm.user_id = ?
+		LEFT JOIN ticket_reads tr ON tr.ticket_id = i.id AND tr.user_id = ?
+		WHERE ` + strings.Join(conditions, " AND ")
+	return query, args
+}
+
+func ticketSummaryListQuery(user User, filter TicketSummaryFilter) (string, []any) {
+	base, args := ticketSummarySelect(user, 0, &filter)
+	conditions := []string{"1 = 1"}
+	statuses := compactStrings(filter.Statuses)
+	statusMatch := ""
+	if len(statuses) > 0 {
+		statusMatch = "status IN (" + placeholders(len(statuses)) + ")"
+		for _, status := range statuses {
+			args = append(args, status)
+		}
+	}
+	switch {
+	case filter.UnreadOnly && statusMatch != "":
+		conditions = append(conditions, "unread_count > 0", statusMatch)
+	case filter.UnreadOnly:
+		conditions = append(conditions, "unread_count > 0")
+	case filter.IncludeUnreadOutsideStatus && statusMatch != "":
+		conditions = append(conditions, "("+statusMatch+" OR unread_count > 0)")
+	case statusMatch != "":
+		conditions = append(conditions, statusMatch)
+	}
+
+	return `WITH ticket_summaries AS (` + base + `)
+		SELECT * FROM ticket_summaries
+		WHERE ` + strings.Join(conditions, " AND ") + `
+		ORDER BY updated_at DESC`, args
+}
+
+func compactStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func timestampKeySQL(column string) string {
+	// SQLite date functions lose sub-millisecond precision; normalize UTC RFC3339 text instead.
+	fraction := "CASE WHEN substr(" + column + ", 20, 1) = '.' " +
+		"THEN substr(" + column + ", 21, instr(" + column + ", 'Z') - 21) ELSE '' END"
+	return "substr(" + column + ", 1, 19) || substr(" + fraction + " || '000000000', 1, 9)"
+}
+
+func scanTicketSummary(row scanner) (TicketSummary, error) {
+	var summary TicketSummary
+	var lastRead sql.NullString
+	var created, updated string
+	if err := row.Scan(
+		&summary.ID, &summary.ProductID, &summary.ProductKey, &summary.ProductName, &summary.Number,
+		&summary.Title, &summary.Status, &summary.Priority, &summary.Assignee,
+		&summary.Reporter, &summary.RequesterName, &summary.RequesterEmail, &summary.ProductRole,
+		&lastRead, &summary.UnreadCount, &created, &updated,
+	); err != nil {
+		return TicketSummary{}, err
+	}
+	summary.Key = fmt.Sprintf("%s-%d", summary.ProductKey, summary.Number)
+	summary.ProductRole = normalizeProductRole(summary.ProductRole)
+	summary.LastReadAt = parseNullTime(lastRead)
+	summary.HasUnread = summary.UnreadCount > 0
+	summary.CreatedAt = parseTime(created)
+	summary.UpdatedAt = parseTime(updated)
+	return summary, nil
+}
+
+func emailLocalPart(email string) string {
+	local, _, ok := strings.Cut(strings.TrimSpace(email), "@")
+	if !ok {
+		return ""
+	}
+	return local
 }
 
 func scanAttachment(rows scanner) (Attachment, error) {

@@ -1764,8 +1764,37 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?unread=1", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Public staff reply")) {
+	if !bytes.Contains(body, []byte("Need help")) || !bytes.Contains(body, []byte(`"has_unread":true`)) {
 		t.Fatalf("customer unread list missing ticket: %s", body)
+	}
+	var ticketList struct {
+		Tickets     []map[string]json.RawMessage `json:"tickets"`
+		Counts      map[string]int               `json:"counts"`
+		UnreadTotal int                          `json:"unread_total"`
+	}
+	if err := json.Unmarshal(body, &ticketList); err != nil {
+		t.Fatalf("decode ticket list: %v", err)
+	}
+	if len(ticketList.Tickets) != 1 || ticketList.Counts["all"] != 1 || ticketList.Counts["new"] != 1 || ticketList.UnreadTotal != 1 {
+		t.Fatalf("ticket list aggregates = %#v", ticketList)
+	}
+	for _, field := range []string{"description", "comments", "attachments"} {
+		if _, exists := ticketList.Tickets[0][field]; exists {
+			t.Fatalf("ticket summary includes %q: %s", field, body)
+		}
+	}
+	if bytes.Contains(body, []byte("Something is wrong")) || bytes.Contains(body, []byte("Public staff reply")) {
+		t.Fatalf("ticket summary leaked conversation content: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?q=Something%20is%20wrong", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Need help")) {
+		t.Fatalf("ticket description search did not match summary: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?q=Public%20staff%20reply", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if bytes.Contains(body, []byte("Need help")) {
+		t.Fatalf("ticket search unexpectedly matched conversation content: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/read", nil, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
@@ -1811,8 +1840,8 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	if bytes.Contains(body, []byte("Private staff note")) {
 		t.Fatalf("customer ticket list leaked internal note: %s", body)
 	}
-	if !bytes.Contains(body, []byte("Public staff reply")) {
-		t.Fatalf("customer ticket list missing public reply: %s", body)
+	if bytes.Contains(body, []byte("Public staff reply")) {
+		t.Fatalf("customer ticket list included conversation content: %s", body)
 	}
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
