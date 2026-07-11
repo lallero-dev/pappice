@@ -33,13 +33,8 @@ func queryStatuses(query url.Values) []string {
 	return statuses
 }
 
-func queryUnread(query url.Values) bool {
-	value := strings.ToLower(strings.TrimSpace(query.Get("unread")))
-	return value == "1" || value == "true" || value == "yes"
-}
-
-func queryIncludeUnreadOutsideStatus(query url.Values) bool {
-	value := strings.ToLower(strings.TrimSpace(query.Get("include_unread_outside_status")))
+func queryFlag(query url.Values, name string) bool {
+	value := strings.ToLower(strings.TrimSpace(query.Get(name)))
 	return value == "1" || value == "true" || value == "yes"
 }
 

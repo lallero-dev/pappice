@@ -337,15 +337,6 @@ func (s *Store) DeleteSession(token string) error {
 	return err
 }
 
-func (s *Store) DeleteUserSessions(userID int64, keepToken string) error {
-	if strings.TrimSpace(keepToken) == "" {
-		_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
-		return err
-	}
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?`, userID, security.HashToken(keepToken))
-	return err
-}
-
 func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepSessionToken string, event EventContext) (User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {

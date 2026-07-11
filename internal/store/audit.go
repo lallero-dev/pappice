@@ -7,22 +7,6 @@ import (
 	"time"
 )
 
-func (s *Store) RecordAuditEvent(input CreateAuditEvent) (AuditEvent, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return AuditEvent{}, err
-	}
-	defer tx.Rollback()
-	event, err := insertAuditEventTx(tx, input, time.Now().UTC())
-	if err != nil {
-		return AuditEvent{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return AuditEvent{}, err
-	}
-	return event, nil
-}
-
 func insertAuditEventTx(tx *sql.Tx, input CreateAuditEvent, now time.Time) (AuditEvent, error) {
 	action := strings.TrimSpace(input.Action)
 	targetType := strings.TrimSpace(input.TargetType)
@@ -58,11 +42,6 @@ func insertAuditEventTx(tx *sql.Tx, input CreateAuditEvent, now time.Time) (Audi
 		return AuditEvent{}, err
 	}
 	return event, nil
-}
-
-func (s *Store) ListAuditEvents(limit int) ([]AuditEvent, error) {
-	page, err := s.ListAuditEventsPage(AuditEventFilter{Limit: limit})
-	return page.Events, err
 }
 
 func (s *Store) ListAuditEventsPage(filter AuditEventFilter) (AuditEventPage, error) {

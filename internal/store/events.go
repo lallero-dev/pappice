@@ -243,19 +243,6 @@ func domainEventStatusTx(tx *sql.Tx, id int64) (string, error) {
 	return status, err
 }
 
-func (s *Store) MarkDomainEventProcessed(id int64) error {
-	now := time.Now().UTC()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := markDomainEventProcessedTx(tx, id, now); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func markDomainEventProcessedTx(tx *sql.Tx, id int64, now time.Time) error {
 	result, err := tx.Exec(`
 		UPDATE domain_events

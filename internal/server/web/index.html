@@ -133,7 +133,7 @@
                         <label for="productFilter">Product</label>
                         <select id="productFilter"></select>
                       </section>
-                      <section class="popover-section" id="assigneeFilterSection">
+                      <section class="popover-section">
                         <label for="assigneeFilter">Assignee</label>
                         <select id="assigneeFilter"></select>
                       </section>
@@ -312,7 +312,7 @@
             <h2>Products</h2>
             <button class="ghost-button" id="addProductButton" type="button">New</button>
           </div>
-          <div class="admin-list product-index-list" id="productIndexList"></div>
+          <div class="admin-list" id="productIndexList"></div>
         </section>
 
         <div id="productDetailView" hidden>
@@ -323,7 +323,7 @@
               <div class="product-context-meta" id="productContextMeta"></div>
             </div>
           </header>
-          <div class="admin-shell product-shell">
+          <div class="admin-shell">
             <aside class="admin-sidebar" aria-label="Product sections">
               <button class="admin-side-button" data-product-section="general" type="button">
                 <strong>General</strong>
@@ -401,10 +401,6 @@
         </div>
       </section>
     </main>
-
-    <template id="emptyTemplate">
-      <div class="empty-state">No tickets match this view.</div>
-    </template>
 
     <div class="ticket-popover-backdrop" id="ticketPopoverBackdrop" hidden></div>
     <pappice-modal id="modalHost"></pappice-modal>

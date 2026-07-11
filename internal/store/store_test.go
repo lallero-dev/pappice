@@ -734,7 +734,7 @@ func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if !payload.HasPatch || !payload.PublicComment || !payload.AssignmentChanged || payload.PreviousStatus != "new" || payload.CurrentStatus != "assigned" {
 		t.Fatalf("event payload = %#v", payload)
 	}
-	if err := tracker.MarkDomainEventProcessed(claimed[0].ID); err != nil {
+	if err := tracker.ApplyDomainEventProjection(claimed[0].ID, DomainEventProjection{}); err != nil {
 		t.Fatalf("mark processed: %v", err)
 	}
 	processed, err := tracker.GetDomainEvent(claimed[0].ID)
@@ -795,6 +795,7 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 			TargetType:  "ticket",
 			TargetID:    77,
 			TargetName:  "PME-77",
+			DetailsJSON: `{"source":"portal"}`,
 		},
 		EmailNotifications: []CreateEmailNotification{{
 			ProductID:      productID,
@@ -824,7 +825,7 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 		t.Fatalf("processed event = %#v", processed)
 	}
 	audits := mustListAuditEvents(t, tracker, 10)
-	if len(audits) != 1 || audits[0].DomainEventID != event.ID {
+	if len(audits) != 1 || audits[0].DomainEventID != event.ID || audits[0].DetailsJSON != `{"source":"portal"}` {
 		t.Fatalf("audits = %#v", audits)
 	}
 	emails := mustListEmailNotifications(t, tracker, 10)
@@ -1264,48 +1265,6 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
 		t.Fatalf("event hooks = %#v", hooks)
 	}
-
-	event, err := tracker.RecordAuditEvent(CreateAuditEvent{
-		ActorUserID: admin.ID,
-		ActorEmail:  admin.Email,
-		Action:      "user.created",
-		TargetType:  "user",
-		TargetID:    admin.ID,
-		TargetName:  admin.Email,
-		IP:          "127.0.0.1",
-		DetailsJSON: `{"role":"admin"}`,
-	})
-	if err != nil {
-		t.Fatalf("record audit event: %v", err)
-	}
-	events := mustListAuditEvents(t, tracker, 10)
-	if len(events) != 1 || events[0].ID != event.ID || events[0].Action != "user.created" || events[0].DetailsJSON == "" {
-		t.Fatalf("audit events = %#v", events)
-	}
-	_, err = tracker.RecordAuditEvent(CreateAuditEvent{
-		DomainEventID: 42,
-		ActorUserID:   admin.ID,
-		ActorEmail:    admin.Email,
-		Action:        "product.created",
-		TargetType:    "product",
-		TargetID:      productID,
-		TargetName:    "Inbox",
-	})
-	if err != nil {
-		t.Fatalf("record domain audit event: %v", err)
-	}
-	_, err = tracker.RecordAuditEvent(CreateAuditEvent{
-		DomainEventID: 42,
-		ActorUserID:   admin.ID,
-		ActorEmail:    admin.Email,
-		Action:        "product.created",
-		TargetType:    "product",
-		TargetID:      productID,
-		TargetName:    "Inbox",
-	})
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("duplicate domain audit error = %v, want ErrConflict", err)
-	}
 }
 
 func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
@@ -1383,20 +1342,6 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if _, _, err := tracker.UserBySession(extraSession); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("removed session error = %v, want ErrNotFound", err)
 	}
-	extraSession, _, _, err = tracker.CreateSession(user.ID)
-	if err != nil {
-		t.Fatalf("create session before delete user sessions: %v", err)
-	}
-	if err := tracker.DeleteUserSessions(user.ID, session); err != nil {
-		t.Fatalf("delete user sessions: %v", err)
-	}
-	if _, _, err := tracker.UserBySession(session); err != nil {
-		t.Fatalf("kept requested session error = %v", err)
-	}
-	if _, _, err := tracker.UserBySession(extraSession); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("removed extra session error = %v, want ErrNotFound", err)
-	}
-
 	resetUser, resetLink, resetToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour, EventContext{})
 	if err != nil {
 		t.Fatalf("create reset link: %v", err)
@@ -1979,13 +1924,13 @@ func mustListDomainEvents(t *testing.T, tracker *Store, limit int) []DomainEvent
 }
 
 func mustListAuditEvents(t *testing.T, tracker *Store, limit int) []AuditEvent {
-	values, err := tracker.ListAuditEvents(limit)
-	return requireList(t, values, err)
+	page, err := tracker.ListAuditEventsPage(AuditEventFilter{Limit: limit})
+	return requireList(t, page.Events, err)
 }
 
 func mustListEmailNotifications(t *testing.T, tracker *Store, limit int) []EmailNotification {
-	values, err := tracker.ListEmailNotifications(limit)
-	return requireList(t, values, err)
+	page, err := tracker.ListEmailNotificationsPage(EmailNotificationFilter{Limit: limit})
+	return requireList(t, page.Notifications, err)
 }
 
 func mustListAPITokens(t *testing.T, tracker *Store, userID int64) []PublicAPIToken {

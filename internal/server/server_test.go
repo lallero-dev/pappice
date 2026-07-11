@@ -2985,6 +2985,6 @@ func mustDomainEvents(t *testing.T, tracker *store.Store, limit int) []store.Dom
 }
 
 func mustEmailNotifications(t *testing.T, tracker *store.Store, limit int) []store.EmailNotification {
-	values, err := tracker.ListEmailNotifications(limit)
-	return requireStoreList(t, values, err)
+	page, err := tracker.ListEmailNotificationsPage(store.EmailNotificationFilter{Limit: limit})
+	return requireStoreList(t, page.Notifications, err)
 }

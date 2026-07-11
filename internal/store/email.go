@@ -328,11 +328,6 @@ func (s *Store) GetEmailNotification(id int64) (EmailNotification, error) {
 	return notification, err
 }
 
-func (s *Store) ListEmailNotifications(limit int) ([]EmailNotification, error) {
-	page, err := s.ListEmailNotificationsPage(EmailNotificationFilter{Limit: limit})
-	return page.Notifications, err
-}
-
 func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) (EmailNotificationPage, error) {
 	limit, offset := normalizePage(filter.Limit, filter.Offset, 25, 100)
 	where, args := emailNotificationWhere(filter)
