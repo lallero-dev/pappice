@@ -66,7 +66,7 @@ func (s *Server) ticketWebhookNotifications(event string, ticket store.Ticket, a
 	return inputs, nil
 }
 
-func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64, body []byte) store.WebhookDelivery {
+func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64, body []byte) (store.WebhookDelivery, error) {
 	started := time.Now()
 	delivery := store.WebhookDelivery{
 		WebhookID: hook.ID,
@@ -77,15 +77,13 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64
 	if err := s.validateWebhookTarget(hook.URL); err != nil {
 		delivery.Error = err.Error()
 		delivery.DurationMS = time.Since(started).Milliseconds()
-		_ = s.store.RecordDelivery(delivery)
-		return delivery
+		return s.recordWebhookDelivery(delivery)
 	}
 	req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
 	if err != nil {
 		delivery.Error = err.Error()
 		delivery.DurationMS = time.Since(started).Milliseconds()
-		_ = s.store.RecordDelivery(delivery)
-		return delivery
+		return s.recordWebhookDelivery(delivery)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "pappice-webhook")
@@ -98,8 +96,7 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64
 	delivery.DurationMS = time.Since(started).Milliseconds()
 	if err != nil {
 		delivery.Error = err.Error()
-		_ = s.store.RecordDelivery(delivery)
-		return delivery
+		return s.recordWebhookDelivery(delivery)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
@@ -107,8 +104,14 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		delivery.Error = fmt.Sprintf("webhook returned HTTP %d", resp.StatusCode)
 	}
-	_ = s.store.RecordDelivery(delivery)
-	return delivery
+	return s.recordWebhookDelivery(delivery)
+}
+
+func (s *Server) recordWebhookDelivery(delivery store.WebhookDelivery) (store.WebhookDelivery, error) {
+	if err := s.store.RecordDelivery(delivery); err != nil {
+		return delivery, fmt.Errorf("record webhook delivery: %w", err)
+	}
+	return delivery, nil
 }
 
 func (s *Server) validateWebhookTarget(raw string) error {

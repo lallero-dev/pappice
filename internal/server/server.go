@@ -42,6 +42,10 @@ type RateLimit struct {
 	Window time.Duration
 }
 
+type Logger interface {
+	Printf(format string, args ...any)
+}
+
 type Options struct {
 	AllowInsecureWebhooks bool
 	AllowPrivateWebhooks  bool
@@ -60,6 +64,7 @@ type Options struct {
 	AllowedUploadTypes    []string
 	LoginRateLimit        RateLimit
 	AccountLinkRateLimit  RateLimit
+	Logger                Logger
 }
 
 type Branding struct {
@@ -1316,7 +1321,11 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request, auth 
 		respondError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	delivery := s.deliverWebhook(hook, "webhook.test", 0, body)
+	delivery, err := s.deliverWebhook(hook, "webhook.test", 0, body)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
 	respondJSON(w, http.StatusOK, delivery)
 }
 
@@ -1787,5 +1796,7 @@ func (s *Server) eventContext(r *http.Request, actor store.User) store.EventCont
 }
 
 func (s *Server) dispatchEventsSoon() {
-	_ = s.dispatchPendingEvents(context.Background(), 10)
+	if err := s.dispatchPendingEvents(context.Background(), 10); err != nil && s.options.Logger != nil {
+		s.options.Logger.Printf("domain event dispatch: %v", err)
+	}
 }

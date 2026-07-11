@@ -146,8 +146,10 @@ func serve(cfg appConfig, stderr io.Writer) error {
 		logger.Printf("email notifications enabled via SMTP host %s", smtpConfig.Host)
 	}
 
-	app := server.NewServer(tracker, cfg.serverOptions(emailEnabled))
-	go app.RunEventDispatcher(ctx, 5*time.Second, logger)
+	serverOptions := cfg.serverOptions(emailEnabled)
+	serverOptions.Logger = logger
+	app := server.NewServer(tracker, serverOptions)
+	go app.RunEventDispatcher(ctx, 5*time.Second)
 	useTLS, err := cfg.tlsEnabled()
 	if err != nil {
 		return err

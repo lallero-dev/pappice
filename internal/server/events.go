@@ -13,11 +13,8 @@ import (
 
 const domainEventPruneInterval = time.Hour
 
-type eventLogger interface {
-	Printf(format string, args ...any)
-}
-
-func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration, logger eventLogger) {
+func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration) {
+	logger := s.options.Logger
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
@@ -43,7 +40,7 @@ func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration,
 	}
 }
 
-func (s *Server) pruneProcessedDomainEvents(logger eventLogger) {
+func (s *Server) pruneProcessedDomainEvents(logger Logger) {
 	if s.options.DomainEventRetention <= 0 {
 		return
 	}
@@ -81,30 +78,22 @@ func (s *Server) dispatchPendingEvents(ctx context.Context, limit int) error {
 	var firstErr error
 	for _, event := range events {
 		if err := ctx.Err(); err != nil {
-			_ = s.store.MarkDomainEventFailed(event.ID, err)
-			if firstErr == nil {
-				firstErr = err
-			}
+			setFirstError(&firstErr, err)
+			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err))
 			continue
 		}
 		projection, err := s.domainEventProjection(event)
 		if err != nil {
-			_ = s.store.MarkDomainEventFailed(event.ID, err)
-			if firstErr == nil {
-				firstErr = err
-			}
+			setFirstError(&firstErr, err)
+			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err))
 			continue
 		}
 		if err := s.store.ApplyDomainEventProjection(event.ID, projection); err != nil {
-			_ = s.store.MarkDomainEventFailed(event.ID, err)
-			if firstErr == nil {
-				firstErr = err
-			}
+			setFirstError(&firstErr, err)
+			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err))
 		}
 	}
-	if err := s.dispatchPendingWebhookNotifications(ctx, limit); err != nil && firstErr == nil {
-		firstErr = err
-	}
+	setFirstError(&firstErr, s.dispatchPendingWebhookNotifications(ctx, limit))
 	return firstErr
 }
 
@@ -172,38 +161,38 @@ func (s *Server) dispatchPendingWebhookNotifications(ctx context.Context, limit 
 	var firstErr error
 	for _, notification := range notifications {
 		if err := ctx.Err(); err != nil {
-			_ = s.store.MarkWebhookNotificationFailed(notification.ID, err, 5)
-			if firstErr == nil {
-				firstErr = err
-			}
+			setFirstError(&firstErr, err)
+			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, err, 5))
 			continue
 		}
 		hook, err := s.store.GetWebhook(notification.WebhookID)
 		if errors.Is(err, store.ErrNotFound) {
-			_ = s.store.MarkWebhookNotificationSent(notification.ID)
+			setFirstError(&firstErr, s.store.MarkWebhookNotificationSent(notification.ID))
 			continue
 		}
 		if err != nil {
-			_ = s.store.MarkWebhookNotificationFailed(notification.ID, err, 5)
-			if firstErr == nil {
-				firstErr = err
-			}
+			setFirstError(&firstErr, err)
+			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, err, 5))
 			continue
 		}
-		delivery := s.deliverWebhook(hook, notification.Event, notification.TicketID, []byte(notification.PayloadJSON))
+		delivery, recordErr := s.deliverWebhook(hook, notification.Event, notification.TicketID, []byte(notification.PayloadJSON))
 		if strings.TrimSpace(delivery.Error) != "" {
-			err := errors.New(delivery.Error)
-			_ = s.store.MarkWebhookNotificationFailed(notification.ID, err, 5)
-			if firstErr == nil {
-				firstErr = err
-			}
+			deliveryErr := errors.New(delivery.Error)
+			setFirstError(&firstErr, deliveryErr)
+			setFirstError(&firstErr, recordErr)
+			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, deliveryErr, 5))
 			continue
 		}
-		if err := s.store.MarkWebhookNotificationSent(notification.ID); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		setFirstError(&firstErr, s.store.MarkWebhookNotificationSent(notification.ID))
+		setFirstError(&firstErr, recordErr)
 	}
 	return firstErr
+}
+
+func setFirstError(target *error, err error) {
+	if err != nil && *target == nil {
+		*target = err
+	}
 }
 
 func (s *Server) projectAppDomainEvent(eventType string, payload store.AppEventPayload, projection *store.DomainEventProjection) error {
