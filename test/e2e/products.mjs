@@ -79,7 +79,11 @@ async function addCustomerToProduct(cdp, productID) {
     setValue(userSelect, userOption.value);
     setValue(root.querySelector("[name='role']"), "customer");
     root.querySelector("form").requestSubmit();
-    await waitFor(() => !modalRoot()?.querySelector("dialog")?.open, "add member modal closed", 12000);
+    await waitFor(() => {
+      const error = modalRoot()?.querySelector(".error:not([hidden])")?.textContent;
+      if (error) throw new Error(error);
+      return !modalRoot()?.querySelector("dialog")?.open;
+    }, "add member modal closed", 12000);
     const memberRow = await waitFor(() => document.querySelector(`[data-member-user='${customerUserID}']`), "customer product membership");
     if ([...memberRow.querySelectorAll("button")].some((button) => button.textContent.trim() === "Remove")) {
       throw new Error("member removal should be inside the edit member modal");

@@ -216,19 +216,10 @@ export function setAttachmentFiles(input, files) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-export function selectedTicketFiles(form) {
-  if (!form) return [];
+export function selectedFiles(root) {
+  if (!root) return [];
   const files = [];
-  form.querySelectorAll("input[type='file']").forEach((input) => {
-    files.push(...Array.from(input.files || []));
-  });
-  return files;
-}
-
-export function selectedCommentFiles(composer) {
-  if (!composer) return [];
-  const files = [];
-  composer.querySelectorAll("input[type='file']").forEach((input) => {
+  root.querySelectorAll("input[type='file']").forEach((input) => {
     files.push(...Array.from(input.files || []));
   });
   return files;
