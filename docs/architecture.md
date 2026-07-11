@@ -148,14 +148,10 @@ into dedicated modules when it becomes large or repetitive.
 
 ## Testing
 
-The normal backend quality gate is:
+The local quality gate is:
 
 ```sh
-go test ./...
-go vet ./...
-for file in scripts/build-release.sh scripts/release.sh; do
-  bash -n "$file"
-done
+scripts/check.sh
 ```
 
 Use focused tests for store invariants and HTTP contract tests for handler

@@ -241,8 +241,7 @@ E2E tests require Node, OpenSSL, and Chromium. Regenerating the README demo GIF
 also requires `ffmpeg`.
 
 ```sh
-go test ./...
-npm run test:e2e
+scripts/check.sh
 ```
 
 The E2E smoke test starts an isolated HTTPS Pappice instance with a temporary
