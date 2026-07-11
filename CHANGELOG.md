@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v0.12.0 - 2026-07-11
+
+- Paginate and optimize the ticket inbox with lightweight summaries, aggregate
+  counts, and selected-ticket conversation loading.
+- Normalize ticket relationships around user IDs and restrict assignees to
+  staff assigned to the ticket's product.
+- Harden authentication, API-token boundaries, audit context, rate limits,
+  routing, persisted timestamps, and notification failure reporting.
+- Add product general settings and reorganize the browser application into
+  focused, dependency-checked feature modules.
+- Add opt-in debug-build pprof support and a single local quality gate enforced
+  by the release script.
+- Adopt the standard-library PBKDF2 implementation and apply focused runtime
+  and allocation improvements.
+
 ## v0.11.0 - 2026-07-04
 
 - Add linux/arm64 release archives alongside linux/amd64 and update release
