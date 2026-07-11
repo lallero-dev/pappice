@@ -14,6 +14,8 @@ async function setupFirstAdmin(cdp) {
     setValue(form.querySelector("[name='password']"), input.password);
     form.requestSubmit();
     await waitFor(() => {
+      const error = document.querySelector("#authError:not([hidden])")?.textContent;
+      if (error) throw new Error(error);
       const app = document.querySelector("#appView");
       return app && !app.hidden && document.querySelector("#profileName")?.textContent.includes(input.displayName);
     }, "admin session after setup", 12000);

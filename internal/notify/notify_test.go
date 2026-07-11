@@ -123,7 +123,16 @@ func TestWorkerMarksFailedEmail(t *testing.T) {
 func TestWorkerRunReturnsWhenContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	Worker{Interval: time.Millisecond}.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		Worker{Interval: time.Millisecond}.Run(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not return after context cancellation")
+	}
 }
 
 func TestSMTPMailerSend(t *testing.T) {

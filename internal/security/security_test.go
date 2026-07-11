@@ -47,14 +47,18 @@ func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("random token: %v", err)
 	}
-	if token == "" || HashToken(token) == HashToken(token+"x") {
-		t.Fatalf("token/hash helpers failed token=%q", token)
+	rawToken, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(rawToken) != 32 {
+		t.Fatalf("random token = %q, decoded bytes = %d, err = %v", token, len(rawToken), err)
+	}
+	if got, want := HashToken("token"), "3c469e9d6c5875d37a43f353d4f88e61fcf812c66eee3457465a40b0da4153e0"; got != want {
+		t.Fatalf("token hash = %q, want %q", got, want)
 	}
 	if !ConstantTimeEqual("same", "same") || ConstantTimeEqual("same", "different") {
 		t.Fatal("constant-time equality returned unexpected result")
 	}
-	if got := HMACSHA256("secret", []byte("payload")); got == "" || got == HMACSHA256("secret", []byte("other")) {
-		t.Fatalf("unexpected hmac value %q", got)
+	if got, want := HMACSHA256("secret", []byte("payload")), "b82fcb791acec57859b989b430a826488ce2e479fdf92326bd0a2e8375a42ba4"; got != want {
+		t.Fatalf("HMAC = %q, want %q", got, want)
 	}
 }
 

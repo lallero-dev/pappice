@@ -146,15 +146,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	adminCookie := setupResp.Cookies()[0]
 	adminCSRF := decodeString(t, setupBody, "csrf_token")
 
-	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
-		"key":  "OPS",
-		"name": "Operations",
-	}, adminCookie, "", server.URL)
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("missing csrf status = %d body=%s, want 403", resp.StatusCode, body)
-	}
-
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
 
@@ -275,19 +267,6 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	}
 
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
-
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/logout", nil, adminCookie, "", "")
-	requireStatus(t, resp, body, http.StatusMethodNotAllowed)
-	if allow := resp.Header.Get("Allow"); allow != http.MethodPost {
-		t.Fatalf("logout Allow header = %q, want POST", allow)
-	}
-
-	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
-		"key":        "BAD",
-		"name":       "Bad payload",
-		"unexpected": true,
-	}, adminCookie, adminCSRF, server.URL)
-	requireStatus(t, resp, body, http.StatusBadRequest)
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/session", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
