@@ -42,6 +42,7 @@ type migration struct {
 var orderedMigrations = []migration{
 	{Version: 1, Name: "baseline_schema", Up: migrateBaselineSchema},
 	{Version: 2, Name: "rename_product_roles", Up: migrateRenameProductRoles},
+	{Version: 3, Name: "normalize_relational_data", Up: migrateRelationalData},
 }
 
 func CurrentSchemaVersion() int {
@@ -339,6 +340,86 @@ func migrateRenameProductRoles(tx *sql.Tx) error {
 	}
 	if _, err := tx.Exec(`UPDATE product_members SET role = 'staff' WHERE role = 'agent'`); err != nil {
 		return err
+	}
+	return nil
+}
+
+func migrateRelationalData(tx *sql.Tx) error {
+	hasTickets, err := tableExists(tx, "tickets")
+	if err != nil {
+		return err
+	}
+	if hasTickets {
+		hasLegacyAssignee, err := tableHasColumn(tx, "tickets", "assignee")
+		if err != nil {
+			return err
+		}
+		if hasLegacyAssignee {
+			if _, err := tx.Exec(`
+		CREATE TABLE tickets_with_user_ids (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+			number INTEGER NOT NULL,
+			title TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			priority TEXT NOT NULL,
+			assignee_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			requester_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			source TEXT NOT NULL DEFAULT 'staff',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			closed_at TEXT,
+			UNIQUE (product_id, number)
+		);
+		INSERT INTO tickets_with_user_ids (
+			id, product_id, number, title, description, status, priority, assignee_user_id,
+			requester_user_id, source, created_at, updated_at, closed_at
+		)
+		SELECT i.id, i.product_id, i.number, i.title, i.description, i.status, i.priority,
+			(SELECT u.id
+			 FROM users u
+			 JOIN product_members pm ON pm.user_id = u.id AND pm.product_id = i.product_id
+			 WHERE lower(u.email) = lower(trim(i.assignee))
+			   AND u.role IN ('admin', 'staff')
+			   AND u.disabled = 0
+			   AND pm.role IN ('manager', 'staff')
+			 LIMIT 1),
+			(SELECT u.id
+			 FROM users u
+			 WHERE lower(u.email) = lower(COALESCE(NULLIF(trim(i.requester_email), ''), trim(i.reporter)))
+			 LIMIT 1),
+			i.source,
+			i.created_at, i.updated_at, i.closed_at
+		FROM tickets i;
+		DROP TABLE tickets;
+		ALTER TABLE tickets_with_user_ids RENAME TO tickets;
+	`); err != nil {
+				return err
+			}
+		}
+	}
+	if hasAuditEvents, err := tableExists(tx, "audit_events"); err != nil {
+		return err
+	} else if hasAuditEvents {
+		if legacy, err := tableHasColumn(tx, "audit_events", "actor_username"); err != nil {
+			return err
+		} else if legacy {
+			if _, err := tx.Exec(`ALTER TABLE audit_events RENAME COLUMN actor_username TO actor_email`); err != nil {
+				return err
+			}
+		}
+	}
+	if hasDomainEvents, err := tableExists(tx, "domain_events"); err != nil {
+		return err
+	} else if hasDomainEvents {
+		if legacy, err := tableHasColumn(tx, "domain_events", "actor_username"); err != nil {
+			return err
+		} else if legacy {
+			if _, err := tx.Exec(`ALTER TABLE domain_events DROP COLUMN actor_username`); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

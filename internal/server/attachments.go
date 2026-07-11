@@ -113,7 +113,12 @@ func (s *Server) handleAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
-	if !s.canReadTicket(auth.User, ticket) || !s.canReadAttachment(auth.User, ticket, attachment) {
+	access, err := s.ticketAccess(auth.User, ticket)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	if !access.read || !canReadAttachment(ticket, attachment, access) {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -149,7 +154,7 @@ func isInlinePreviewImage(contentType string) bool {
 	}
 }
 
-func (s *Server) canReadAttachment(user store.User, ticket store.Ticket, attachment store.Attachment) bool {
+func canReadAttachment(ticket store.Ticket, attachment store.Attachment, access ticketAccess) bool {
 	if attachment.CommentID == nil {
 		return true
 	}
@@ -157,7 +162,7 @@ func (s *Server) canReadAttachment(user store.User, ticket store.Ticket, attachm
 		if comment.ID != *attachment.CommentID {
 			continue
 		}
-		return comment.Visibility == "" || comment.Visibility == "public" || s.canEditTicket(user, ticket.ProductID)
+		return comment.Visibility == "" || comment.Visibility == "public" || access.edit
 	}
 	return false
 }
@@ -420,20 +425,20 @@ func multipartCreateTicketInput(r *http.Request, fallbackProductID int64) (store
 		}
 		productID = parsed
 	}
+	assigneeUserID, err := multipartOptionalID(r, "assignee_user_id")
+	if err != nil {
+		return store.CreateTicket{}, err
+	}
 	return store.CreateTicket{
 		ProductID:      productID,
 		Title:          multipartValue(r, "title"),
 		Description:    multipartValue(r, "description"),
 		Priority:       multipartValue(r, "priority"),
-		Assignee:       multipartValue(r, "assignee"),
-		Reporter:       multipartValue(r, "requester"),
-		Source:         multipartValue(r, "source"),
-		RequesterName:  multipartValue(r, "requester_name"),
-		RequesterEmail: multipartValue(r, "requester_email"),
+		AssigneeUserID: assigneeUserID,
 	}, nil
 }
 
-func multipartTicketPatchInput(r *http.Request) ticketPatchInput {
+func multipartTicketPatchInput(r *http.Request) (ticketPatchInput, error) {
 	var input ticketPatchInput
 	if value, ok := multipartOptionalValue(r, "title"); ok {
 		input.Title = &value
@@ -447,15 +452,31 @@ func multipartTicketPatchInput(r *http.Request) ticketPatchInput {
 	if value, ok := multipartOptionalValue(r, "priority"); ok {
 		input.Priority = &value
 	}
-	if value, ok := multipartOptionalValue(r, "assignee"); ok {
-		input.Assignee = &value
+	if _, ok := multipartOptionalValue(r, "assignee_user_id"); ok {
+		value, err := multipartOptionalID(r, "assignee_user_id")
+		if err != nil {
+			return ticketPatchInput{}, err
+		}
+		input.AssigneeUserID = &value
 	}
 	body, hasBody := multipartOptionalValue(r, "body")
 	visibility, hasVisibility := multipartOptionalValue(r, "visibility")
 	if hasBody || hasVisibility {
 		input.Comment = &store.AddComment{Body: body, Visibility: visibility}
 	}
-	return input
+	return input, nil
+}
+
+func multipartOptionalID(r *http.Request, name string) (int64, error) {
+	value := strings.TrimSpace(multipartValue(r, name))
+	if value == "" {
+		return 0, nil
+	}
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id < 0 {
+		return 0, fmt.Errorf("%w: %s must be a valid user id", store.ErrValidation, name)
+	}
+	return id, nil
 }
 
 func multipartCommentInput(r *http.Request) store.AddComment {

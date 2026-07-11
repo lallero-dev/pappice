@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+const productAssigneeEligibilitySQL = `pm.role IN ('manager', 'staff')
+	AND u.role IN ('admin', 'staff')
+	AND u.disabled = 0`
+
 func (s *Store) CreateProduct(input CreateProduct) (Product, error) {
 	now := time.Now().UTC()
 	tx, err := s.db.Begin()
@@ -29,7 +33,7 @@ func (s *Store) CreateProduct(input CreateProduct) (Product, error) {
 	return product, nil
 }
 
-func (s *Store) ListProducts(user User) []Product {
+func (s *Store) ListProducts(user User) ([]Product, error) {
 	var rows *sql.Rows
 	var err error
 	if normalizeGlobalRole(user.Role) == "admin" {
@@ -48,18 +52,19 @@ func (s *Store) ListProducts(user User) []Product {
 		)
 	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
 	var products []Product
 	for rows.Next() {
 		product, err := scanProduct(rows)
-		if err == nil {
-			products = append(products, product)
+		if err != nil {
+			return nil, err
 		}
+		products = append(products, product)
 	}
-	return products
+	return products, rows.Err()
 }
 
 func (s *Store) GetProduct(id int64) (Product, error) {
@@ -128,8 +133,8 @@ func (s *Store) DeleteProduct(id int64, event ...EventContext) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return nil, ErrNotFound
+	if err := requireChangedRow(result); err != nil {
+		return nil, err
 	}
 	orphaned, err := orphanedAttachmentStorageKeysTx(tx, storageKeys)
 	if err != nil {
@@ -144,13 +149,16 @@ func (s *Store) DeleteProduct(id int64, event ...EventContext) ([]string, error)
 	return orphaned, nil
 }
 
-func (s *Store) ProductRole(userID, productID int64) (string, bool) {
+func (s *Store) ProductRole(userID, productID int64) (string, error) {
 	var role string
 	err := s.db.QueryRow(`SELECT role FROM product_members WHERE user_id = ? AND product_id = ?`, userID, productID).Scan(&role)
-	return normalizeProductRole(role), err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return normalizeProductRole(role), err
 }
 
-func (s *Store) ListProductMembers(productID int64) []ProductMember {
+func (s *Store) ListProductMembers(productID int64) ([]ProductMember, error) {
 	rows, err := s.db.Query(`
 		SELECT pm.product_id, u.id, u.email, u.display_name, pm.role, pm.created_at
 		FROM product_members pm
@@ -158,21 +166,61 @@ func (s *Store) ListProductMembers(productID int64) []ProductMember {
 		WHERE pm.product_id = ?
 		ORDER BY pm.role, u.email`, productID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
+	return scanProductMembers(rows)
+}
 
+func (s *Store) ListProductAssignees(user User) ([]ProductAssignee, error) {
+	if normalizeGlobalRole(user.Role) == "customer" {
+		return nil, nil
+	}
+	conditions := []string{productAssigneeEligibilitySQL}
+	args := []any{}
+	if normalizeGlobalRole(user.Role) != "admin" {
+		conditions = append(conditions, `EXISTS (
+			SELECT 1 FROM product_members access
+			WHERE access.product_id = pm.product_id
+			  AND access.user_id = ?
+			  AND access.role IN ('manager', 'staff')
+		)`)
+		args = append(args, user.ID)
+	}
+	rows, err := s.db.Query(`
+		SELECT pm.product_id, u.id, u.email, u.display_name
+		FROM product_members pm
+		JOIN users u ON u.id = pm.user_id
+		WHERE `+strings.Join(conditions, " AND ")+`
+		ORDER BY pm.product_id, u.email`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var assignees []ProductAssignee
+	for rows.Next() {
+		var assignee ProductAssignee
+		if err := rows.Scan(&assignee.ProductID, &assignee.UserID, &assignee.Email, &assignee.DisplayName); err != nil {
+			return nil, err
+		}
+		assignees = append(assignees, assignee)
+	}
+	return assignees, rows.Err()
+}
+
+func scanProductMembers(rows *sql.Rows) ([]ProductMember, error) {
 	var members []ProductMember
 	for rows.Next() {
 		var member ProductMember
 		var created string
-		if err := rows.Scan(&member.ProductID, &member.UserID, &member.Email, &member.DisplayName, &member.Role, &created); err == nil {
-			member.Role = normalizeProductRole(member.Role)
-			member.CreatedAt = parseTime(created)
-			members = append(members, member)
+		if err := rows.Scan(&member.ProductID, &member.UserID, &member.Email, &member.DisplayName, &member.Role, &created); err != nil {
+			return nil, err
 		}
+		member.Role = normalizeProductRole(member.Role)
+		member.CreatedAt = parseTime(created)
+		members = append(members, member)
 	}
-	return members
+	return members, rows.Err()
 }
 
 func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) (ProductMember, error) {
@@ -196,12 +244,14 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 		return ProductMember{}, fmt.Errorf("%w: user is disabled", ErrValidation)
 	}
 	now := time.Now().UTC()
-	_, err = tx.Exec(`
+	var created string
+	err = tx.QueryRow(`
 		INSERT INTO product_members (product_id, user_id, role, created_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(product_id, user_id) DO UPDATE SET role = excluded.role`,
+		ON CONFLICT(product_id, user_id) DO UPDATE SET role = excluded.role
+		RETURNING created_at`,
 		productID, input.UserID, role, formatTime(now),
-	)
+	).Scan(&created)
 	if err != nil {
 		return ProductMember{}, err
 	}
@@ -211,7 +261,7 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Role:        role,
-		CreatedAt:   now,
+		CreatedAt:   parseTime(created),
 	}
 	if err := insertAppEventTx(tx, now, input.Event, "product_member.upserted", "user", member.UserID, member.Email, map[string]any{
 		"product_id": productID,
@@ -222,11 +272,6 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 	if err := tx.Commit(); err != nil {
 		return ProductMember{}, err
 	}
-	for _, listed := range s.ListProductMembers(productID) {
-		if listed.UserID == input.UserID {
-			return listed, nil
-		}
-	}
 	return member, nil
 }
 
@@ -236,13 +281,16 @@ func (s *Store) DeleteProductMember(productID, userID int64, event ...EventConte
 		return err
 	}
 	defer tx.Rollback()
-	user, _ := getUserTx(tx, userID)
+	user, err := getUserTx(tx, userID)
+	if err != nil {
+		return err
+	}
 	result, err := tx.Exec(`DELETE FROM product_members WHERE product_id = ? AND user_id = ?`, productID, userID)
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
+	if err := requireChangedRow(result); err != nil {
+		return err
 	}
 	targetName := user.Email
 	if targetName == "" {
@@ -269,7 +317,10 @@ func createProductTx(tx *sql.Tx, input CreateProduct) (Product, error) {
 	if err != nil {
 		return Product{}, normalizeSQLError(err)
 	}
-	id, _ := result.LastInsertId()
+	id, err := insertedID(result)
+	if err != nil {
+		return Product{}, err
+	}
 	return Product{
 		ID:          id,
 		Key:         key,

@@ -32,7 +32,7 @@ func insertAuditEventTx(tx *sql.Tx, input CreateAuditEvent, now time.Time) (Audi
 	event := AuditEvent{
 		DomainEventID: input.DomainEventID,
 		ActorUserID:   input.ActorUserID,
-		ActorUsername: strings.TrimSpace(input.ActorUsername),
+		ActorEmail:    strings.TrimSpace(input.ActorEmail),
 		Action:        action,
 		TargetType:    targetType,
 		TargetID:      input.TargetID,
@@ -41,53 +41,60 @@ func insertAuditEventTx(tx *sql.Tx, input CreateAuditEvent, now time.Time) (Audi
 		DetailsJSON:   strings.TrimSpace(input.DetailsJSON),
 		CreatedAt:     now.UTC(),
 	}
-	if event.ActorUsername == "" {
-		event.ActorUsername = "system"
+	if event.ActorEmail == "" {
+		event.ActorEmail = "system"
 	}
 	result, err := tx.Exec(`
-		INSERT INTO audit_events (domain_event_id, actor_user_id, actor_username, action, target_type, target_id, target_name, ip, details_json, created_at)
+		INSERT INTO audit_events (domain_event_id, actor_user_id, actor_email, action, target_type, target_id, target_name, ip, details_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		event.DomainEventID, nullZero(event.ActorUserID), event.ActorUsername, event.Action, event.TargetType, nullZero(event.TargetID),
+		event.DomainEventID, nullZero(event.ActorUserID), event.ActorEmail, event.Action, event.TargetType, nullZero(event.TargetID),
 		event.TargetName, event.IP, event.DetailsJSON, formatTime(event.CreatedAt),
 	)
 	if err != nil {
 		return AuditEvent{}, normalizeSQLError(err)
 	}
-	event.ID, _ = result.LastInsertId()
+	event.ID, err = insertedID(result)
+	if err != nil {
+		return AuditEvent{}, err
+	}
 	return event, nil
 }
 
-func (s *Store) ListAuditEvents(limit int) []AuditEvent {
-	return s.ListAuditEventsPage(AuditEventFilter{Limit: limit}).Events
+func (s *Store) ListAuditEvents(limit int) ([]AuditEvent, error) {
+	page, err := s.ListAuditEventsPage(AuditEventFilter{Limit: limit})
+	return page.Events, err
 }
 
-func (s *Store) ListAuditEventsPage(filter AuditEventFilter) AuditEventPage {
+func (s *Store) ListAuditEventsPage(filter AuditEventFilter) (AuditEventPage, error) {
 	limit, offset := normalizePage(filter.Limit, filter.Offset, 25, 100)
 	where, args := auditEventWhere(filter)
 	page := AuditEventPage{Limit: limit, Offset: offset}
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM audit_events `+where, args...).Scan(&page.Total)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events `+where, args...).Scan(&page.Total); err != nil {
+		return AuditEventPage{}, err
+	}
 
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit, offset)
 	rows, err := s.db.Query(`
-		SELECT id, domain_event_id, actor_user_id, actor_username, action, target_type, target_id, target_name, ip, details_json, created_at
+		SELECT id, domain_event_id, actor_user_id, actor_email, action, target_type, target_id, target_name, ip, details_json, created_at
 		FROM audit_events
 		`+where+`
 		ORDER BY created_at DESC, id DESC
 		LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
-		return page
+		return AuditEventPage{}, err
 	}
 	defer rows.Close()
 
 	page.Events = make([]AuditEvent, 0, limit)
 	for rows.Next() {
 		event, err := scanAuditEvent(rows)
-		if err == nil {
-			page.Events = append(page.Events, event)
+		if err != nil {
+			return AuditEventPage{}, err
 		}
+		page.Events = append(page.Events, event)
 	}
-	return page
+	return page, rows.Err()
 }
 
 func auditEventWhere(filter AuditEventFilter) (string, []any) {
@@ -96,7 +103,7 @@ func auditEventWhere(filter AuditEventFilter) (string, []any) {
 		return "", nil
 	}
 	like := "%" + query + "%"
-	return `WHERE (actor_username LIKE ? OR action LIKE ? OR target_type LIKE ? OR target_name LIKE ? OR ip LIKE ? OR details_json LIKE ?)`,
+	return `WHERE (actor_email LIKE ? OR action LIKE ? OR target_type LIKE ? OR target_name LIKE ? OR ip LIKE ? OR details_json LIKE ?)`,
 		[]any{like, like, like, like, like, like}
 }
 
@@ -107,7 +114,7 @@ func scanAuditEvent(rows scanner) (AuditEvent, error) {
 	var targetID sql.NullInt64
 	var created string
 	if err := rows.Scan(
-		&event.ID, &domainEventID, &actorID, &event.ActorUsername, &event.Action, &event.TargetType, &targetID,
+		&event.ID, &domainEventID, &actorID, &event.ActorEmail, &event.Action, &event.TargetType, &targetID,
 		&event.TargetName, &event.IP, &event.DetailsJSON, &created,
 	); err != nil {
 		return AuditEvent{}, err

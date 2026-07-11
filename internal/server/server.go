@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -89,26 +88,26 @@ type authContext struct {
 }
 
 type ticketPatchInput struct {
-	Title       *string           `json:"title"`
-	Description *string           `json:"description"`
-	Status      *string           `json:"status"`
-	Priority    *string           `json:"priority"`
-	Assignee    *string           `json:"assignee"`
-	Comment     *store.AddComment `json:"comment"`
+	Title          *string           `json:"title"`
+	Description    *string           `json:"description"`
+	Status         *string           `json:"status"`
+	Priority       *string           `json:"priority"`
+	AssigneeUserID *int64            `json:"assignee_user_id"`
+	Comment        *store.AddComment `json:"comment"`
 }
 
 func (input ticketPatchInput) updateTicket() store.UpdateTicket {
 	return store.UpdateTicket{
-		Title:       input.Title,
-		Description: input.Description,
-		Status:      input.Status,
-		Priority:    input.Priority,
-		Assignee:    input.Assignee,
+		Title:          input.Title,
+		Description:    input.Description,
+		Status:         input.Status,
+		Priority:       input.Priority,
+		AssigneeUserID: input.AssigneeUserID,
 	}
 }
 
 func (input ticketPatchInput) hasTicketPatch() bool {
-	return input.Title != nil || input.Description != nil || input.Status != nil || input.Priority != nil || input.Assignee != nil
+	return input.Title != nil || input.Description != nil || input.Status != nil || input.Priority != nil || input.AssigneeUserID != nil
 }
 
 func New(tracker *store.Store, opts ...Options) http.Handler {
@@ -328,7 +327,6 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_ = auth
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
@@ -336,8 +334,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBrowserSession(w, auth) {
 		return
 	}
-	if cookie, err := r.Cookie(sessionCookieName); err == nil {
-		_ = s.store.DeleteSession(cookie.Value)
+	if err := s.store.DeleteSession(auth.SessionToken); err != nil {
+		respondStoreError(w, err)
+		return
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -459,7 +458,20 @@ func (s *Server) handleProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		respondJSON(w, http.StatusOK, map[string]any{"products": s.store.ListProducts(auth.User)})
+		products, err := s.store.ListProducts(auth.User)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		assignees, err := s.store.ListProductAssignees(auth.User)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"products":  products,
+			"assignees": assignees,
+		})
 	case http.MethodPost:
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
@@ -496,28 +508,33 @@ func (s *Server) handleProductByID(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	access, err := s.productAccess(auth.User, productID)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
 	if len(parts) == 1 {
-		s.handleSingleProduct(w, r, auth, productID)
+		s.handleSingleProduct(w, r, auth, productID, access)
 		return
 	}
 	switch parts[1] {
 	case "members":
-		s.handleProductMembers(w, r, auth, productID, parts[2:])
+		s.handleProductMembers(w, r, auth, productID, access, parts[2:])
 	case "tickets":
-		s.handleProductTickets(w, r, auth, productID)
+		s.handleProductTickets(w, r, auth, productID, access)
 	case "webhooks":
-		s.handleProductWebhooks(w, r, auth, productID)
+		s.handleProductWebhooks(w, r, auth, productID, access)
 	case "webhook-deliveries":
-		s.handleProductDeliveries(w, r, auth, productID)
+		s.handleProductDeliveries(w, r, auth, productID, access)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
+func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, access productAccess) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.canReadProduct(auth.User, productID) {
+		if !access.read {
 			respondError(w, http.StatusNotFound, "not found")
 			return
 		}
@@ -526,15 +543,10 @@ func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, aut
 			respondStoreError(w, err)
 			return
 		}
-		if role, ok := s.store.ProductRole(auth.User.ID, productID); ok {
-			product.Role = role
-		}
-		if isAdmin(auth.User) {
-			product.Role = "manager"
-		}
+		product.Role = access.role
 		respondJSON(w, http.StatusOK, product)
 	case http.MethodPatch:
-		if !s.canManageProduct(auth.User, productID) {
+		if !access.manage {
 			respondError(w, http.StatusForbidden, "product manager access is required")
 			return
 		}
@@ -568,15 +580,20 @@ func (s *Server) handleSingleProduct(w http.ResponseWriter, r *http.Request, aut
 	}
 }
 
-func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, rest []string) {
-	if !s.canManageProduct(auth.User, productID) {
+func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, access productAccess, rest []string) {
+	if !access.manage {
 		respondError(w, http.StatusForbidden, "product manager access is required")
 		return
 	}
 	if len(rest) == 0 {
 		switch r.Method {
 		case http.MethodGet:
-			respondJSON(w, http.StatusOK, map[string]any{"members": s.store.ListProductMembers(productID), "roles": store.ProductRoles()})
+			members, err := s.store.ListProductMembers(productID)
+			if err != nil {
+				respondStoreError(w, err)
+				return
+			}
+			respondJSON(w, http.StatusOK, map[string]any{"members": members, "roles": store.ProductRoles()})
 		case http.MethodPost:
 			var input store.UpsertProductMember
 			if !decodeJSON(w, r, &input) {
@@ -611,13 +628,13 @@ func (s *Server) handleProductMembers(w http.ResponseWriter, r *http.Request, au
 	http.NotFound(w, r)
 }
 
-func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
-	if !s.canReadProduct(auth.User, productID) {
-		respondError(w, http.StatusNotFound, "not found")
-		return
-	}
+func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, access productAccess) {
 	switch r.Method {
 	case http.MethodGet:
+		if !access.read {
+			respondError(w, http.StatusNotFound, "not found")
+			return
+		}
 		query := r.URL.Query()
 		limit, offset := paginationParams(r, 50, 500)
 		result, err := s.listTicketsForQuery(auth.User, ticketSummaryFilter(query, productID, limit, offset))
@@ -636,12 +653,16 @@ func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, au
 			"priorities":   store.Priorities(),
 		})
 	case http.MethodPost:
+		if !access.createTicket {
+			respondError(w, http.StatusForbidden, "product write access is required")
+			return
+		}
 		ticket, ok := s.createTicketFromRequest(w, r, auth, productID)
 		if !ok {
 			return
 		}
 		s.dispatchEventsSoon()
-		respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, ticket))
+		s.respondTicketForUser(w, http.StatusCreated, auth.User, ticket)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
@@ -669,18 +690,13 @@ func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.dispatchEventsSoon()
-		respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, ticket))
+		s.respondTicketForUser(w, http.StatusCreated, auth.User, ticket)
 	default:
 		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
 func (s *Server) createTicketFromRequest(w http.ResponseWriter, r *http.Request, auth authContext, fallbackProductID int64) (store.Ticket, bool) {
-	if fallbackProductID > 0 && !s.canCreateTicket(auth.User, fallbackProductID) {
-		respondError(w, http.StatusForbidden, "product write access is required")
-		return store.Ticket{}, false
-	}
-
 	var input store.CreateTicket
 	multipart := isMultipartRequest(r)
 	if multipart {
@@ -703,13 +719,18 @@ func (s *Server) createTicketFromRequest(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	if fallbackProductID == 0 && !s.canCreateTicket(auth.User, input.ProductID) {
-		respondError(w, http.StatusForbidden, "product write access is required")
-		return store.Ticket{}, false
+	if fallbackProductID == 0 {
+		access, err := s.productAccess(auth.User, input.ProductID)
+		if err != nil {
+			respondStoreError(w, err)
+			return store.Ticket{}, false
+		}
+		if !access.createTicket {
+			respondError(w, http.StatusForbidden, "product write access is required")
+			return store.Ticket{}, false
+		}
 	}
-	if !s.prepareTicketInput(w, auth.User, input.ProductID, &input) {
-		return store.Ticket{}, false
-	}
+	input.ActorUserID = auth.User.ID
 
 	var uploads []storedUpload
 	if multipart {
@@ -719,8 +740,7 @@ func (s *Server) createTicketFromRequest(w http.ResponseWriter, r *http.Request,
 			return store.Ticket{}, false
 		}
 	}
-	input.Actor = store.EventActorFromUser(auth.User)
-	ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads), auth.User.ID)
+	ticket, err := s.store.CreateTicketWithAttachments(input, attachmentInputs(uploads))
 	if err != nil {
 		cleanupStoredUploads(uploads)
 		respondStoreError(w, err)
@@ -752,21 +772,26 @@ func (s *Server) handleTicketPath(w http.ResponseWriter, r *http.Request) {
 		respondStoreError(w, err)
 		return
 	}
-	if !s.canReadTicket(auth.User, ticket) {
+	access, err := s.ticketAccess(auth.User, ticket)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	if !access.read {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
 
 	if len(parts) == 1 {
-		s.handleSingleTicket(w, r, auth, ticket)
+		s.handleSingleTicket(w, r, auth, ticket, access)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "comments" {
-		s.handleComments(w, r, auth, ticket)
+		s.handleComments(w, r, auth, ticket, access)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "read" {
-		s.handleTicketRead(w, r, auth, ticket)
+		s.handleTicketRead(w, r, auth, ticket, access)
 		return
 	}
 	http.NotFound(w, r)
@@ -782,17 +807,22 @@ func (s *Server) handleTicketByKey(w http.ResponseWriter, r *http.Request, auth 
 		respondStoreError(w, err)
 		return
 	}
-	if !s.canReadTicket(auth.User, ticket) {
+	access, err := s.ticketAccess(auth.User, ticket)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	if !access.read {
 		respondError(w, http.StatusNotFound, "not found")
 		return
 	}
-	respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, ticket))
+	s.respondTicket(w, http.StatusOK, auth.User, ticket, access)
 }
 
-func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket) {
+func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket, access ticketAccess) {
 	switch r.Method {
 	case http.MethodGet:
-		respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, ticket))
+		s.respondTicket(w, http.StatusOK, auth.User, ticket, access)
 	case http.MethodPatch:
 		var input ticketPatchInput
 		var uploads []storedUpload
@@ -801,7 +831,12 @@ func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth
 				return
 			}
 			defer cleanupMultipartForm(r)
-			input = multipartTicketPatchInput(r)
+			var err error
+			input, err = multipartTicketPatchInput(r)
+			if err != nil {
+				respondStoreError(w, err)
+				return
+			}
 			var ok bool
 			uploads, ok = s.saveRequestAttachments(w, r)
 			if !ok {
@@ -812,12 +847,12 @@ func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth
 				return
 			}
 		}
-		updated, ok := s.applyTicketPatch(w, auth, ticket, input, attachmentInputs(uploads), auth.User.ID)
+		updated, ok := s.applyTicketPatch(w, auth, ticket, access, input, attachmentInputs(uploads))
 		if !ok {
 			cleanupStoredUploads(uploads)
 			return
 		}
-		respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, updated))
+		s.respondTicket(w, http.StatusOK, auth.User, updated, access)
 	case http.MethodDelete:
 		if !isAdmin(auth.User) {
 			respondError(w, http.StatusForbidden, "admin role is required")
@@ -836,7 +871,7 @@ func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth
 	}
 }
 
-func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticket store.Ticket, input ticketPatchInput, attachments []store.CreateAttachment, attachmentUserID int64) (store.Ticket, bool) {
+func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticket store.Ticket, access ticketAccess, input ticketPatchInput, attachments []store.CreateAttachment) (store.Ticket, bool) {
 	hasPatch := input.hasTicketPatch()
 	hasAttachments := len(attachments) > 0
 	if hasAttachments && input.Comment == nil {
@@ -847,11 +882,11 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 		respondError(w, http.StatusBadRequest, "ticket changes or comment are required")
 		return store.Ticket{}, false
 	}
-	if hasPatch && !s.canEditTicket(auth.User, ticket.ProductID) {
+	if hasPatch && !access.edit {
 		respondError(w, http.StatusForbidden, "staff access is required")
 		return store.Ticket{}, false
 	}
-	if hasComment && !s.canCommentTicket(auth.User, ticket.ProductID) {
+	if hasComment && !access.comment {
 		respondError(w, http.StatusForbidden, "product comment access is required")
 		return store.Ticket{}, false
 	}
@@ -860,22 +895,19 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 	if hasComment {
 		next := *input.Comment
 		next.Visibility = defaultString(next.Visibility, "public")
-		if next.Visibility == "internal" && !s.canEditTicket(auth.User, ticket.ProductID) {
+		if next.Visibility == "internal" && !access.edit {
 			respondError(w, http.StatusForbidden, "staff access is required for internal notes")
 			return store.Ticket{}, false
 		}
-		next.Author = defaultString(auth.User.DisplayName, auth.User.Email)
-		next.AuthorUserID = auth.User.ID
 		comment = &next
 	}
 
 	result, err := s.store.SaveTicket(store.SaveTicketInput{
-		TicketID:         ticket.ID,
-		Patch:            input.updateTicket(),
-		Comment:          comment,
-		Attachments:      attachments,
-		AttachmentUserID: attachmentUserID,
-		Actor:            store.EventActorFromUser(auth.User),
+		TicketID:    ticket.ID,
+		Patch:       input.updateTicket(),
+		Comment:     comment,
+		Attachments: attachments,
+		ActorUserID: auth.User.ID,
 	})
 	if err != nil {
 		respondStoreError(w, err)
@@ -883,22 +915,15 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 	}
 	updated := result.Ticket
 	s.dispatchEventsSoon()
-	if result.HasPatch || result.HasComment {
-		if err := s.store.MarkTicketRead(updated.ID, auth.User.ID, time.Now().UTC()); err == nil {
-			if refreshed, err := s.store.GetTicket(updated.ID); err == nil {
-				updated = refreshed
-			}
-		}
-	}
 	return updated, true
 }
 
-func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket) {
+func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket, access ticketAccess) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if !s.canCommentTicket(auth.User, ticket.ProductID) {
+	if !access.comment {
 		respondError(w, http.StatusForbidden, "product comment access is required")
 		return
 	}
@@ -921,20 +946,20 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		}
 	}
 	input.Visibility = defaultString(input.Visibility, "public")
-	if input.Visibility == "internal" && !s.canEditTicket(auth.User, ticket.ProductID) {
+	if input.Visibility == "internal" && !access.edit {
 		respondError(w, http.StatusForbidden, "staff access is required for internal notes")
 		cleanupStoredUploads(uploads)
 		return
 	}
-	updated, ok := s.applyTicketPatch(w, auth, ticket, ticketPatchInput{Comment: &input}, attachmentInputs(uploads), auth.User.ID)
+	updated, ok := s.applyTicketPatch(w, auth, ticket, access, ticketPatchInput{Comment: &input}, attachmentInputs(uploads))
 	if !ok {
 		cleanupStoredUploads(uploads)
 		return
 	}
-	respondJSON(w, http.StatusCreated, s.ticketForUser(auth.User, updated))
+	s.respondTicket(w, http.StatusCreated, auth.User, updated, access)
 }
 
-func (s *Server) handleTicketRead(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket) {
+func (s *Server) handleTicketRead(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket, access ticketAccess) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
@@ -948,7 +973,7 @@ func (s *Server) handleTicketRead(w http.ResponseWriter, r *http.Request, auth a
 		respondStoreError(w, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, s.ticketForUser(auth.User, updated))
+	s.respondTicket(w, http.StatusOK, auth.User, updated, access)
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -958,7 +983,11 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		users := s.store.ListUsers()
+		users, err := s.store.ListUsers()
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
 		public := make([]store.PublicUser, 0, len(users))
 		for _, user := range users {
 			public = append(public, store.ToPublicUser(user))
@@ -989,7 +1018,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			respondStoreError(w, err)
 			return
 		}
-		queued := s.accountLinkEmailRequested(created, token)
+		queued := s.options.EmailNotifications
 		s.dispatchEventsSoon()
 		respondJSON(w, http.StatusCreated, userAccountLinkResponse(created, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 	default:
@@ -1059,7 +1088,7 @@ func (s *Server) handleUserPasswordReset(w http.ResponseWriter, r *http.Request,
 		respondStoreError(w, err)
 		return
 	}
-	queued := s.accountLinkEmailRequested(user, token)
+	queued := s.options.EmailNotifications
 	s.dispatchEventsSoon()
 	respondJSON(w, http.StatusCreated, userAccountLinkResponse(user, s.accountLinkURL(link.Purpose, token), link.ExpiresAt, queued, s.options.EmailNotifications))
 }
@@ -1074,7 +1103,12 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		respondJSON(w, http.StatusOK, map[string]any{"tokens": s.store.ListAPITokens(auth.User.ID)})
+		tokens, err := s.store.ListAPITokens(auth.User.ID)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
 	case http.MethodPost:
 		var input store.CreateAPIToken
 		if !decodeJSON(w, r, &input) {
@@ -1125,8 +1159,8 @@ func (s *Server) handleWebhooks(w http.ResponseWriter, r *http.Request) {
 	s.handleWebhookCollection(w, r, auth, nil)
 }
 
-func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
-	if !s.canManageProduct(auth.User, productID) {
+func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, access productAccess) {
+	if !access.manage {
 		respondError(w, http.StatusForbidden, "product manager access is required")
 		return
 	}
@@ -1136,8 +1170,13 @@ func (s *Server) handleProductWebhooks(w http.ResponseWriter, r *http.Request, a
 func (s *Server) handleWebhookCollection(w http.ResponseWriter, r *http.Request, auth authContext, productID *int64) {
 	switch r.Method {
 	case http.MethodGet:
+		hooks, err := s.store.ListWebhooks(productID)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
 		respondJSON(w, http.StatusOK, map[string]any{
-			"webhooks": publicWebhooks(s.store.ListWebhooks(productID)),
+			"webhooks": publicWebhooks(hooks),
 			"events":   store.Events(),
 		})
 	case http.MethodPost:
@@ -1183,9 +1222,16 @@ func (s *Server) handleWebhookByID(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusForbidden, "admin role is required")
 			return
 		}
-	} else if !s.canManageProduct(auth.User, *hook.ProductID) {
-		respondError(w, http.StatusForbidden, "product manager access is required")
-		return
+	} else {
+		access, err := s.productAccess(auth.User, *hook.ProductID)
+		if err != nil {
+			respondStoreError(w, err)
+			return
+		}
+		if !access.manage {
+			respondError(w, http.StatusForbidden, "product manager access is required")
+			return
+		}
 	}
 	if len(parts) == 2 && parts[1] == "secret" {
 		s.handleWebhookSecret(w, r, auth, hook)
@@ -1250,7 +1296,11 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request, auth 
 		"actor":      store.ToPublicUser(auth.User),
 		"message":    "Pappice test delivery",
 	}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
 	delivery := s.deliverWebhook(hook, "webhook.test", 0, body)
 	respondJSON(w, http.StatusOK, delivery)
 }
@@ -1264,7 +1314,12 @@ func (s *Server) handleWebhookDeliveries(w http.ResponseWriter, r *http.Request)
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"deliveries": s.store.ListDeliveries(50)})
+	deliveries, err := s.store.ListDeliveries(nil, 50)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries})
 }
 
 func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request) {
@@ -1277,12 +1332,21 @@ func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request
 		return
 	}
 	limit, offset := paginationParams(r, 25, 100)
-	page := s.store.ListEmailNotificationsPage(store.EmailNotificationFilter{
+	page, err := s.store.ListEmailNotificationsPage(store.EmailNotificationFilter{
 		Status: r.URL.Query().Get("status"),
 		Query:  r.URL.Query().Get("q"),
 		Limit:  limit,
 		Offset: offset,
 	})
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	stats, err := s.store.EmailNotificationStats()
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"notifications":              page.Notifications,
 		"total":                      page.Total,
@@ -1290,7 +1354,7 @@ func (s *Server) handleEmailNotifications(w http.ResponseWriter, r *http.Request
 		"offset":                     page.Offset,
 		"enabled":                    s.options.EmailNotifications,
 		"notification_delay_seconds": int(s.options.NotificationDelay.Seconds()),
-		"stats":                      s.store.EmailNotificationStats(),
+		"stats":                      stats,
 	})
 }
 
@@ -1380,11 +1444,15 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, offset := paginationParams(r, 25, 100)
-	page := s.store.ListAuditEventsPage(store.AuditEventFilter{
+	page, err := s.store.ListAuditEventsPage(store.AuditEventFilter{
 		Query:  r.URL.Query().Get("q"),
 		Limit:  limit,
 		Offset: offset,
 	})
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"events": page.Events,
 		"total":  page.Total,
@@ -1393,8 +1461,8 @@ func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, productID int64) {
-	if !s.canManageProduct(auth.User, productID) {
+func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request, auth authContext, productID int64, access productAccess) {
+	if !access.manage {
 		respondError(w, http.StatusForbidden, "product manager access is required")
 		return
 	}
@@ -1402,17 +1470,12 @@ func (s *Server) handleProductDeliveries(w http.ResponseWriter, r *http.Request,
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	deliveries := s.store.ListDeliveries(200)
-	filtered := make([]store.WebhookDelivery, 0, min(len(deliveries), 50))
-	for _, delivery := range deliveries {
-		if delivery.ProductID != nil && *delivery.ProductID == productID {
-			filtered = append(filtered, delivery)
-			if len(filtered) == 50 {
-				break
-			}
-		}
+	deliveries, err := s.store.ListDeliveries(&productID, 50)
+	if err != nil {
+		respondStoreError(w, err)
+		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"deliveries": filtered})
+	respondJSON(w, http.StatusOK, map[string]any{"deliveries": deliveries})
 }
 
 func (s *Server) createSession(w http.ResponseWriter, userID int64) (string, bool) {
@@ -1521,101 +1584,92 @@ func (s *Server) verifyCSRF(w http.ResponseWriter, r *http.Request, expected str
 	return true
 }
 
-func (s *Server) canReadProduct(user store.User, productID int64) bool {
-	if isAdmin(user) {
-		return true
-	}
-	_, ok := s.store.ProductRole(user.ID, productID)
-	return ok
-}
-
-func (s *Server) canReadTicket(user store.User, ticket store.Ticket) bool {
-	if isAdmin(user) {
-		return true
-	}
-	role, ok := s.store.ProductRole(user.ID, ticket.ProductID)
-	if !ok {
-		return false
-	}
-	if isCustomer(user) || role == "customer" {
-		return s.isSupportTicketRequester(user, ticket)
-	}
-	return true
-}
-
-func (s *Server) canManageProduct(user store.User, productID int64) bool {
-	if isCustomer(user) {
-		return false
-	}
-	if isAdmin(user) {
-		return true
-	}
-	role, ok := s.store.ProductRole(user.ID, productID)
-	return ok && role == "manager"
-}
-
-func (s *Server) canCreateTicket(user store.User, productID int64) bool {
-	return s.hasProductRole(user, productID, "manager", "staff", "customer")
-}
-
-func (s *Server) canCommentTicket(user store.User, productID int64) bool {
-	return s.hasProductRole(user, productID, "manager", "staff", "customer")
-}
-
-func (s *Server) canEditTicket(user store.User, productID int64) bool {
-	if isCustomer(user) {
-		return false
-	}
-	return s.hasProductRole(user, productID, "manager", "staff")
-}
-
 func (s *Server) isSupportTicketRequester(user store.User, ticket store.Ticket) bool {
-	email := strings.TrimSpace(user.Email)
-	if email != "" && strings.EqualFold(email, strings.TrimSpace(ticket.RequesterEmail)) {
-		return true
-	}
-	return ticket.Source == "portal" && email != "" && strings.EqualFold(strings.TrimSpace(ticket.Reporter), email)
+	return user.ID > 0 && user.ID == ticket.RequesterUserID
 }
 
-func (s *Server) prepareTicketInput(w http.ResponseWriter, user store.User, productID int64, input *store.CreateTicket) bool {
-	input.ProductID = productID
-	input.Reporter = user.Email
-	if !s.isCustomerTicketCreator(user, productID) {
-		return true
-	}
-	requesterEmail := strings.TrimSpace(user.Email)
-	if requesterEmail == "" {
-		respondError(w, http.StatusBadRequest, "your account needs an email address before you can open support tickets")
-		return false
-	}
-	input.Assignee = ""
-	input.Source = "portal"
-	input.RequesterName = defaultString(user.DisplayName, user.Email)
-	input.RequesterEmail = requesterEmail
-	return true
+type productAccess struct {
+	role         string
+	read         bool
+	manage       bool
+	createTicket bool
 }
 
-func (s *Server) isCustomerTicketCreator(user store.User, productID int64) bool {
-	if isCustomer(user) {
-		return true
+func (s *Server) productAccess(user store.User, productID int64) (productAccess, error) {
+	if isAdmin(user) {
+		return productAccess{role: "manager", read: true, manage: true, createTicket: true}, nil
 	}
-	role, ok := s.store.ProductRole(user.ID, productID)
-	return ok && role == "customer"
+	role, err := s.store.ProductRole(user.ID, productID)
+	if errors.Is(err, store.ErrNotFound) {
+		return productAccess{}, nil
+	}
+	if err != nil {
+		return productAccess{}, err
+	}
+	return productAccess{
+		role:         role,
+		read:         true,
+		manage:       !isCustomer(user) && role == "manager",
+		createTicket: role == "manager" || role == "staff" || role == "customer",
+	}, nil
 }
 
-func (s *Server) ticketForUser(user store.User, ticket store.Ticket) store.Ticket {
-	if !s.canEditTicket(user, ticket.ProductID) {
+type ticketAccess struct {
+	read         bool
+	comment      bool
+	edit         bool
+	viewAssignee bool
+}
+
+func (s *Server) ticketAccess(user store.User, ticket store.Ticket) (ticketAccess, error) {
+	product, err := s.productAccess(user, ticket.ProductID)
+	if err != nil || !product.read {
+		return ticketAccess{}, err
+	}
+	role := product.role
+	requesterOnly := isCustomer(user) || role == "customer"
+	return ticketAccess{
+		read:         !requesterOnly || s.isSupportTicketRequester(user, ticket),
+		comment:      product.createTicket,
+		edit:         !isCustomer(user) && (role == "manager" || role == "staff"),
+		viewAssignee: !isCustomer(user) && role != "customer",
+	}, nil
+}
+
+func (s *Server) ticketForUser(user store.User, ticket store.Ticket, access ticketAccess) (store.Ticket, error) {
+	if !access.edit {
 		ticket.Comments = publicComments(ticket.Comments)
 	}
-	if !s.canViewTicketAssignee(user, ticket.ProductID) {
-		ticket.Assignee = ""
+	if !access.viewAssignee {
+		ticket.AssigneeUserID = 0
+		ticket.AssigneeEmail = ""
 	}
-	if summary, err := s.store.TicketSummaryForUser(user, ticket.ID); err == nil {
-		ticket.UnreadCount = summary.UnreadCount
-		ticket.HasUnread = summary.HasUnread
-		ticket.LastReadAt = summary.LastReadAt
+	summary, err := s.store.TicketSummaryForUser(user, ticket.ID)
+	if err != nil {
+		return store.Ticket{}, err
 	}
-	return ticket
+	ticket.UnreadCount = summary.UnreadCount
+	ticket.HasUnread = summary.HasUnread
+	ticket.LastReadAt = summary.LastReadAt
+	return ticket, nil
+}
+
+func (s *Server) respondTicket(w http.ResponseWriter, status int, user store.User, ticket store.Ticket, access ticketAccess) {
+	ticket, err := s.ticketForUser(user, ticket, access)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, status, ticket)
+}
+
+func (s *Server) respondTicketForUser(w http.ResponseWriter, status int, user store.User, ticket store.Ticket) {
+	access, err := s.ticketAccess(user, ticket)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	s.respondTicket(w, status, user, ticket, access)
 }
 
 type ticketListResult struct {
@@ -1628,11 +1682,12 @@ type ticketListResult struct {
 }
 
 func ticketSummaryFilter(query url.Values, productID int64, limit, offset int) store.TicketSummaryFilter {
+	assigneeUserID, _ := strconv.ParseInt(query.Get("assignee_user_id"), 10, 64)
 	return store.TicketSummaryFilter{
 		Query:                      query.Get("q"),
 		Statuses:                   queryStatuses(query),
 		ProductID:                  productID,
-		Assignee:                   query.Get("assignee"),
+		AssigneeUserID:             assigneeUserID,
 		UnreadOnly:                 queryUnread(query),
 		IncludeUnreadOutsideStatus: queryIncludeUnreadOutsideStatus(query),
 		Sort:                       query.Get("sort"),
@@ -1644,7 +1699,7 @@ func ticketSummaryFilter(query url.Values, productID int64, limit, offset int) s
 
 func (s *Server) listTicketsForQuery(user store.User, filter store.TicketSummaryFilter) (ticketListResult, error) {
 	if isCustomer(user) {
-		filter.Assignee = ""
+		filter.AssigneeUserID = 0
 	}
 	page, err := s.store.ListTicketSummariesPage(user, filter)
 	if err != nil {
@@ -1656,7 +1711,8 @@ func (s *Server) listTicketsForQuery(user store.User, filter store.TicketSummary
 	}
 	for i := range page.Tickets {
 		if !s.canViewTicketSummaryAssignee(user, page.Tickets[i]) {
-			page.Tickets[i].Assignee = ""
+			page.Tickets[i].AssigneeUserID = 0
+			page.Tickets[i].AssigneeEmail = ""
 		}
 	}
 	return ticketListResult{
@@ -1676,17 +1732,6 @@ func (s *Server) canViewTicketSummaryAssignee(user store.User, summary store.Tic
 	return isAdmin(user) || summary.ProductRole != "customer"
 }
 
-func (s *Server) canViewTicketAssignee(user store.User, productID int64) bool {
-	if isCustomer(user) {
-		return false
-	}
-	if isAdmin(user) {
-		return true
-	}
-	role, ok := s.store.ProductRole(user.ID, productID)
-	return ok && role != "customer"
-}
-
 func publicComments(comments []store.Comment) []store.Comment {
 	result := make([]store.Comment, 0, len(comments))
 	for _, comment := range comments {
@@ -1696,17 +1741,6 @@ func publicComments(comments []store.Comment) []store.Comment {
 		}
 	}
 	return result
-}
-
-func (s *Server) hasProductRole(user store.User, productID int64, allowed ...string) bool {
-	if isAdmin(user) {
-		return true
-	}
-	role, ok := s.store.ProductRole(user.ID, productID)
-	if !ok {
-		return false
-	}
-	return slices.Contains(allowed, role)
 }
 
 func (s *Server) eventContext(r *http.Request, actor store.User) store.EventContext {
@@ -1722,8 +1756,4 @@ func (s *Server) eventContext(r *http.Request, actor store.User) store.EventCont
 
 func (s *Server) dispatchEventsSoon() {
 	_ = s.dispatchPendingEvents(context.Background(), 10)
-}
-
-func (s *Server) accountLinkEmailRequested(user store.User, token string) bool {
-	return s.options.EmailNotifications && store.AccountLinkEmailRequested(user, token)
 }

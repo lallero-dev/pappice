@@ -10,10 +10,10 @@ import (
 )
 
 type EventActor struct {
-	UserID      int64
-	DisplayName string
-	Email       string
-	Role        string
+	UserID      int64  `json:"id,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Email       string `json:"email,omitempty"`
+	Role        string `json:"role,omitempty"`
 }
 
 type EventContext struct {
@@ -35,7 +35,6 @@ type DomainEvent struct {
 	ProductID        int64      `json:"product_id,omitempty"`
 	TicketID         int64      `json:"ticket_id,omitempty"`
 	ActorUserID      int64      `json:"actor_user_id,omitempty"`
-	ActorUsername    string     `json:"actor_username,omitempty"`
 	ActorDisplayName string     `json:"actor_display_name,omitempty"`
 	ActorEmail       string     `json:"actor_email,omitempty"`
 	ActorRole        string     `json:"actor_role,omitempty"`
@@ -58,22 +57,17 @@ type CreateDomainEvent struct {
 }
 
 type TicketEventPayload struct {
-	Source               string `json:"source,omitempty"`
-	HasPatch             bool   `json:"has_patch,omitempty"`
-	HasComment           bool   `json:"has_comment,omitempty"`
-	PublicComment        bool   `json:"public_comment,omitempty"`
-	AssignmentChanged    bool   `json:"assignment_changed,omitempty"`
-	OnlyAssigneePatch    bool   `json:"only_assignee_patch,omitempty"`
-	PreviousStatus       string `json:"previous_status,omitempty"`
-	CurrentStatus        string `json:"current_status,omitempty"`
-	PreviousAssignee     string `json:"previous_assignee,omitempty"`
-	CurrentAssignee      string `json:"current_assignee,omitempty"`
-	CommentID            int64  `json:"comment_id,omitempty"`
-	CommentVisibility    string `json:"comment_visibility,omitempty"`
-	StatusChanged        bool   `json:"status_changed,omitempty"`
-	TerminalStatus       bool   `json:"terminal_status,omitempty"`
-	RequesterEmail       string `json:"requester_email,omitempty"`
-	RequesterCreatedCopy bool   `json:"requester_created_copy,omitempty"`
+	Source            string `json:"source,omitempty"`
+	HasPatch          bool   `json:"has_patch,omitempty"`
+	PublicComment     bool   `json:"public_comment,omitempty"`
+	AssignmentChanged bool   `json:"assignment_changed,omitempty"`
+	OnlyAssigneePatch bool   `json:"only_assignee_patch,omitempty"`
+	PreviousStatus    string `json:"previous_status,omitempty"`
+	CurrentStatus     string `json:"current_status,omitempty"`
+	PreviousAssignee  string `json:"previous_assignee,omitempty"`
+	CurrentAssignee   string `json:"current_assignee,omitempty"`
+	CommentID         int64  `json:"comment_id,omitempty"`
+	CommentVisibility string `json:"comment_visibility,omitempty"`
 }
 
 type AppEventPayload struct {
@@ -86,12 +80,9 @@ type AppEventPayload struct {
 }
 
 type AccountLinkEventPayload struct {
-	Event       string    `json:"event"`
-	UserID      int64     `json:"user_id"`
-	DisplayName string    `json:"display_name"`
-	Email       string    `json:"email"`
-	Token       string    `json:"token"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	UserID    int64     `json:"user_id"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 func EventActorFromUser(user User) EventActor {
@@ -103,27 +94,20 @@ func EventActorFromUser(user User) EventActor {
 	}
 }
 
-func (event DomainEvent) Actor() User {
-	return User{
-		ID:          event.ActorUserID,
+func (event DomainEvent) Actor() EventActor {
+	return EventActor{
+		UserID:      event.ActorUserID,
 		DisplayName: event.ActorDisplayName,
 		Email:       event.ActorEmail,
 		Role:        normalizeGlobalRole(event.ActorRole),
 	}
 }
 
-func AccountLinkEmailRequested(user User, token string) bool {
-	return strings.TrimSpace(user.Email) != "" && strings.TrimSpace(token) != ""
-}
-
-func accountLinkEventPayload(event string, user User, token string, expiresAt time.Time) *AccountLinkEventPayload {
+func accountLinkEventPayload(user User, token string, expiresAt time.Time) *AccountLinkEventPayload {
 	return &AccountLinkEventPayload{
-		Event:       strings.TrimSpace(event),
-		UserID:      user.ID,
-		DisplayName: user.DisplayName,
-		Email:       user.Email,
-		Token:       token,
-		ExpiresAt:   expiresAt,
+		UserID:    user.ID,
+		Token:     token,
+		ExpiresAt: expiresAt,
 	}
 }
 
@@ -152,20 +136,16 @@ func (s *Store) GetDomainEvent(id int64) (DomainEvent, error) {
 	return event, err
 }
 
-func (s *Store) ListDomainEvents(limit int) []DomainEvent {
+func (s *Store) ListDomainEvents(limit int) ([]DomainEvent, error) {
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
 	rows, err := s.db.Query(domainEventSelectSQL+` ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
-	events, err := scanDomainEvents(rows)
-	if err != nil {
-		return nil
-	}
-	return events
+	return scanDomainEvents(rows)
 }
 
 func (s *Store) ClaimDomainEvents(limit int, leaseFor time.Duration) ([]DomainEvent, error) {
@@ -293,10 +273,7 @@ func markDomainEventProcessedTx(tx *sql.Tx, id int64, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return requireChangedRow(result)
 }
 
 func (s *Store) MarkDomainEventFailed(id int64, err error) error {
@@ -314,10 +291,7 @@ func (s *Store) MarkDomainEventFailed(id int64, err error) error {
 	if updateErr != nil {
 		return updateErr
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return requireChangedRow(result)
 }
 
 func (s *Store) PruneProcessedDomainEvents(olderThan time.Time, limit int) (int64, error) {
@@ -357,19 +331,18 @@ func insertDomainEventTx(tx *sql.Tx, input CreateDomainEvent, now time.Time) (in
 	}
 	result, err := tx.Exec(`
 		INSERT INTO domain_events (
-			type, product_id, ticket_id, actor_user_id, actor_username, actor_display_name, actor_email, actor_role,
+			type, product_id, ticket_id, actor_user_id, actor_display_name, actor_email, actor_role,
 			payload_json, status, attempts, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-		eventType, input.ProductID, input.TicketID, input.Actor.UserID, strings.TrimSpace(input.Actor.Email),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+		eventType, input.ProductID, input.TicketID, input.Actor.UserID,
 		strings.TrimSpace(input.Actor.DisplayName), strings.TrimSpace(input.Actor.Email), normalizeGlobalRole(input.Actor.Role),
 		payload, formatTime(now), formatTime(now),
 	)
 	if err != nil {
 		return 0, normalizeSQLError(err)
 	}
-	id, _ := result.LastInsertId()
-	return id, nil
+	return insertedID(result)
 }
 
 func insertAppEventTx(tx *sql.Tx, now time.Time, ctx EventContext, eventType, targetType string, targetID int64, targetName string, details map[string]any, accountLink *AccountLinkEventPayload) error {
@@ -397,7 +370,7 @@ func insertAppEventTx(tx *sql.Tx, now time.Time, ctx EventContext, eventType, ta
 }
 
 const domainEventSelectSQL = `
-	SELECT id, type, product_id, ticket_id, actor_user_id, actor_username, actor_display_name, actor_email, actor_role,
+	SELECT id, type, product_id, ticket_id, actor_user_id, actor_display_name, actor_email, actor_role,
 	       payload_json, status, attempts, locked_until, last_error, created_at, updated_at, processed_at
 	FROM domain_events`
 
@@ -418,7 +391,7 @@ func scanDomainEvent(row scanner) (DomainEvent, error) {
 	var lockedUntil, processedAt sql.NullString
 	var createdAt, updatedAt string
 	err := row.Scan(
-		&event.ID, &event.Type, &event.ProductID, &event.TicketID, &event.ActorUserID, &event.ActorUsername,
+		&event.ID, &event.Type, &event.ProductID, &event.TicketID, &event.ActorUserID,
 		&event.ActorDisplayName, &event.ActorEmail, &event.ActorRole, &event.PayloadJSON, &event.Status,
 		&event.Attempts, &lockedUntil, &event.LastError, &createdAt, &updatedAt, &processedAt,
 	)

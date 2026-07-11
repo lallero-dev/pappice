@@ -25,61 +25,60 @@ var (
 )
 
 type Ticket struct {
-	ID             int64        `json:"id"`
-	ProductID      int64        `json:"product_id"`
-	ProductKey     string       `json:"product_key"`
-	ProductName    string       `json:"product_name"`
-	Number         int64        `json:"number"`
-	Key            string       `json:"key"`
-	Title          string       `json:"title"`
-	Description    string       `json:"description"`
-	Product        string       `json:"product"`
-	Status         string       `json:"status"`
-	Severity       string       `json:"-"`
-	Priority       string       `json:"priority"`
-	Assignee       string       `json:"assignee,omitempty"`
-	Reporter       string       `json:"requester"`
-	Source         string       `json:"source"`
-	RequesterName  string       `json:"requester_name,omitempty"`
-	RequesterEmail string       `json:"requester_email,omitempty"`
-	CustomerToken  string       `json:"-"`
-	Attachments    []Attachment `json:"attachments,omitempty"`
-	Comments       []Comment    `json:"comments"`
-	UnreadCount    int          `json:"unread_count"`
-	HasUnread      bool         `json:"has_unread"`
-	LastReadAt     *time.Time   `json:"last_read_at,omitempty"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
-	ClosedAt       *time.Time   `json:"closed_at,omitempty"`
+	ID              int64        `json:"id"`
+	ProductID       int64        `json:"product_id"`
+	ProductKey      string       `json:"product_key"`
+	ProductName     string       `json:"product_name"`
+	Number          int64        `json:"number"`
+	Key             string       `json:"key"`
+	Title           string       `json:"title"`
+	Description     string       `json:"description"`
+	Status          string       `json:"status"`
+	Priority        string       `json:"priority"`
+	AssigneeUserID  int64        `json:"assignee_user_id,omitempty"`
+	AssigneeEmail   string       `json:"assignee_email,omitempty"`
+	RequesterUserID int64        `json:"requester_user_id,omitempty"`
+	Source          string       `json:"source"`
+	RequesterName   string       `json:"requester_name,omitempty"`
+	RequesterEmail  string       `json:"requester_email,omitempty"`
+	Attachments     []Attachment `json:"attachments,omitempty"`
+	Comments        []Comment    `json:"comments"`
+	UnreadCount     int          `json:"unread_count"`
+	HasUnread       bool         `json:"has_unread"`
+	LastReadAt      *time.Time   `json:"last_read_at,omitempty"`
+	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+	ClosedAt        *time.Time   `json:"closed_at,omitempty"`
 }
 
 type TicketSummary struct {
-	ID             int64      `json:"id"`
-	ProductID      int64      `json:"product_id"`
-	ProductKey     string     `json:"product_key"`
-	ProductName    string     `json:"product_name"`
-	Number         int64      `json:"number"`
-	Key            string     `json:"key"`
-	Title          string     `json:"title"`
-	Status         string     `json:"status"`
-	Priority       string     `json:"priority"`
-	Assignee       string     `json:"assignee,omitempty"`
-	Reporter       string     `json:"requester"`
-	RequesterName  string     `json:"requester_name,omitempty"`
-	RequesterEmail string     `json:"requester_email,omitempty"`
-	ProductRole    string     `json:"-"`
-	UnreadCount    int        `json:"unread_count"`
-	HasUnread      bool       `json:"has_unread"`
-	LastReadAt     *time.Time `json:"last_read_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID              int64      `json:"id"`
+	ProductID       int64      `json:"product_id"`
+	ProductKey      string     `json:"product_key"`
+	ProductName     string     `json:"product_name"`
+	Number          int64      `json:"number"`
+	Key             string     `json:"key"`
+	Title           string     `json:"title"`
+	Status          string     `json:"status"`
+	Priority        string     `json:"priority"`
+	AssigneeUserID  int64      `json:"assignee_user_id,omitempty"`
+	AssigneeEmail   string     `json:"assignee_email,omitempty"`
+	RequesterUserID int64      `json:"requester_user_id,omitempty"`
+	RequesterName   string     `json:"requester_name,omitempty"`
+	RequesterEmail  string     `json:"requester_email,omitempty"`
+	ProductRole     string     `json:"-"`
+	UnreadCount     int        `json:"unread_count"`
+	HasUnread       bool       `json:"has_unread"`
+	LastReadAt      *time.Time `json:"last_read_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type TicketSummaryFilter struct {
 	Query                      string
 	Statuses                   []string
 	ProductID                  int64
-	Assignee                   string
+	AssigneeUserID             int64
 	UnreadOnly                 bool
 	IncludeUnreadOutsideStatus bool
 	Sort                       string
@@ -103,7 +102,7 @@ type TicketSummaryAggregates struct {
 type Comment struct {
 	ID           int64        `json:"id"`
 	Author       string       `json:"author"`
-	AuthorUserID int64        `json:"-"`
+	AuthorUserID int64        `json:"author_user_id,omitempty"`
 	Body         string       `json:"body"`
 	Visibility   string       `json:"visibility"`
 	Attachments  []Attachment `json:"attachments,omitempty"`
@@ -111,43 +110,33 @@ type Comment struct {
 }
 
 type CreateTicket struct {
-	ProductID      int64      `json:"product_id"`
-	Title          string     `json:"title"`
-	Description    string     `json:"description"`
-	Product        string     `json:"product"`
-	Severity       string     `json:"-"`
-	Priority       string     `json:"priority"`
-	Assignee       string     `json:"assignee"`
-	Reporter       string     `json:"requester"`
-	Source         string     `json:"source"`
-	RequesterName  string     `json:"requester_name"`
-	RequesterEmail string     `json:"requester_email"`
-	Actor          EventActor `json:"-"`
+	ProductID      int64  `json:"product_id"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	Priority       string `json:"priority"`
+	AssigneeUserID int64  `json:"assignee_user_id"`
+	ActorUserID    int64  `json:"-"`
 }
 
 type UpdateTicket struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Status      *string `json:"status"`
-	Severity    *string `json:"-"`
-	Priority    *string `json:"priority"`
-	Assignee    *string `json:"assignee"`
+	Title          *string `json:"title"`
+	Description    *string `json:"description"`
+	Status         *string `json:"status"`
+	Priority       *string `json:"priority"`
+	AssigneeUserID *int64  `json:"assignee_user_id"`
 }
 
 type AddComment struct {
-	Author       string `json:"author"`
-	AuthorUserID int64  `json:"-"`
-	Body         string `json:"body"`
-	Visibility   string `json:"visibility"`
+	Body       string `json:"body"`
+	Visibility string `json:"visibility"`
 }
 
 type SaveTicketInput struct {
-	TicketID         int64
-	Patch            UpdateTicket
-	Comment          *AddComment
-	Attachments      []CreateAttachment
-	AttachmentUserID int64
-	Actor            EventActor
+	TicketID    int64
+	Patch       UpdateTicket
+	Comment     *AddComment
+	Attachments []CreateAttachment
+	ActorUserID int64
 }
 
 type SaveTicketResult struct {
@@ -165,7 +154,7 @@ type User struct {
 	DisplayName           string    `json:"display_name"`
 	Email                 string    `json:"email"`
 	Role                  string    `json:"role"`
-	PasswordHash          string    `json:"password_hash,omitempty"`
+	PasswordHash          string    `json:"-"`
 	Disabled              bool      `json:"disabled"`
 	PasswordResetRequired bool      `json:"password_reset_required"`
 	CreatedAt             time.Time `json:"created_at"`
@@ -241,7 +230,7 @@ type AuditEvent struct {
 	ID            int64     `json:"id"`
 	DomainEventID int64     `json:"domain_event_id,omitempty"`
 	ActorUserID   int64     `json:"actor_user_id"`
-	ActorUsername string    `json:"actor_username"`
+	ActorEmail    string    `json:"actor_email"`
 	Action        string    `json:"action"`
 	TargetType    string    `json:"target_type"`
 	TargetID      int64     `json:"target_id"`
@@ -254,7 +243,7 @@ type AuditEvent struct {
 type CreateAuditEvent struct {
 	DomainEventID int64
 	ActorUserID   int64
-	ActorUsername string
+	ActorEmail    string
 	Action        string
 	TargetType    string
 	TargetID      int64
@@ -344,6 +333,13 @@ type ProductMember struct {
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type ProductAssignee struct {
+	ProductID   int64  `json:"product_id"`
+	UserID      int64  `json:"user_id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
 }
 
 type UpsertProductMember struct {
@@ -620,6 +616,36 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+type rowQueryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func insertedID(result sql.Result) (int64, error) {
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if id < 1 {
+		return 0, errors.New("database returned an invalid insert id")
+	}
+	return id, nil
+}
+
+func requireChangedRow(result sql.Result) error {
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func normalizeSQLError(err error) error {
 	if err == nil {
 		return nil
@@ -734,14 +760,6 @@ func nullableInt64(value *int64) any {
 	return *value
 }
 
-func nullEmptyString(value string) any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return value
-}
-
 func nullString(value sql.NullString) string {
 	if !value.Valid {
 		return ""
@@ -831,7 +849,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	domain_event_id INTEGER NOT NULL DEFAULT 0,
 	actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-	actor_username TEXT NOT NULL,
+	actor_email TEXT NOT NULL,
 	action TEXT NOT NULL,
 	target_type TEXT NOT NULL,
 	target_id INTEGER,
@@ -865,14 +883,10 @@ CREATE TABLE IF NOT EXISTS tickets (
 	title TEXT NOT NULL,
 	description TEXT NOT NULL DEFAULT '',
 	status TEXT NOT NULL,
-	severity TEXT NOT NULL,
 	priority TEXT NOT NULL,
-	assignee TEXT NOT NULL DEFAULT '',
-	reporter TEXT NOT NULL DEFAULT '',
+	assignee_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+	requester_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 	source TEXT NOT NULL DEFAULT 'staff',
-	requester_name TEXT NOT NULL DEFAULT '',
-	requester_email TEXT NOT NULL DEFAULT '',
-	customer_token TEXT,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	closed_at TEXT,
@@ -978,7 +992,6 @@ CREATE TABLE IF NOT EXISTS domain_events (
 	product_id INTEGER NOT NULL DEFAULT 0,
 	ticket_id INTEGER NOT NULL DEFAULT 0,
 	actor_user_id INTEGER NOT NULL DEFAULT 0,
-	actor_username TEXT NOT NULL DEFAULT '',
 	actor_display_name TEXT NOT NULL DEFAULT '',
 	actor_email TEXT NOT NULL DEFAULT '',
 	actor_role TEXT NOT NULL DEFAULT '',
@@ -993,8 +1006,8 @@ CREATE TABLE IF NOT EXISTS domain_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tickets_product_updated ON tickets(product_id, updated_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_customer_token ON tickets(customer_token) WHERE customer_token IS NOT NULL AND customer_token <> '';
-CREATE INDEX IF NOT EXISTS idx_tickets_requester_email ON tickets(requester_email);
+CREATE INDEX IF NOT EXISTS idx_tickets_assignee_user ON tickets(assignee_user_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_requester_user ON tickets(requester_user_id);
 CREATE INDEX IF NOT EXISTS idx_product_members_user ON product_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_comments_visibility ON comments(ticket_id, visibility);

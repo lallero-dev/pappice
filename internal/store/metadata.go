@@ -2,11 +2,9 @@ package store
 
 var (
 	ticketStatuses            = []string{"new", "assigned", "resolved", "rejected"}
-	ticketSeverities          = []string{"support", "question", "incident", "task"}
 	ticketPriorities          = []string{"low", "normal", "high", "urgent"}
 	globalRoles               = []string{"admin", "staff", "customer"}
 	productRoles              = []string{"manager", "staff", "customer", "viewer"}
-	ticketSources             = []string{"staff", "portal"}
 	commentVisibilities       = []string{"public", "internal"}
 	webhookEvents             = []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}
 	defaultWebhookEvents      = []string{"ticket.created", "ticket.updated", "ticket.commented"}
@@ -16,11 +14,9 @@ var (
 	accountLinkPurposes       = []string{"setup", "reset"}
 
 	validStatuses                  = stringSet(ticketStatuses)
-	validSeverities                = stringSet(ticketSeverities)
 	validPriorities                = stringSet(ticketPriorities)
 	validGlobalRoles               = stringSet(globalRoles)
 	validProductRoles              = stringSet(productRoles)
-	validTicketSources             = stringSet(ticketSources)
 	validCommentVisibility         = stringSet(commentVisibilities)
 	validEvents                    = stringSet(appendStrings(webhookEvents, "*"))
 	validDomainEvents              = stringSet(appendStrings(webhookEvents, auditEvents...))

@@ -196,7 +196,10 @@ func TestSeedDemoStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authenticate demo customer: %v", err)
 	}
-	products := tracker.ListProducts(customer)
+	products, err := tracker.ListProducts(customer)
+	if err != nil {
+		t.Fatalf("list customer products: %v", err)
+	}
 	if len(products) != 1 || products[0].Key != "WEB" || products[0].Name != "Website Support" {
 		t.Fatalf("customer products = %#v", products)
 	}

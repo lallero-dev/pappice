@@ -27,16 +27,16 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	products := tracker.ListProducts(admin)
+	products := mustListProducts(t, tracker, admin)
 	if len(products) != 1 {
 		t.Fatalf("products = %d, want 1", len(products))
 	}
 
 	ticket, err := tracker.CreateTicket(CreateTicket{
-		ProductID: products[0].ID,
-		Title:     "Cannot import invoice",
-		Priority:  "urgent",
-		Reporter:  admin.Email,
+		ProductID:   products[0].ID,
+		Title:       "Cannot import invoice",
+		Priority:    "urgent",
+		ActorUserID: admin.ID,
 	})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
@@ -44,8 +44,8 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if ticket.ID != 1 {
 		t.Fatalf("ticket ID = %d, want 1", ticket.ID)
 	}
-	if ticket.ProductKey != products[0].Key || ticket.ProductName != products[0].Name || ticket.Product != products[0].Name {
-		t.Fatalf("ticket product labels = key %q name %q product %q", ticket.ProductKey, ticket.ProductName, ticket.Product)
+	if ticket.ProductKey != products[0].Key || ticket.ProductName != products[0].Name {
+		t.Fatalf("ticket product labels = key %q name %q", ticket.ProductKey, ticket.ProductName)
 	}
 	if ticket.RequesterName != "Alice Admin" {
 		t.Fatalf("requester name = %q, want account display name", ticket.RequesterName)
@@ -80,43 +80,53 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	}
 
 	status := "assigned"
-	assignee := "alice@example.test"
-	updated, err := tracker.UpdateTicket(ticket.ID, UpdateTicket{
-		Status:   &status,
-		Assignee: &assignee,
+	assigneeUserID := admin.ID
+	updatedResult, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
+		Patch: UpdateTicket{
+			Status:         &status,
+			AssigneeUserID: &assigneeUserID,
+		},
+		ActorUserID: admin.ID,
 	})
 	if err != nil {
 		t.Fatalf("update ticket: %v", err)
 	}
-	if updated.Status != "assigned" || updated.Assignee != "alice@example.test" {
+	if updated := updatedResult.Ticket; updated.Status != "assigned" || updated.AssigneeUserID != admin.ID || updated.AssigneeEmail != admin.Email {
 		t.Fatalf("updated ticket = %#v", updated)
 	}
+	summary, err = tracker.TicketSummaryForUser(admin, ticket.ID)
+	if err != nil || summary.LastReadAt == nil || !summary.LastReadAt.After(readAt) {
+		t.Fatalf("read time after save = %v err=%v, want after %v", summary.LastReadAt, err, readAt)
+	}
+	unassignedUserID := int64(0)
+	unassigned, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID:    ticket.ID,
+		Patch:       UpdateTicket{AssigneeUserID: &unassignedUserID},
+		ActorUserID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("unassign ticket: %v", err)
+	}
+	if !unassigned.AssignmentChanged || unassigned.Ticket.AssigneeUserID != 0 || unassigned.Ticket.AssigneeEmail != "" {
+		t.Fatalf("unassigned ticket = %#v", unassigned)
+	}
 
-	withComment, err := tracker.AddComment(ticket.ID, AddComment{
-		Author: admin.Email,
-		Body:   "Reproduced on Linux.",
+	commented, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID:    ticket.ID,
+		Comment:     &AddComment{Body: "Reproduced on Linux."},
+		ActorUserID: admin.ID,
 	})
 	if err != nil {
 		t.Fatalf("add comment: %v", err)
 	}
+	withComment := commented.Ticket
 	if got := len(withComment.Comments); got != 1 {
 		t.Fatalf("comments = %d, want 1", got)
 	}
 	if withComment.Comments[0].Author != "Alice Admin" {
 		t.Fatalf("email comment author = %q, want display name", withComment.Comments[0].Author)
 	}
-	withComment, err = tracker.AddComment(ticket.ID, AddComment{
-		Author:       "stored identity",
-		AuthorUserID: admin.ID,
-		Body:         "Author ID maps to the display name.",
-	})
-	if err != nil {
-		t.Fatalf("add identified comment: %v", err)
-	}
-	if got := withComment.Comments[1].Author; got != "Alice Admin" {
-		t.Fatalf("identified comment author = %q, want display name", got)
-	}
-
 	reloaded, err := Open(path)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
@@ -135,7 +145,7 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get reloaded ticket: %v", err)
 	}
-	if len(reloadedTicket.Comments) != 2 || reloadedTicket.Comments[0].Author != "Alice Admin" || reloadedTicket.Comments[1].Author != "Alice Admin" {
+	if len(reloadedTicket.Comments) != 1 || reloadedTicket.Comments[0].Author != "Alice Admin" {
 		t.Fatalf("reloaded comment authors = %#v, want display names", reloadedTicket.Comments)
 	}
 }
@@ -150,19 +160,26 @@ func TestStoreValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
+	productID := mustListProducts(t, tracker, admin)[0].ID
+	if _, err := tracker.CreateUser(CreateUser{Password: "correct horse"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("missing user email error = %v, want ErrValidation", err)
+	}
+	if _, _, _, err := tracker.CreateUserWithSetupLink(CreateUser{Role: "customer"}, time.Hour); !errors.Is(err, ErrValidation) {
+		t.Fatalf("missing setup email error = %v, want ErrValidation", err)
+	}
 
-	_, err = tracker.CreateTicket(CreateTicket{ProductID: productID, Priority: "normal"})
+	actorUserID := admin.ID
+	_, err = tracker.CreateTicket(CreateTicket{ProductID: productID, Priority: "normal", ActorUserID: actorUserID})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("empty title error = %v, want ErrValidation", err)
 	}
 
-	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Bad status"})
+	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Bad status", ActorUserID: actorUserID})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
 	status := "triaged"
-	_, err = tracker.UpdateTicket(ticket.ID, UpdateTicket{Status: &status})
+	_, err = tracker.SaveTicket(SaveTicketInput{TicketID: ticket.ID, Patch: UpdateTicket{Status: &status}, ActorUserID: actorUserID})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("bad status error = %v, want ErrValidation", err)
 	}
@@ -173,11 +190,11 @@ func TestStoreValidation(t *testing.T) {
 	}
 
 	status = "rejected"
-	rejected, err := tracker.UpdateTicket(ticket.ID, UpdateTicket{Status: &status})
+	rejectedResult, err := tracker.SaveTicket(SaveTicketInput{TicketID: ticket.ID, Patch: UpdateTicket{Status: &status}, ActorUserID: actorUserID})
 	if err != nil {
 		t.Fatalf("reject ticket: %v", err)
 	}
-	if rejected.Status != "rejected" || rejected.ClosedAt == nil {
+	if rejected := rejectedResult.Ticket; rejected.Status != "rejected" || rejected.ClosedAt == nil {
 		t.Fatalf("rejected ticket = %#v, want rejected with closed_at", rejected)
 	}
 }
@@ -218,7 +235,7 @@ func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect migration: %v", err)
 	}
-	if status.CurrentVersion != 0 || len(status.Pending) != 2 || status.Pending[0].Name != "baseline_schema" || status.Pending[1].Name != "rename_product_roles" {
+	if status.CurrentVersion != 0 || len(status.Pending) != 3 || status.Pending[0].Name != "baseline_schema" || status.Pending[1].Name != "rename_product_roles" || status.Pending[2].Name != "normalize_relational_data" {
 		t.Fatalf("migration status = %#v", status)
 	}
 	if _, err := Migrate(path, MigrationOptions{DryRun: true}); !errors.Is(err, ErrMigrationRequired) {
@@ -300,14 +317,14 @@ func TestMigrateRenamesProductRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect before migration: %v", err)
 	}
-	if status.CurrentVersion != 1 || len(status.Pending) != 1 || status.Pending[0].Name != "rename_product_roles" {
+	if status.CurrentVersion != 1 || len(status.Pending) != 2 || status.Pending[0].Name != "rename_product_roles" || status.Pending[1].Name != "normalize_relational_data" {
 		t.Fatalf("before migration status = %#v", status)
 	}
 	result, err := Migrate(path, MigrationOptions{})
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if len(result.Applied) != 1 || result.Applied[0].Name != "rename_product_roles" {
+	if len(result.Applied) != 2 || result.Applied[0].Name != "rename_product_roles" || result.Applied[1].Name != "normalize_relational_data" {
 		t.Fatalf("applied migrations = %#v", result.Applied)
 	}
 
@@ -334,6 +351,133 @@ func TestMigrateRenamesProductRoles(t *testing.T) {
 	}
 	if want := []string{"manager", "staff", "customer"}; !slices.Equal(got, want) {
 		t.Fatalf("migrated product roles = %#v, want %#v", got, want)
+	}
+}
+
+func TestMigrateRelationalData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "relations.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY, display_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL,
+			password_hash TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0,
+			password_reset_required INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		);
+		CREATE TABLE products (
+			id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		);
+		CREATE TABLE product_members (
+			product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			role TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (product_id, user_id)
+		);
+		CREATE TABLE tickets (
+			id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+			number INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+			severity TEXT NOT NULL, priority TEXT NOT NULL, assignee TEXT NOT NULL DEFAULT '', reporter TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'staff', requester_name TEXT NOT NULL DEFAULT '', requester_email TEXT NOT NULL DEFAULT '',
+			customer_token TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT,
+			UNIQUE (product_id, number)
+		);
+		CREATE TABLE comments (
+			id INTEGER PRIMARY KEY, ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+			author TEXT NOT NULL, author_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			body TEXT NOT NULL, visibility TEXT NOT NULL DEFAULT 'public', created_at TEXT NOT NULL
+		);
+		CREATE TABLE audit_events (
+			id INTEGER PRIMARY KEY, domain_event_id INTEGER NOT NULL DEFAULT 0,
+			actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, actor_username TEXT NOT NULL,
+			action TEXT NOT NULL, target_type TEXT NOT NULL, target_id INTEGER, target_name TEXT NOT NULL DEFAULT '',
+			ip TEXT NOT NULL DEFAULT '', details_json TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+		);
+		CREATE TABLE domain_events (
+			id INTEGER PRIMARY KEY, type TEXT NOT NULL, product_id INTEGER NOT NULL DEFAULT 0, ticket_id INTEGER NOT NULL DEFAULT 0,
+			actor_user_id INTEGER NOT NULL DEFAULT 0, actor_username TEXT NOT NULL DEFAULT '', actor_display_name TEXT NOT NULL DEFAULT '',
+			actor_email TEXT NOT NULL DEFAULT '', actor_role TEXT NOT NULL DEFAULT '', payload_json TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, locked_until TEXT,
+			last_error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, processed_at TEXT
+		);
+		INSERT INTO schema_migrations VALUES (1, 'baseline_schema', '2026-01-01T00:00:00Z'), (2, 'rename_product_roles', '2026-01-01T00:00:00Z');
+		INSERT INTO users VALUES
+			(1, 'Valid Staff', 'staff@example.test', 'staff', 'hash', 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+			(2, 'Viewer', 'viewer@example.test', 'staff', 'hash', 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		INSERT INTO products VALUES (1, 'SUP', 'Support', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+		INSERT INTO product_members VALUES
+			(1, 1, 'staff', '2026-01-01T00:00:00Z'), (1, 2, 'viewer', '2026-01-01T00:00:00Z');
+		INSERT INTO tickets VALUES
+			(1, 1, 1, 'Valid assignment', '', 'assigned', 'support', 'normal', 'STAFF@example.test', 'staff@example.test', 'staff', '', 'staff@example.test', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL),
+			(2, 1, 2, 'Invalid assignment', '', 'assigned', 'support', 'normal', 'viewer@example.test', 'viewer@example.test', 'staff', '', 'viewer@example.test', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL);
+		INSERT INTO comments VALUES (1, 1, 'Valid Staff', 1, 'Preserved reply', 'public', '2026-01-01T00:00:00Z');
+		INSERT INTO audit_events VALUES (1, 1, 1, 'staff@example.test', 'ticket.created', 'ticket', 1, 'SUP-1', '', '', '2026-01-01T00:00:00Z');
+		INSERT INTO domain_events VALUES (1, 'ticket.created', 1, 1, 1, 'staff@example.test', 'Valid Staff', 'staff@example.test', 'staff', '{}', 'processed', 0, NULL, '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+	`)
+	if err != nil {
+		t.Fatalf("seed db: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	result, err := Migrate(path, MigrationOptions{})
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if len(result.Applied) != 1 || result.Applied[0].Name != "normalize_relational_data" {
+		t.Fatalf("applied migrations = %#v", result.Applied)
+	}
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	defer db.Close()
+	for _, column := range []string{"assignee", "severity", "reporter", "requester_name", "requester_email", "customer_token"} {
+		if legacy, err := tableHasColumn(db, "tickets", column); err != nil || legacy {
+			t.Fatalf("legacy ticket column %q exists = %v err=%v", column, legacy, err)
+		}
+	}
+	for _, table := range []string{"audit_events", "domain_events"} {
+		if legacy, err := tableHasColumn(db, table, "actor_username"); err != nil || legacy {
+			t.Fatalf("legacy actor column in %q exists = %v err=%v", table, legacy, err)
+		}
+	}
+	rows, err := db.Query(`SELECT COALESCE(assignee_user_id, 0), COALESCE(requester_user_id, 0) FROM tickets ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query assignments: %v", err)
+	}
+	defer rows.Close()
+	var assignees, requesters []int64
+	for rows.Next() {
+		var assigneeID, requesterID int64
+		if err := rows.Scan(&assigneeID, &requesterID); err != nil {
+			t.Fatalf("scan assignment: %v", err)
+		}
+		assignees = append(assignees, assigneeID)
+		requesters = append(requesters, requesterID)
+	}
+	if want := []int64{1, 0}; !slices.Equal(assignees, want) {
+		t.Fatalf("migrated assignments = %#v, want %#v", assignees, want)
+	}
+	if want := []int64{1, 2}; !slices.Equal(requesters, want) {
+		t.Fatalf("migrated requesters = %#v, want %#v", requesters, want)
+	}
+	var comments int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM comments WHERE ticket_id = 1`).Scan(&comments); err != nil || comments != 1 {
+		t.Fatalf("preserved comments = %d err=%v, want 1", comments, err)
+	}
+	var auditEmail, eventEmail string
+	if err := db.QueryRow(`SELECT actor_email FROM audit_events WHERE id = 1`).Scan(&auditEmail); err != nil {
+		t.Fatalf("query migrated audit actor: %v", err)
+	}
+	if err := db.QueryRow(`SELECT actor_email FROM domain_events WHERE id = 1`).Scan(&eventEmail); err != nil {
+		t.Fatalf("query migrated event actor: %v", err)
+	}
+	if auditEmail != "staff@example.test" || eventEmail != auditEmail {
+		t.Fatalf("migrated actor emails = audit %q event %q", auditEmail, eventEmail)
 	}
 }
 
@@ -430,8 +574,9 @@ func TestSaveTicketIsTransactional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
-	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Original", Priority: "normal"})
+	productID := mustListProducts(t, tracker, admin)[0].ID
+	actorUserID := admin.ID
+	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Original", Priority: "normal", ActorUserID: actorUserID})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
@@ -439,13 +584,10 @@ func TestSaveTicketIsTransactional(t *testing.T) {
 	title := "Changed"
 	status := "assigned"
 	_, err = tracker.SaveTicket(SaveTicketInput{
-		TicketID: ticket.ID,
-		Patch:    UpdateTicket{Title: &title, Status: &status},
-		Comment: &AddComment{
-			Author:     "Admin",
-			Body:       "This should not be stored",
-			Visibility: "private",
-		},
+		TicketID:    ticket.ID,
+		Patch:       UpdateTicket{Title: &title, Status: &status},
+		Comment:     &AddComment{Body: "This should not be stored", Visibility: "private"},
+		ActorUserID: actorUserID,
 	})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("save ticket error = %v, want ErrValidation", err)
@@ -458,12 +600,13 @@ func TestSaveTicketIsTransactional(t *testing.T) {
 		t.Fatalf("failed save was not rolled back: %#v", unchanged)
 	}
 
-	comment := AddComment{Author: "Admin", Body: "Now assigned", Visibility: "public"}
-	assignee := "alice"
+	comment := AddComment{Body: "Now assigned", Visibility: "public"}
+	assigneeUserID := admin.ID
 	saved, err := tracker.SaveTicket(SaveTicketInput{
-		TicketID: ticket.ID,
-		Patch:    UpdateTicket{Status: &status, Assignee: &assignee},
-		Comment:  &comment,
+		TicketID:    ticket.ID,
+		Patch:       UpdateTicket{Status: &status, AssigneeUserID: &assigneeUserID},
+		Comment:     &comment,
+		ActorUserID: actorUserID,
 	})
 	if err != nil {
 		t.Fatalf("save ticket: %v", err)
@@ -485,50 +628,41 @@ func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
-	actor := EventActorFromUser(admin)
+	productID := mustListProducts(t, tracker, admin)[0].ID
 	ticket, err := tracker.CreateTicket(CreateTicket{
-		ProductID: productID,
-		Title:     "Evented ticket",
-		Priority:  "normal",
-		Actor:     actor,
+		ProductID:   productID,
+		Title:       "Evented ticket",
+		Priority:    "normal",
+		ActorUserID: admin.ID,
 	})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
-	events := tracker.ListDomainEvents(10)
-	if len(events) != 1 || events[0].Type != "ticket.created" || events[0].TicketID != ticket.ID || events[0].ActorUsername != "admin@example.test" {
+	events := mustListDomainEvents(t, tracker, 10)
+	if len(events) != 1 || events[0].Type != "ticket.created" || events[0].TicketID != ticket.ID || events[0].ActorEmail != "admin@example.test" {
 		t.Fatalf("created events = %#v", events)
 	}
 
 	status := "assigned"
-	assignee := "alice"
+	assigneeUserID := admin.ID
 	_, err = tracker.SaveTicket(SaveTicketInput{
-		TicketID: ticket.ID,
-		Patch:    UpdateTicket{Status: &status, Assignee: &assignee},
-		Comment: &AddComment{
-			Author:     "Admin",
-			Body:       "This should not be stored",
-			Visibility: "private",
-		},
-		Actor: actor,
+		TicketID:    ticket.ID,
+		Patch:       UpdateTicket{Status: &status, AssigneeUserID: &assigneeUserID},
+		Comment:     &AddComment{Body: "This should not be stored", Visibility: "private"},
+		ActorUserID: admin.ID,
 	})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("save ticket error = %v, want ErrValidation", err)
 	}
-	if events := tracker.ListDomainEvents(10); len(events) != 1 {
+	if events := mustListDomainEvents(t, tracker, 10); len(events) != 1 {
 		t.Fatalf("failed save wrote events: %#v", events)
 	}
 
 	_, err = tracker.SaveTicket(SaveTicketInput{
-		TicketID: ticket.ID,
-		Patch:    UpdateTicket{Status: &status, Assignee: &assignee},
-		Comment: &AddComment{
-			Author:     "Admin",
-			Body:       "Taking this now",
-			Visibility: "public",
-		},
-		Actor: actor,
+		TicketID:    ticket.ID,
+		Patch:       UpdateTicket{Status: &status, AssigneeUserID: &assigneeUserID},
+		Comment:     &AddComment{Body: "Taking this now", Visibility: "public"},
+		ActorUserID: admin.ID,
 	})
 	if err != nil {
 		t.Fatalf("save ticket: %v", err)
@@ -572,7 +706,7 @@ func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if _, err := tracker.GetDomainEvent(claimed[0].ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("pruned event error = %v, want ErrNotFound", err)
 	}
-	if events := tracker.ListDomainEvents(10); len(events) != 3 {
+	if events := mustListDomainEvents(t, tracker, 10); len(events) != 3 {
 		t.Fatalf("prune removed non-processed events: %#v", events)
 	}
 }
@@ -586,7 +720,7 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
+	productID := mustListProducts(t, tracker, admin)[0].ID
 	hook, err := tracker.CreateWebhook(CreateWebhook{
 		ProductID: &productID,
 		Name:      "Ticket receiver",
@@ -607,12 +741,12 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 	}
 	projection := DomainEventProjection{
 		Audit: &CreateAuditEvent{
-			ActorUserID:   admin.ID,
-			ActorUsername: admin.Email,
-			Action:        "ticket.created",
-			TargetType:    "ticket",
-			TargetID:      77,
-			TargetName:    "PME-77",
+			ActorUserID: admin.ID,
+			ActorEmail:  admin.Email,
+			Action:      "ticket.created",
+			TargetType:  "ticket",
+			TargetID:    77,
+			TargetName:  "PME-77",
 		},
 		EmailNotifications: []CreateEmailNotification{{
 			ProductID:      productID,
@@ -641,11 +775,11 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 	if processed.Status != "processed" || processed.ProcessedAt == nil {
 		t.Fatalf("processed event = %#v", processed)
 	}
-	audits := tracker.ListAuditEvents(10)
+	audits := mustListAuditEvents(t, tracker, 10)
 	if len(audits) != 1 || audits[0].DomainEventID != event.ID {
 		t.Fatalf("audits = %#v", audits)
 	}
-	emails := tracker.ListEmailNotifications(10)
+	emails := mustListEmailNotifications(t, tracker, 10)
 	if len(emails) != 1 || emails[0].Event != "ticket.created" {
 		t.Fatalf("emails = %#v", emails)
 	}
@@ -659,10 +793,10 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 	if err := tracker.ApplyDomainEventProjection(event.ID, projection); err != nil {
 		t.Fatalf("reapply processed projection: %v", err)
 	}
-	if audits := tracker.ListAuditEvents(10); len(audits) != 1 {
+	if audits := mustListAuditEvents(t, tracker, 10); len(audits) != 1 {
 		t.Fatalf("reapply duplicated audit events: %#v", audits)
 	}
-	if emails := tracker.ListEmailNotifications(10); len(emails) != 1 {
+	if emails := mustListEmailNotifications(t, tracker, 10); len(emails) != 1 {
 		t.Fatalf("reapply duplicated email notifications: %#v", emails)
 	}
 	if webhooks, err := tracker.ClaimWebhookNotifications(10, time.Minute); err != nil || len(webhooks) != 0 {
@@ -675,11 +809,11 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 	}
 	err = tracker.ApplyDomainEventProjection(failed.ID, DomainEventProjection{
 		Audit: &CreateAuditEvent{
-			ActorUserID:   admin.ID,
-			ActorUsername: admin.Email,
-			Action:        "ticket.created",
-			TargetType:    "ticket",
-			TargetName:    "bad projection",
+			ActorUserID: admin.ID,
+			ActorEmail:  admin.Email,
+			Action:      "ticket.created",
+			TargetType:  "ticket",
+			TargetName:  "bad projection",
 		},
 		EmailNotifications: []CreateEmailNotification{{
 			RecipientEmail: "staff@example.test",
@@ -697,7 +831,7 @@ func TestApplyDomainEventProjectionIsTransactional(t *testing.T) {
 	if unprocessed.Status == "processed" {
 		t.Fatalf("failed projection was processed: %#v", unprocessed)
 	}
-	if audits := tracker.ListAuditEvents(10); len(audits) != 1 {
+	if audits := mustListAuditEvents(t, tracker, 10); len(audits) != 1 {
 		t.Fatalf("failed projection left audit row: %#v", audits)
 	}
 }
@@ -716,8 +850,8 @@ func TestAppMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create product: %v", err)
 	}
-	events := tracker.ListDomainEvents(10)
-	if len(events) != 1 || events[0].Type != "product.created" || events[0].ActorUsername != "admin@example.test" {
+	events := mustListDomainEvents(t, tracker, 10)
+	if len(events) != 1 || events[0].Type != "product.created" || events[0].ActorEmail != "admin@example.test" {
 		t.Fatalf("product events = %#v", events)
 	}
 	var payload AppEventPayload
@@ -731,7 +865,7 @@ func TestAppMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if _, err := tracker.CreateProduct(CreateProduct{Key: "OPS", Name: "Duplicate", Event: ctx}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate product error = %v, want ErrConflict", err)
 	}
-	if events := tracker.ListDomainEvents(10); len(events) != 1 {
+	if events := mustListDomainEvents(t, tracker, 10); len(events) != 1 {
 		t.Fatalf("failed product write created events: %#v", events)
 	}
 
@@ -744,7 +878,7 @@ func TestAppMutationsWriteDomainEventsTransactionally(t *testing.T) {
 		t.Fatalf("create setup link user: %v", err)
 	}
 	_ = link
-	events = tracker.ListDomainEvents(10)
+	events = mustListDomainEvents(t, tracker, 10)
 	if len(events) != 2 || events[0].Type != "user.created" {
 		t.Fatalf("user events = %#v", events)
 	}
@@ -752,7 +886,7 @@ func TestAppMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if err := json.Unmarshal([]byte(events[0].PayloadJSON), &payload); err != nil {
 		t.Fatalf("decode user payload: %v", err)
 	}
-	if payload.TargetID != user.ID || payload.AccountLink == nil || payload.AccountLink.Event != "account.setup" || payload.AccountLink.Token != token {
+	if payload.TargetID != user.ID || payload.AccountLink == nil || payload.AccountLink.UserID != user.ID || payload.AccountLink.Token != token {
 		t.Fatalf("user payload = %#v", payload)
 	}
 }
@@ -766,18 +900,19 @@ func TestTicketAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
+	productID := mustListProducts(t, tracker, admin)[0].ID
 
 	ticket, err := tracker.CreateTicketWithAttachments(CreateTicket{
-		ProductID: productID,
-		Title:     "Attached ticket",
+		ProductID:   productID,
+		Title:       "Attached ticket",
+		ActorUserID: admin.ID,
 	}, []CreateAttachment{{
 		Filename:    "request.txt",
 		ContentType: "text/plain",
 		SizeBytes:   12,
 		SHA256:      "ticket-hash",
 		StorageKey:  "ti/ck/ticket-hash",
-	}}, admin.ID)
+	}})
 	if err != nil {
 		t.Fatalf("create ticket with attachment: %v", err)
 	}
@@ -788,7 +923,6 @@ func TestTicketAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 	saved, err := tracker.SaveTicket(SaveTicketInput{
 		TicketID: ticket.ID,
 		Comment: &AddComment{
-			Author:     "Admin",
 			Visibility: "internal",
 		},
 		Attachments: []CreateAttachment{{
@@ -798,7 +932,7 @@ func TestTicketAttachmentsHydrateWithTicketAndComments(t *testing.T) {
 			SHA256:      "comment-hash",
 			StorageKey:  "co/mm/comment-hash",
 		}},
-		AttachmentUserID: admin.ID,
+		ActorUserID: admin.ID,
 	})
 	if err != nil {
 		t.Fatalf("save file-only comment: %v", err)
@@ -828,7 +962,7 @@ func TestDeleteTicketCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
+	productID := mustListProducts(t, tracker, admin)[0].ID
 	shared := CreateAttachment{
 		Filename:    "shared.txt",
 		ContentType: "text/plain",
@@ -837,23 +971,24 @@ func TestDeleteTicketCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 		StorageKey:  "sh/ar/shared-hash",
 	}
 	ticket, err := tracker.CreateTicketWithAttachments(CreateTicket{
-		ProductID: productID,
-		Title:     "Delete me",
-	}, []CreateAttachment{shared}, admin.ID)
+		ProductID:   productID,
+		Title:       "Delete me",
+		ActorUserID: admin.ID,
+	}, []CreateAttachment{shared})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
 	other, err := tracker.CreateTicketWithAttachments(CreateTicket{
-		ProductID: productID,
-		Title:     "Keep me",
-	}, []CreateAttachment{shared}, admin.ID)
+		ProductID:   productID,
+		Title:       "Keep me",
+		ActorUserID: admin.ID,
+	}, []CreateAttachment{shared})
 	if err != nil {
 		t.Fatalf("create other ticket: %v", err)
 	}
 	saved, err := tracker.SaveTicket(SaveTicketInput{
 		TicketID: ticket.ID,
 		Comment: &AddComment{
-			Author:     "Admin",
 			Visibility: "public",
 		},
 		Attachments: []CreateAttachment{{
@@ -863,7 +998,7 @@ func TestDeleteTicketCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 			SHA256:      "orphan-hash",
 			StorageKey:  "or/ph/orphan-hash",
 		}},
-		AttachmentUserID: admin.ID,
+		ActorUserID: admin.ID,
 	})
 	if err != nil {
 		t.Fatalf("save comment attachment: %v", err)
@@ -904,7 +1039,7 @@ func TestDeleteProductCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	deleteProductID := tracker.ListProducts(admin)[0].ID
+	deleteProductID := mustListProducts(t, tracker, admin)[0].ID
 	keepProduct, err := tracker.CreateProduct(CreateProduct{Key: "KEEP", Name: "Keep"})
 	if err != nil {
 		t.Fatalf("create keep product: %v", err)
@@ -924,16 +1059,18 @@ func TestDeleteProductCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 		StorageKey:  "or/ph/orphan-hash",
 	}
 	deletedTicket, err := tracker.CreateTicketWithAttachments(CreateTicket{
-		ProductID: deleteProductID,
-		Title:     "Delete product ticket",
-	}, []CreateAttachment{shared, orphan}, admin.ID)
+		ProductID:   deleteProductID,
+		Title:       "Delete product ticket",
+		ActorUserID: admin.ID,
+	}, []CreateAttachment{shared, orphan})
 	if err != nil {
 		t.Fatalf("create deleted product ticket: %v", err)
 	}
 	keptTicket, err := tracker.CreateTicketWithAttachments(CreateTicket{
-		ProductID: keepProduct.ID,
-		Title:     "Keep product ticket",
-	}, []CreateAttachment{shared}, admin.ID)
+		ProductID:   keepProduct.ID,
+		Title:       "Keep product ticket",
+		ActorUserID: admin.ID,
+	}, []CreateAttachment{shared})
 	if err != nil {
 		t.Fatalf("create kept product ticket: %v", err)
 	}
@@ -1044,7 +1181,7 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if user, ok := tracker.UserByAPIToken(raw); !ok || user.ID != admin.ID {
 		t.Fatalf("API token user = %#v, %v", user, ok)
 	}
-	tokens := tracker.ListAPITokens(admin.ID)
+	tokens := mustListAPITokens(t, tracker, admin.ID)
 	if len(tokens) != 1 || tokens[0].ID != token.ID || tokens[0].Prefix != token.Prefix {
 		t.Fatalf("API tokens = %#v", tokens)
 	}
@@ -1054,7 +1191,7 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if err := tracker.DeleteAPIToken(admin.ID, token.ID); err != nil {
 		t.Fatalf("delete API token: %v", err)
 	}
-	if tokens := tracker.ListAPITokens(admin.ID); len(tokens) != 0 {
+	if tokens := mustListAPITokens(t, tracker, admin.ID); len(tokens) != 0 {
 		t.Fatalf("API tokens after delete = %#v", tokens)
 	}
 	if user, ok := tracker.UserByAPIToken(raw); ok || user.ID != 0 {
@@ -1071,33 +1208,36 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
-	hooks := tracker.ListWebhooksForEvent("ticket.created", productID)
+	productID := mustListProducts(t, tracker, admin)[0].ID
+	hooks, err := tracker.ListWebhooksForEvent("ticket.created", productID)
+	if err != nil {
+		t.Fatalf("list event hooks: %v", err)
+	}
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
 		t.Fatalf("event hooks = %#v", hooks)
 	}
 
 	event, err := tracker.RecordAuditEvent(CreateAuditEvent{
-		ActorUserID:   admin.ID,
-		ActorUsername: admin.Email,
-		Action:        "user.created",
-		TargetType:    "user",
-		TargetID:      admin.ID,
-		TargetName:    admin.Email,
-		IP:            "127.0.0.1",
-		DetailsJSON:   `{"role":"admin"}`,
+		ActorUserID: admin.ID,
+		ActorEmail:  admin.Email,
+		Action:      "user.created",
+		TargetType:  "user",
+		TargetID:    admin.ID,
+		TargetName:  admin.Email,
+		IP:          "127.0.0.1",
+		DetailsJSON: `{"role":"admin"}`,
 	})
 	if err != nil {
 		t.Fatalf("record audit event: %v", err)
 	}
-	events := tracker.ListAuditEvents(10)
+	events := mustListAuditEvents(t, tracker, 10)
 	if len(events) != 1 || events[0].ID != event.ID || events[0].Action != "user.created" || events[0].DetailsJSON == "" {
 		t.Fatalf("audit events = %#v", events)
 	}
 	_, err = tracker.RecordAuditEvent(CreateAuditEvent{
 		DomainEventID: 42,
 		ActorUserID:   admin.ID,
-		ActorUsername: admin.Email,
+		ActorEmail:    admin.Email,
 		Action:        "product.created",
 		TargetType:    "product",
 		TargetID:      productID,
@@ -1109,7 +1249,7 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	_, err = tracker.RecordAuditEvent(CreateAuditEvent{
 		DomainEventID: 42,
 		ActorUserID:   admin.ID,
-		ActorUsername: admin.Email,
+		ActorEmail:    admin.Email,
 		Action:        "product.created",
 		TargetType:    "product",
 		TargetID:      productID,
@@ -1285,7 +1425,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if updatedUser.Role != "customer" || updatedUser.Email != "customer-bob@example.test" {
 		t.Fatalf("updated user = %#v", updatedUser)
 	}
-	users := tracker.ListUsers()
+	users := mustListUsers(t, tracker)
 	if len(users) != 2 {
 		t.Fatalf("users = %#v", users)
 	}
@@ -1304,14 +1444,14 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if _, err := tracker.UpsertProductMember(product.ID, UpsertProductMember{UserID: user.ID, Role: "customer"}); err != nil {
 		t.Fatalf("upsert member: %v", err)
 	}
-	if role, ok := tracker.ProductRole(user.ID, product.ID); !ok || role != "customer" {
-		t.Fatalf("product role = %q %v", role, ok)
+	if role, err := tracker.ProductRole(user.ID, product.ID); err != nil || role != "customer" {
+		t.Fatalf("product role = %q err=%v", role, err)
 	}
 	if err := tracker.DeleteProductMember(product.ID, user.ID); err != nil {
 		t.Fatalf("delete member: %v", err)
 	}
-	if _, ok := tracker.ProductRole(user.ID, product.ID); ok {
-		t.Fatal("product role should be removed")
+	if _, err := tracker.ProductRole(user.ID, product.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted product member error = %v, want ErrNotFound", err)
 	}
 
 	enabled := false
@@ -1325,7 +1465,10 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
-	hooks := tracker.ListWebhooks(&product.ID)
+	hooks, err := tracker.ListWebhooks(&product.ID)
+	if err != nil {
+		t.Fatalf("list product hooks: %v", err)
+	}
 	if len(hooks) != 1 || hooks[0].ID != hook.ID {
 		t.Fatalf("product hooks = %#v", hooks)
 	}
@@ -1363,7 +1506,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if err := tracker.RecordDelivery(WebhookDelivery{WebhookID: hook.ID, ProductID: &product.ID, Event: "ticket.created", StatusCode: 204}); err != nil {
 		t.Fatalf("record delivery: %v", err)
 	}
-	deliveries := tracker.ListDeliveries(10)
+	deliveries := mustListDeliveries(t, tracker, 10)
 	if len(deliveries) != 1 || deliveries[0].StatusCode != 204 {
 		t.Fatalf("deliveries = %#v", deliveries)
 	}
@@ -1415,7 +1558,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("failed webhook notification = %#v", failedWebhook)
 	}
 
-	ticketForWebhook, err := tracker.CreateTicket(CreateTicket{ProductID: product.ID, Title: "Coalesced webhook ticket"})
+	ticketForWebhook, err := tracker.CreateTicket(CreateTicket{ProductID: product.ID, Title: "Coalesced webhook ticket", ActorUserID: admin.ID})
 	if err != nil {
 		t.Fatalf("create webhook ticket: %v", err)
 	}
@@ -1466,14 +1609,6 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 		t.Fatalf("claimed coalesced delayed webhook too early: %#v", claimedWebhooks)
 	}
 
-	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: product.ID, Title: "Numbered support ticket"})
-	if err != nil {
-		t.Fatalf("create ticket: %v", err)
-	}
-	if gotID, ok := tracker.TicketIDByProductNumber(product.ID, ticket.Number); !ok || gotID != ticket.ID {
-		t.Fatalf("ticket by product number = %d %v", gotID, ok)
-	}
-
 	queued, err := tracker.EnqueueEmailNotifications([]CreateEmailNotification{{
 		UserID:         user.ID,
 		RecipientEmail: updatedUser.Email,
@@ -1488,11 +1623,14 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if err := tracker.MarkEmailFailed(queued[0].ID, errors.New("temporary failure"), 1); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
-	notifications := tracker.ListEmailNotifications(10)
+	notifications := mustListEmailNotifications(t, tracker, 10)
 	if len(notifications) != 1 || notifications[0].Status != "failed" || notifications[0].LastError != "temporary failure" {
 		t.Fatalf("notifications = %#v", notifications)
 	}
-	stats := tracker.EmailNotificationStats()
+	stats, err := tracker.EmailNotificationStats()
+	if err != nil {
+		t.Fatalf("email notification stats: %v", err)
+	}
 	if stats.Total != 1 || stats.Failed != 1 || stats.LastError != "temporary failure" {
 		t.Fatalf("email stats = %#v", stats)
 	}
@@ -1523,7 +1661,7 @@ func TestProductMembershipFiltersTickets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	visibleProduct := tracker.ListProducts(admin)[0]
+	visibleProduct := mustListProducts(t, tracker, admin)[0]
 	hiddenProduct, err := tracker.CreateProduct(CreateProduct{Key: "OPS", Name: "Operations"})
 	if err != nil {
 		t.Fatalf("create product: %v", err)
@@ -1535,10 +1673,13 @@ func TestProductMembershipFiltersTickets(t *testing.T) {
 	if _, err := tracker.UpsertProductMember(visibleProduct.ID, UpsertProductMember{UserID: user.ID, Role: "viewer"}); err != nil {
 		t.Fatalf("add member: %v", err)
 	}
-	if _, err := tracker.CreateTicket(CreateTicket{ProductID: visibleProduct.ID, Title: "Visible"}); err != nil {
+	if _, err := tracker.CreateTicket(CreateTicket{ProductID: visibleProduct.ID, Title: "Forbidden", ActorUserID: user.ID}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("viewer ticket error = %v, want ErrValidation", err)
+	}
+	if _, err := tracker.CreateTicket(CreateTicket{ProductID: visibleProduct.ID, Title: "Visible", ActorUserID: admin.ID}); err != nil {
 		t.Fatalf("create visible ticket: %v", err)
 	}
-	if _, err := tracker.CreateTicket(CreateTicket{ProductID: hiddenProduct.ID, Title: "Hidden"}); err != nil {
+	if _, err := tracker.CreateTicket(CreateTicket{ProductID: hiddenProduct.ID, Title: "Hidden", ActorUserID: admin.ID}); err != nil {
 		t.Fatalf("create hidden ticket: %v", err)
 	}
 
@@ -1549,7 +1690,7 @@ func TestProductMembershipFiltersTickets(t *testing.T) {
 	if len(page.Tickets) != 1 || page.Tickets[0].Title != "Visible" {
 		t.Fatalf("visible tickets = %#v", page.Tickets)
 	}
-	products := tracker.ListProducts(user)
+	products := mustListProducts(t, tracker, user)
 	if len(products) != 1 || products[0].ID != visibleProduct.ID {
 		t.Fatalf("visible products = %#v", products)
 	}
@@ -1564,7 +1705,7 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
+	productID := mustListProducts(t, tracker, admin)[0].ID
 	customer, err := tracker.CreateUser(CreateUser{Password: "correct horse", Email: "bob@example.test", Role: "customer"})
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
@@ -1580,28 +1721,50 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 		t.Fatalf("add assignee member: %v", err)
 	}
 	ticket, err := tracker.CreateTicket(CreateTicket{
-		ProductID: productID,
-		Title:     "Notify operators",
-		Reporter:  customer.Email,
-		Assignee:  assignee.Email,
+		ProductID:      productID,
+		Title:          "Notify operators",
+		AssigneeUserID: assignee.ID,
+		ActorUserID:    customer.ID,
 	})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
+	assignedUserID := assignee.ID
+	assigned, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID:    ticket.ID,
+		Patch:       UpdateTicket{AssigneeUserID: &assignedUserID},
+		ActorUserID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("assign ticket: %v", err)
+	}
+	ticket = assigned.Ticket
 
-	createdRecipients := tracker.TicketEmailRecipients("ticket.created", ticket, customer)
+	createdRecipients, err := tracker.TicketEmailRecipients("ticket.created", ticket, customer.ID)
+	if err != nil {
+		t.Fatalf("created recipients: %v", err)
+	}
 	if !hasRecipient(createdRecipients, admin.Email) || hasRecipient(createdRecipients, customer.Email) {
 		t.Fatalf("created recipients = %#v, want admin only excluding actor customer", createdRecipients)
 	}
-	commentRecipients := tracker.TicketEmailRecipients("ticket.commented", ticket, customer)
+	commentRecipients, err := tracker.TicketEmailRecipients("ticket.commented", ticket, customer.ID)
+	if err != nil {
+		t.Fatalf("comment recipients: %v", err)
+	}
 	if !hasRecipient(commentRecipients, assignee.Email) || hasRecipient(commentRecipients, customer.Email) {
 		t.Fatalf("comment recipients = %#v, want assignee excluding actor customer", commentRecipients)
 	}
-	updateRecipients := tracker.TicketEmailRecipients("ticket.updated", ticket, admin)
+	updateRecipients, err := tracker.TicketEmailRecipients("ticket.updated", ticket, admin.ID)
+	if err != nil {
+		t.Fatalf("update recipients: %v", err)
+	}
 	if !hasRecipient(updateRecipients, assignee.Email) || hasRecipient(updateRecipients, customer.Email) {
 		t.Fatalf("update recipients = %#v, want assignee excluding customer reporter", updateRecipients)
 	}
-	assignedRecipients := tracker.TicketEmailRecipients("ticket.assigned", ticket, admin)
+	assignedRecipients, err := tracker.TicketEmailRecipients("ticket.assigned", ticket, admin.ID)
+	if err != nil {
+		t.Fatalf("assigned recipients: %v", err)
+	}
 	if !hasRecipient(assignedRecipients, assignee.Email) {
 		t.Fatalf("assigned recipients = %#v, want assignee", assignedRecipients)
 	}
@@ -1659,7 +1822,8 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 		ProductID:      ticket.ProductID,
 		TicketID:       ticket.ID,
 		UserID:         assignee.ID,
-		RecipientEmail: assignee.Email,
+		RecipientEmail: "renamed@example.test",
+		RecipientName:  "Renamed Assignee",
 		Event:          "ticket.commented",
 		Subject:        "[PME-1] Ticket update",
 		BodyText:       "second update",
@@ -1669,7 +1833,8 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue second coalesced email: %v", err)
 	}
-	if first[0].ID != second[0].ID || second[0].Event != "ticket.commented" || second[0].BodyText != "second update" {
+	if first[0].ID != second[0].ID || second[0].Event != "ticket.commented" || second[0].BodyText != "second update" ||
+		second[0].RecipientEmail != "renamed@example.test" || second[0].RecipientName != "Renamed Assignee" {
 		t.Fatalf("coalesced emails = first %#v second %#v", first[0], second[0])
 	}
 	if second[0].NextAttemptAt.Before(sendAfter.Add(59 * time.Minute)) {
@@ -1682,9 +1847,16 @@ func TestEmailRecipientsAndOutbox(t *testing.T) {
 	if len(claimed) != 0 {
 		t.Fatalf("claimed delayed email too early: %#v", claimed)
 	}
+	disabled := true
+	if _, err := tracker.UpdateUser(assignee.ID, UpdateUser{Disabled: &disabled}); err != nil {
+		t.Fatalf("disable assignee: %v", err)
+	}
+	if _, err := tracker.GetEmailNotification(second[0].ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("disabled user pending notification error = %v, want ErrNotFound", err)
+	}
 }
 
-func TestPortalTicketTokenAndPublicComments(t *testing.T) {
+func TestPortalTicketRequesterUsesUserRelation(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -1693,36 +1865,41 @@ func TestPortalTicketTokenAndPublicComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
-	productID := tracker.ListProducts(admin)[0].ID
+	productID := mustListProducts(t, tracker, admin)[0].ID
+	customer, err := tracker.CreateUser(CreateUser{
+		DisplayName: "Customer",
+		Email:       "customer@example.test",
+		Password:    "correct horse",
+		Role:        "customer",
+	})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	if _, err := tracker.UpsertProductMember(productID, UpsertProductMember{UserID: customer.ID, Role: "customer"}); err != nil {
+		t.Fatalf("add customer member: %v", err)
+	}
 	ticket, err := tracker.CreateTicket(CreateTicket{
-		ProductID:      productID,
-		Title:          "Cannot sign in",
-		Description:    "Login fails",
-		Source:         "portal",
-		RequesterName:  "Customer",
-		RequesterEmail: "Customer@Example.Test",
+		ProductID:   productID,
+		Title:       "Cannot sign in",
+		Description: "Login fails",
+		ActorUserID: customer.ID,
 	})
 	if err != nil {
 		t.Fatalf("create portal ticket: %v", err)
 	}
-	if ticket.Source != "portal" || ticket.CustomerToken == "" || ticket.RequesterEmail != "customer@example.test" {
+	if ticket.Source != "portal" || ticket.RequesterUserID != customer.ID || ticket.RequesterName != "Customer" || ticket.RequesterEmail != customer.Email {
 		t.Fatalf("ticket fields = %#v", ticket)
 	}
-	if _, err := tracker.AddComment(ticket.ID, AddComment{Author: "Admin", Body: "Internal diagnosis", Visibility: "internal"}); err != nil {
-		t.Fatalf("add internal note: %v", err)
+	newName, newEmail := "Renamed Customer", "renamed@example.test"
+	if _, err := tracker.UpdateUser(customer.ID, UpdateUser{DisplayName: &newName, Email: &newEmail}); err != nil {
+		t.Fatalf("update customer: %v", err)
 	}
-	if _, err := tracker.AddComment(ticket.ID, AddComment{Author: "Admin", Body: "Public reply", Visibility: "public"}); err != nil {
-		t.Fatalf("add public reply: %v", err)
-	}
-	publicTicket, err := tracker.GetTicketByCustomerToken(ticket.CustomerToken)
+	updated, err := tracker.GetTicket(ticket.ID)
 	if err != nil {
-		t.Fatalf("get ticket by token: %v", err)
+		t.Fatalf("get updated ticket: %v", err)
 	}
-	if len(publicTicket.Comments) != 1 || publicTicket.Comments[0].Body != "Public reply" {
-		t.Fatalf("public comments = %#v", publicTicket.Comments)
-	}
-	if _, err := tracker.GetTicketByCustomerToken("missing"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("missing token error = %v, want ErrNotFound", err)
+	if updated.RequesterUserID != customer.ID || updated.RequesterName != newName || updated.RequesterEmail != newEmail {
+		t.Fatalf("updated requester = %#v", updated)
 	}
 }
 
@@ -1733,4 +1910,47 @@ func hasRecipient(recipients []EmailRecipient, email string) bool {
 		}
 	}
 	return false
+}
+
+func requireList[T any](t *testing.T, values []T, err error) []T {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("list values: %v", err)
+	}
+	return values
+}
+
+func mustListProducts(t *testing.T, tracker *Store, user User) []Product {
+	values, err := tracker.ListProducts(user)
+	return requireList(t, values, err)
+}
+
+func mustListDomainEvents(t *testing.T, tracker *Store, limit int) []DomainEvent {
+	values, err := tracker.ListDomainEvents(limit)
+	return requireList(t, values, err)
+}
+
+func mustListAuditEvents(t *testing.T, tracker *Store, limit int) []AuditEvent {
+	values, err := tracker.ListAuditEvents(limit)
+	return requireList(t, values, err)
+}
+
+func mustListEmailNotifications(t *testing.T, tracker *Store, limit int) []EmailNotification {
+	values, err := tracker.ListEmailNotifications(limit)
+	return requireList(t, values, err)
+}
+
+func mustListAPITokens(t *testing.T, tracker *Store, userID int64) []PublicAPIToken {
+	values, err := tracker.ListAPITokens(userID)
+	return requireList(t, values, err)
+}
+
+func mustListUsers(t *testing.T, tracker *Store) []User {
+	values, err := tracker.ListUsers()
+	return requireList(t, values, err)
+}
+
+func mustListDeliveries(t *testing.T, tracker *Store, limit int) []WebhookDelivery {
+	values, err := tracker.ListDeliveries(nil, limit)
+	return requireList(t, values, err)
 }

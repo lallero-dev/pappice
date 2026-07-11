@@ -150,7 +150,10 @@ func seedDemoStore(dbPath string) (demoSeed, error) {
 		return demoSeed{}, err
 	}
 
-	products := tracker.ListProducts(admin)
+	products, err := tracker.ListProducts(admin)
+	if err != nil {
+		return demoSeed{}, err
+	}
 	if len(products) == 0 {
 		return demoSeed{}, fmt.Errorf("default product was not created")
 	}
@@ -186,11 +189,8 @@ func seedDemoStore(dbPath string) (demoSeed, error) {
 		Title:          "Login page returns an error",
 		Description:    "I cannot sign in after the last password reset. The page shows an error and sends me back to the login form.",
 		Priority:       "high",
-		Assignee:       staff.DisplayName,
-		Source:         "portal",
-		RequesterName:  customer.DisplayName,
-		RequesterEmail: customer.Email,
-		Actor:          store.EventActorFromUser(customer),
+		AssigneeUserID: staff.ID,
+		ActorUserID:    customer.ID,
 	})
 	if err != nil {
 		return demoSeed{}, err
@@ -200,37 +200,30 @@ func seedDemoStore(dbPath string) (demoSeed, error) {
 		TicketID: ticket.ID,
 		Patch:    store.UpdateTicket{Status: &assigned},
 		Comment: &store.AddComment{
-			Author:       staff.DisplayName,
-			AuthorUserID: staff.ID,
-			Body:         "Thanks, I can reproduce it. I am checking the account setup now.",
-			Visibility:   "public",
+			Body:       "Thanks, I can reproduce it. I am checking the account setup now.",
+			Visibility: "public",
 		},
-		Actor: store.EventActorFromUser(staff),
+		ActorUserID: staff.ID,
 	}); err != nil {
 		return demoSeed{}, err
 	}
 	if _, err := tracker.SaveTicket(store.SaveTicketInput{
 		TicketID: ticket.ID,
 		Comment: &store.AddComment{
-			Author:       customer.DisplayName,
-			AuthorUserID: customer.ID,
-			Body:         "I tried again from a private window and it still fails.",
-			Visibility:   "public",
+			Body:       "I tried again from a private window and it still fails.",
+			Visibility: "public",
 		},
-		Actor: store.EventActorFromUser(customer),
+		ActorUserID: customer.ID,
 	}); err != nil {
 		return demoSeed{}, err
 	}
 
 	if _, err := tracker.CreateTicket(store.CreateTicket{
-		ProductID:      product.ID,
-		Title:          "Invoice download link is expired",
-		Description:    "The invoice link in last week's email no longer opens.",
-		Priority:       "normal",
-		Source:         "portal",
-		RequesterName:  customer.DisplayName,
-		RequesterEmail: customer.Email,
-		Actor:          store.EventActorFromUser(customer),
+		ProductID:   product.ID,
+		Title:       "Invoice download link is expired",
+		Description: "The invoice link in last week's email no longer opens.",
+		Priority:    "normal",
+		ActorUserID: customer.ID,
 	}); err != nil {
 		return demoSeed{}, err
 	}
@@ -246,14 +239,11 @@ func seedDemoStore(dbPath string) (demoSeed, error) {
 		{"Export contains duplicate rows", "The latest CSV export contains some invoices more than once.", "normal"},
 	} {
 		if _, err := tracker.CreateTicket(store.CreateTicket{
-			ProductID:      product.ID,
-			Title:          example.title,
-			Description:    example.description,
-			Priority:       example.priority,
-			Source:         "portal",
-			RequesterName:  customer.DisplayName,
-			RequesterEmail: customer.Email,
-			Actor:          store.EventActorFromUser(customer),
+			ProductID:   product.ID,
+			Title:       example.title,
+			Description: example.description,
+			Priority:    example.priority,
+			ActorUserID: customer.ID,
 		}); err != nil {
 			return demoSeed{}, err
 		}

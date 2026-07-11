@@ -8,65 +8,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"pappice/internal/security"
 )
 
 func (s *Store) CreateTicket(input CreateTicket) (Ticket, error) {
-	return s.CreateTicketWithAttachments(input, nil, 0)
+	return s.CreateTicketWithAttachments(input, nil)
 }
 
-func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []CreateAttachment, attachmentUserID int64) (Ticket, error) {
+func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []CreateAttachment) (Ticket, error) {
 	now := time.Now().UTC()
-	source := defaultString(input.Source, "staff")
-	if !isValid(validTicketSources, source) {
-		return Ticket{}, fmt.Errorf("%w: invalid ticket source %q", ErrValidation, source)
-	}
-	requesterEmail, err := normalizeEmail(input.RequesterEmail)
-	if err != nil {
-		return Ticket{}, err
-	}
 	ticket := Ticket{
 		ProductID:      input.ProductID,
 		Title:          strings.TrimSpace(input.Title),
 		Description:    strings.TrimSpace(input.Description),
 		Status:         "new",
-		Severity:       defaultString(input.Severity, "support"),
 		Priority:       defaultString(input.Priority, "normal"),
-		Assignee:       strings.TrimSpace(input.Assignee),
-		Reporter:       strings.TrimSpace(input.Reporter),
-		Source:         source,
-		RequesterName:  strings.TrimSpace(input.RequesterName),
-		RequesterEmail: requesterEmail,
+		AssigneeUserID: input.AssigneeUserID,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if ticket.Source == "portal" {
-		if ticket.RequesterEmail == "" {
-			return Ticket{}, fmt.Errorf("%w: requester email is required", ErrValidation)
-		}
-		if ticket.RequesterName == "" {
-			ticket.RequesterName = ticket.RequesterEmail
-		}
-		if ticket.Reporter == "" {
-			ticket.Reporter = ticket.RequesterEmail
-		}
-	}
-	if ticket.RequesterEmail != "" {
-		token, err := security.RandomToken()
-		if err != nil {
-			return Ticket{}, err
-		}
-		ticket.CustomerToken = token
+	if input.ActorUserID < 1 {
+		return Ticket{}, fmt.Errorf("%w: actor user is required", ErrValidation)
 	}
 	if ticket.ProductID < 1 {
 		return Ticket{}, fmt.Errorf("%w: product_id is required", ErrValidation)
 	}
 	if ticket.Title == "" {
 		return Ticket{}, fmt.Errorf("%w: title is required", ErrValidation)
-	}
-	if !isValid(validSeverities, ticket.Severity) {
-		return Ticket{}, fmt.Errorf("%w: invalid severity %q", ErrValidation, ticket.Severity)
 	}
 	if !isValid(validPriorities, ticket.Priority) {
 		return Ticket{}, fmt.Errorf("%w: invalid priority %q", ErrValidation, ticket.Priority)
@@ -80,27 +47,44 @@ func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []Cr
 	if _, err := getProductTx(tx, ticket.ProductID); err != nil {
 		return Ticket{}, err
 	}
+	requester, productRole, err := ticketCreatorTx(tx, ticket.ProductID, input.ActorUserID)
+	if err != nil {
+		return Ticket{}, err
+	}
+	ticket.RequesterUserID = requester.ID
+	ticket.Source = "staff"
+	if requester.Role == "customer" || productRole == "customer" {
+		ticket.Source = "portal"
+		ticket.AssigneeUserID = 0
+	}
+	ticket.AssigneeEmail, err = ticketAssigneeEmailTx(tx, ticket.ProductID, ticket.AssigneeUserID)
+	if err != nil {
+		return Ticket{}, err
+	}
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(number), 0) + 1 FROM tickets WHERE product_id = ?`, ticket.ProductID).Scan(&ticket.Number); err != nil {
 		return Ticket{}, err
 	}
 	result, err := tx.Exec(`
 		INSERT INTO tickets (
-			product_id, number, title, description, status, severity, priority, assignee, reporter,
-			source, requester_name, requester_email, customer_token, created_at, updated_at
+			product_id, number, title, description, status, priority, assignee_user_id, requester_user_id,
+			source, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ticket.ProductID, ticket.Number, ticket.Title, ticket.Description, ticket.Status, ticket.Severity, ticket.Priority,
-		ticket.Assignee, ticket.Reporter, ticket.Source, ticket.RequesterName, ticket.RequesterEmail,
-		nullEmptyString(ticket.CustomerToken), formatTime(ticket.CreatedAt), formatTime(ticket.UpdatedAt),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ticket.ProductID, ticket.Number, ticket.Title, ticket.Description, ticket.Status, ticket.Priority,
+		nullZero(ticket.AssigneeUserID), nullZero(ticket.RequesterUserID), ticket.Source,
+		formatTime(ticket.CreatedAt), formatTime(ticket.UpdatedAt),
 	)
 	if err != nil {
 		return Ticket{}, err
 	}
-	ticket.ID, _ = result.LastInsertId()
-	if err := insertAttachmentsTx(tx, ticket.ID, nil, attachmentUserID, attachments, now); err != nil {
+	ticket.ID, err = insertedID(result)
+	if err != nil {
 		return Ticket{}, err
 	}
-	if err := insertTicketCreatedEventTx(tx, ticket, input.Actor, now); err != nil {
+	if err := insertAttachmentsTx(tx, ticket.ID, nil, requester.ID, attachments, now); err != nil {
+		return Ticket{}, err
+	}
+	if err := insertTicketCreatedEventTx(tx, ticket, EventActorFromUser(requester), now); err != nil {
 		return Ticket{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -204,42 +188,10 @@ func (s *Store) GetTicketByKey(key string) (Ticket, error) {
 	return ticket, s.hydrateTicket(&ticket)
 }
 
-func (s *Store) GetTicketByCustomerToken(token string) (Ticket, error) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return Ticket{}, ErrNotFound
-	}
-	row := s.db.QueryRow(`
-		SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
-		       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
-		       i.created_at, i.updated_at, i.closed_at
-		FROM tickets i
-		JOIN products p ON p.id = i.product_id
-		LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)
-		WHERE i.customer_token = ?`, token)
-	ticket, err := scanTicket(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Ticket{}, ErrNotFound
-	}
-	if err != nil {
-		return Ticket{}, err
-	}
-	if err := s.hydrateTicket(&ticket); err != nil {
-		return Ticket{}, err
-	}
-	ticket.Comments = publicComments(ticket.Comments)
-	return ticket, nil
-}
-
-func (s *Store) UpdateTicket(id int64, patch UpdateTicket) (Ticket, error) {
-	result, err := s.SaveTicket(SaveTicketInput{TicketID: id, Patch: patch})
-	if err != nil {
-		return Ticket{}, err
-	}
-	return result.Ticket, nil
-}
-
 func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
+	if input.ActorUserID < 1 {
+		return SaveTicketResult{}, fmt.Errorf("%w: actor user is required", ErrValidation)
+	}
 	hasPatch := ticketPatchPresent(input.Patch)
 	hasAttachments := len(input.Attachments) > 0
 	hasCommentBody := input.Comment != nil && strings.TrimSpace(input.Comment.Body) != ""
@@ -257,9 +209,16 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 	}
 	defer tx.Rollback()
 
-	previous, err := getTicketTx(tx, input.TicketID)
+	previous, err := getTicketRecordTx(tx, input.TicketID)
 	if err != nil {
 		return SaveTicketResult{}, err
+	}
+	actor, err := getUserTx(tx, input.ActorUserID)
+	if err != nil {
+		return SaveTicketResult{}, err
+	}
+	if actor.Disabled {
+		return SaveTicketResult{}, fmt.Errorf("%w: actor is disabled", ErrValidation)
 	}
 
 	now := time.Now().UTC()
@@ -273,9 +232,14 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		if err := applyTicketPatch(&current, input.Patch, now); err != nil {
 			return SaveTicketResult{}, err
 		}
-		result.AssignmentChanged = input.Patch.Assignee != nil &&
-			strings.TrimSpace(*input.Patch.Assignee) != "" &&
-			!strings.EqualFold(strings.TrimSpace(*input.Patch.Assignee), strings.TrimSpace(previous.Assignee))
+		if input.Patch.AssigneeUserID != nil {
+			current.AssigneeEmail, err = ticketAssigneeEmailTx(tx, current.ProductID, current.AssigneeUserID)
+			if err != nil {
+				return SaveTicketResult{}, err
+			}
+		}
+		result.AssignmentChanged = input.Patch.AssigneeUserID != nil &&
+			current.AssigneeUserID != previous.AssigneeUserID
 		if err := updateTicketTx(tx, current); err != nil {
 			return SaveTicketResult{}, err
 		}
@@ -285,7 +249,7 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		if err != nil {
 			return SaveTicketResult{}, err
 		}
-		commentID, err := addCommentTx(tx, input.TicketID, comment, now)
+		commentID, err := addCommentTx(tx, input.TicketID, comment, actor, now)
 		if err != nil {
 			return SaveTicketResult{}, err
 		}
@@ -297,7 +261,7 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		if result.CommentID > 0 {
 			commentID = &result.CommentID
 		}
-		if err := insertAttachmentsTx(tx, input.TicketID, commentID, input.AttachmentUserID, input.Attachments, now); err != nil {
+		if err := insertAttachmentsTx(tx, input.TicketID, commentID, actor.ID, input.Attachments, now); err != nil {
 			return SaveTicketResult{}, err
 		}
 	}
@@ -307,12 +271,15 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 			return SaveTicketResult{}, err
 		}
 	}
+	if err := markTicketRead(tx, input.TicketID, actor.ID, now); err != nil {
+		return SaveTicketResult{}, err
+	}
 
 	current, err = getTicketTx(tx, input.TicketID)
 	if err != nil {
 		return SaveTicketResult{}, err
 	}
-	if err := insertTicketSavedEventsTx(tx, input, result, current, now); err != nil {
+	if err := insertTicketSavedEventsTx(tx, input, result, current, EventActorFromUser(actor), now); err != nil {
 		return SaveTicketResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -323,14 +290,15 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 }
 
 func insertTicketCreatedEventTx(tx *sql.Tx, ticket Ticket, actor EventActor, now time.Time) error {
-	payload := ticketEventPayloadJSON(TicketEventPayload{
-		Source:               ticket.Source,
-		CurrentStatus:        ticket.Status,
-		CurrentAssignee:      ticket.Assignee,
-		RequesterEmail:       ticket.RequesterEmail,
-		RequesterCreatedCopy: ticket.Source == "portal" && strings.TrimSpace(ticket.RequesterEmail) != "",
+	payload, err := ticketEventPayloadJSON(TicketEventPayload{
+		Source:          ticket.Source,
+		CurrentStatus:   ticket.Status,
+		CurrentAssignee: ticket.AssigneeEmail,
 	})
-	_, err := insertDomainEventTx(tx, CreateDomainEvent{
+	if err != nil {
+		return err
+	}
+	_, err = insertDomainEventTx(tx, CreateDomainEvent{
 		Type:        "ticket.created",
 		ProductID:   ticket.ProductID,
 		TicketID:    ticket.ID,
@@ -340,32 +308,31 @@ func insertTicketCreatedEventTx(tx *sql.Tx, ticket Ticket, actor EventActor, now
 	return err
 }
 
-func insertTicketSavedEventsTx(tx *sql.Tx, input SaveTicketInput, result SaveTicketResult, current Ticket, now time.Time) error {
+func insertTicketSavedEventsTx(tx *sql.Tx, input SaveTicketInput, result SaveTicketResult, current Ticket, actor EventActor, now time.Time) error {
 	payload := TicketEventPayload{
 		HasPatch:          result.HasPatch,
-		HasComment:        result.HasComment,
 		PublicComment:     result.PublicComment,
 		AssignmentChanged: result.AssignmentChanged,
 		OnlyAssigneePatch: ticketPatchOnlyAssignee(input.Patch),
 		PreviousStatus:    result.Previous.Status,
 		CurrentStatus:     current.Status,
-		PreviousAssignee:  result.Previous.Assignee,
-		CurrentAssignee:   current.Assignee,
+		PreviousAssignee:  result.Previous.AssigneeEmail,
+		CurrentAssignee:   current.AssigneeEmail,
 		CommentID:         result.CommentID,
-		RequesterEmail:    current.RequesterEmail,
-		StatusChanged:     !strings.EqualFold(strings.TrimSpace(result.Previous.Status), strings.TrimSpace(current.Status)),
-		TerminalStatus:    ticketRequesterTerminalStatus(current.Status),
 	}
 	if input.Comment != nil {
 		payload.CommentVisibility = defaultString(input.Comment.Visibility, "public")
 	}
-	payloadJSON := ticketEventPayloadJSON(payload)
+	payloadJSON, err := ticketEventPayloadJSON(payload)
+	if err != nil {
+		return err
+	}
 	if result.HasPatch {
 		if _, err := insertDomainEventTx(tx, CreateDomainEvent{
 			Type:        "ticket.updated",
 			ProductID:   current.ProductID,
 			TicketID:    current.ID,
-			Actor:       input.Actor,
+			Actor:       actor,
 			PayloadJSON: payloadJSON,
 		}, now); err != nil {
 			return err
@@ -375,7 +342,7 @@ func insertTicketSavedEventsTx(tx *sql.Tx, input SaveTicketInput, result SaveTic
 				Type:        "ticket.assigned",
 				ProductID:   current.ProductID,
 				TicketID:    current.ID,
-				Actor:       input.Actor,
+				Actor:       actor,
 				PayloadJSON: payloadJSON,
 			}, now); err != nil {
 				return err
@@ -387,7 +354,7 @@ func insertTicketSavedEventsTx(tx *sql.Tx, input SaveTicketInput, result SaveTic
 			Type:        "ticket.commented",
 			ProductID:   current.ProductID,
 			TicketID:    current.ID,
-			Actor:       input.Actor,
+			Actor:       actor,
 			PayloadJSON: payloadJSON,
 		}, now); err != nil {
 			return err
@@ -396,29 +363,20 @@ func insertTicketSavedEventsTx(tx *sql.Tx, input SaveTicketInput, result SaveTic
 	return nil
 }
 
-func ticketEventPayloadJSON(payload TicketEventPayload) string {
+func ticketEventPayloadJSON(payload TicketEventPayload) (string, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return "{}"
+		return "", err
 	}
-	return string(data)
+	return string(data), nil
 }
 
 func ticketPatchOnlyAssignee(patch UpdateTicket) bool {
-	return patch.Assignee != nil && patch.Title == nil && patch.Description == nil && patch.Status == nil && patch.Severity == nil && patch.Priority == nil
-}
-
-func ticketRequesterTerminalStatus(status string) bool {
-	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "resolved", "rejected":
-		return true
-	default:
-		return false
-	}
+	return patch.AssigneeUserID != nil && patch.Title == nil && patch.Description == nil && patch.Status == nil && patch.Priority == nil
 }
 
 func ticketPatchPresent(patch UpdateTicket) bool {
-	return patch.Title != nil || patch.Description != nil || patch.Status != nil || patch.Severity != nil || patch.Priority != nil || patch.Assignee != nil
+	return patch.Title != nil || patch.Description != nil || patch.Status != nil || patch.Priority != nil || patch.AssigneeUserID != nil
 }
 
 func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error {
@@ -445,13 +403,6 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 			current.ClosedAt = nil
 		}
 	}
-	if patch.Severity != nil {
-		severity := defaultString(*patch.Severity, "support")
-		if !isValid(validSeverities, severity) {
-			return fmt.Errorf("%w: invalid severity %q", ErrValidation, severity)
-		}
-		current.Severity = severity
-	}
 	if patch.Priority != nil {
 		priority := defaultString(*patch.Priority, "normal")
 		if !isValid(validPriorities, priority) {
@@ -459,8 +410,8 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 		}
 		current.Priority = priority
 	}
-	if patch.Assignee != nil {
-		current.Assignee = strings.TrimSpace(*patch.Assignee)
+	if patch.AssigneeUserID != nil {
+		current.AssigneeUserID = *patch.AssigneeUserID
 	}
 	current.UpdatedAt = now
 	return nil
@@ -469,20 +420,58 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 func updateTicketTx(tx *sql.Tx, ticket Ticket) error {
 	_, err := tx.Exec(`
 		UPDATE tickets
-		SET title = ?, description = ?, status = ?, severity = ?, priority = ?, assignee = ?, updated_at = ?, closed_at = ?
+		SET title = ?, description = ?, status = ?, priority = ?, assignee_user_id = ?, updated_at = ?, closed_at = ?
 		WHERE id = ?`,
-		ticket.Title, ticket.Description, ticket.Status, ticket.Severity, ticket.Priority, ticket.Assignee,
+		ticket.Title, ticket.Description, ticket.Status, ticket.Priority, nullZero(ticket.AssigneeUserID),
 		formatTime(ticket.UpdatedAt), formatTimePtr(ticket.ClosedAt), ticket.ID,
 	)
 	return err
 }
 
-func (s *Store) AddComment(id int64, input AddComment) (Ticket, error) {
-	result, err := s.SaveTicket(SaveTicketInput{TicketID: id, Comment: &input})
-	if err != nil {
-		return Ticket{}, err
+func ticketAssigneeEmailTx(tx *sql.Tx, productID, userID int64) (string, error) {
+	if userID == 0 {
+		return "", nil
 	}
-	return result.Ticket, nil
+	var email string
+	err := tx.QueryRow(`
+		SELECT u.email
+		FROM product_members pm
+		JOIN users u ON u.id = pm.user_id
+		WHERE pm.product_id = ?
+		  AND u.id = ?
+		  AND `+productAssigneeEligibilitySQL, productID, userID).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: assignee must be an active staff member of this product", ErrValidation)
+	}
+	return email, err
+}
+
+func ticketCreatorTx(tx *sql.Tx, productID, userID int64) (User, string, error) {
+	user, err := getUserTx(tx, userID)
+	if err != nil {
+		return User{}, "", err
+	}
+	if user.Disabled {
+		return User{}, "", fmt.Errorf("%w: creator is disabled", ErrValidation)
+	}
+	if user.Role == "admin" {
+		return user, "manager", nil
+	}
+	var role string
+	err = tx.QueryRow(`SELECT role FROM product_members WHERE product_id = ? AND user_id = ?`, productID, userID).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, "", fmt.Errorf("%w: creator is not a member of this product", ErrValidation)
+	}
+	if err != nil {
+		return User{}, "", err
+	}
+	role = normalizeProductRole(role)
+	switch role {
+	case "manager", "staff", "customer":
+		return user, role, nil
+	default:
+		return User{}, "", fmt.Errorf("%w: product role %q cannot create tickets", ErrValidation, role)
+	}
 }
 
 func normalizeComment(input AddComment, allowEmptyBody bool) (AddComment, bool, error) {
@@ -490,31 +479,25 @@ func normalizeComment(input AddComment, allowEmptyBody bool) (AddComment, bool, 
 	if body == "" && !allowEmptyBody {
 		return AddComment{}, false, fmt.Errorf("%w: comment body is required", ErrValidation)
 	}
-	author := defaultString(input.Author, "anonymous")
 	visibility := defaultString(input.Visibility, "public")
 	if !isValid(validCommentVisibility, visibility) {
 		return AddComment{}, false, fmt.Errorf("%w: invalid comment visibility %q", ErrValidation, visibility)
 	}
-	return AddComment{Author: author, AuthorUserID: input.AuthorUserID, Body: body, Visibility: visibility}, visibility == "public", nil
+	return AddComment{Body: body, Visibility: visibility}, visibility == "public", nil
 }
 
-func addCommentTx(tx *sql.Tx, id int64, input AddComment, now time.Time) (int64, error) {
-	var authorUserID sql.NullInt64
-	if input.AuthorUserID > 0 {
-		authorUserID = sql.NullInt64{Int64: input.AuthorUserID, Valid: true}
-	}
+func addCommentTx(tx *sql.Tx, id int64, input AddComment, author User, now time.Time) (int64, error) {
 	result, err := tx.Exec(
 		`INSERT INTO comments (ticket_id, author, author_user_id, body, visibility, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, input.Author, authorUserID, input.Body, input.Visibility, formatTime(now),
+		id, defaultString(author.DisplayName, author.Email), author.ID, input.Body, input.Visibility, formatTime(now),
 	)
 	if err != nil {
 		return 0, normalizeSQLError(err)
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return 0, ErrNotFound
+	if err := requireChangedRow(result); err != nil {
+		return 0, err
 	}
-	commentID, _ := result.LastInsertId()
-	return commentID, nil
+	return insertedID(result)
 }
 
 func updateTicketTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
@@ -522,16 +505,7 @@ func updateTicketTimestampTx(tx *sql.Tx, id int64, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) TicketIDByProductNumber(productID, number int64) (int64, bool) {
-	var id int64
-	err := s.db.QueryRow(`SELECT id FROM tickets WHERE product_id = ? AND number = ?`, productID, number).Scan(&id)
-	return id, err == nil
+	return requireChangedRow(result)
 }
 
 func insertAttachmentsTx(tx *sql.Tx, ticketID int64, commentID *int64, userID int64, attachments []CreateAttachment, now time.Time) error {
@@ -596,7 +570,7 @@ func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) 
 	}
 	defer tx.Rollback()
 
-	ticket, err := getTicketTx(tx, id)
+	ticket, err := getTicketRecordTx(tx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -609,8 +583,8 @@ func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) 
 	if err != nil {
 		return nil, normalizeSQLError(err)
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return nil, ErrNotFound
+	if err := requireChangedRow(result); err != nil {
+		return nil, err
 	}
 
 	orphaned, err := orphanedAttachmentStorageKeysTx(tx, storageKeys)
@@ -684,6 +658,14 @@ func (s *Store) getTicket(id int64) (Ticket, error) {
 }
 
 func getTicketTx(tx *sql.Tx, id int64) (Ticket, error) {
+	ticket, err := getTicketRecordTx(tx, id)
+	if err != nil {
+		return Ticket{}, err
+	}
+	return ticket, hydrateTicketTx(tx, &ticket)
+}
+
+func getTicketRecordTx(tx *sql.Tx, id int64) (Ticket, error) {
 	row := tx.QueryRow(ticketSelectSQL+` WHERE i.id = ?`, id)
 	ticket, err := scanTicket(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -692,7 +674,7 @@ func getTicketTx(tx *sql.Tx, id int64) (Ticket, error) {
 	if err != nil {
 		return Ticket{}, err
 	}
-	return ticket, hydrateTicketTx(tx, &ticket)
+	return ticket, nil
 }
 
 func (s *Store) hydrateTicket(ticket *Ticket) error {
@@ -709,18 +691,13 @@ type ticketQueryer interface {
 
 func hydrateTicketWithQuery(queryer ticketQueryer, ticket *Ticket) error {
 	ticket.Key = fmt.Sprintf("%s-%d", ticket.ProductKey, ticket.Number)
-	ticket.Product = ticket.ProductName
-	if ticket.Product == "" {
-		ticket.Product = ticket.ProductKey
-	}
 	ticket.Attachments = nil
 	ticket.Comments = nil
 
 	commentRows, err := queryer.Query(`
-		SELECT c.id, COALESCE(NULLIF(author_by_id.display_name, ''), NULLIF(author_by_name.display_name, ''), c.author), c.author_user_id, c.body, c.visibility, c.created_at
+		SELECT c.id, COALESCE(NULLIF(author_by_id.display_name, ''), c.author), c.author_user_id, c.body, c.visibility, c.created_at
 		FROM comments c
 		LEFT JOIN users author_by_id ON author_by_id.id = c.author_user_id
-		LEFT JOIN users author_by_name ON c.author_user_id IS NULL AND lower(author_by_name.email) = lower(c.author)
 		WHERE c.ticket_id = ?
 		ORDER BY c.created_at`, ticket.ID)
 	if err != nil {
@@ -731,16 +708,17 @@ func hydrateTicketWithQuery(queryer ticketQueryer, ticket *Ticket) error {
 		var comment Comment
 		var authorUserID sql.NullInt64
 		var created string
-		if err := commentRows.Scan(&comment.ID, &comment.Author, &authorUserID, &comment.Body, &comment.Visibility, &created); err == nil {
-			if authorUserID.Valid {
-				comment.AuthorUserID = authorUserID.Int64
-			}
-			if comment.Visibility == "" {
-				comment.Visibility = "public"
-			}
-			comment.CreatedAt = parseTime(created)
-			ticket.Comments = append(ticket.Comments, comment)
+		if err := commentRows.Scan(&comment.ID, &comment.Author, &authorUserID, &comment.Body, &comment.Visibility, &created); err != nil {
+			return err
 		}
+		if authorUserID.Valid {
+			comment.AuthorUserID = authorUserID.Int64
+		}
+		if comment.Visibility == "" {
+			comment.Visibility = "public"
+		}
+		comment.CreatedAt = parseTime(created)
+		ticket.Comments = append(ticket.Comments, comment)
 	}
 	if err := commentRows.Err(); err != nil {
 		return err
@@ -788,64 +766,44 @@ func parseTicketKey(key string) (string, int64, bool) {
 }
 
 const ticketSelectSQL = `
-	SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.severity, i.priority,
-	       i.assignee, i.reporter, i.source, COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), ''), i.requester_email, i.customer_token,
+	SELECT i.id, i.product_id, p.key, p.name, i.number, i.title, i.description, i.status, i.priority,
+	       COALESCE(i.assignee_user_id, 0), COALESCE(assigned_user.email, ''), COALESCE(i.requester_user_id, 0), i.source,
+	       COALESCE(requester.display_name, ''), COALESCE(requester.email, ''),
 	       i.created_at, i.updated_at, i.closed_at
 	FROM tickets i
 	JOIN products p ON p.id = i.product_id
-	LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)`
+	LEFT JOIN users assigned_user ON assigned_user.id = i.assignee_user_id
+	LEFT JOIN users requester ON requester.id = i.requester_user_id`
 
 func scanTicket(rows scanner) (Ticket, error) {
 	var ticket Ticket
-	var closed, customerToken sql.NullString
+	var closed sql.NullString
 	var created, updated string
 	if err := rows.Scan(
 		&ticket.ID, &ticket.ProductID, &ticket.ProductKey, &ticket.ProductName, &ticket.Number, &ticket.Title, &ticket.Description,
-		&ticket.Status, &ticket.Severity, &ticket.Priority, &ticket.Assignee, &ticket.Reporter,
-		&ticket.Source, &ticket.RequesterName, &ticket.RequesterEmail, &customerToken, &created, &updated, &closed,
+		&ticket.Status, &ticket.Priority, &ticket.AssigneeUserID, &ticket.AssigneeEmail, &ticket.RequesterUserID,
+		&ticket.Source, &ticket.RequesterName, &ticket.RequesterEmail, &created, &updated, &closed,
 	); err != nil {
 		return Ticket{}, err
 	}
 	if ticket.Source == "" {
 		ticket.Source = "staff"
 	}
-	ticket.CustomerToken = nullString(customerToken)
 	ticket.CreatedAt = parseTime(created)
 	ticket.UpdatedAt = parseTime(updated)
 	ticket.ClosedAt = parseNullTime(closed)
 	ticket.Key = fmt.Sprintf("%s-%d", ticket.ProductKey, ticket.Number)
-	ticket.Product = ticket.ProductName
-	if ticket.Product == "" {
-		ticket.Product = ticket.ProductKey
-	}
 	return ticket, nil
 }
 
 func ticketSummarySelect(user User, ticketID int64, filter *TicketSummaryFilter) (string, []any) {
 	role := normalizeGlobalRole(user.Role)
-	email := strings.ToLower(strings.TrimSpace(user.Email))
-	identities := compactIdentityValues(user.DisplayName, email, emailLocalPart(email))
-	if len(identities) == 0 {
-		identities = []string{"\x00"}
-	}
-
 	args := make([]any, 0, 24)
-	identityMatch := func(expression string) string {
-		for _, identity := range identities {
-			args = append(args, identity)
-		}
-		return "lower(trim(" + expression + ")) IN (" + placeholders(len(identities)) + ")"
-	}
-	requesterName := "COALESCE(NULLIF(requester.display_name, ''), NULLIF(i.requester_name, ''), '')"
-	requesterLocal := "CASE WHEN instr(i.requester_email, '@') > 1 THEN substr(i.requester_email, 1, instr(i.requester_email, '@') - 1) ELSE '' END"
-	openedByUser := strings.Join([]string{
-		identityMatch("i.reporter"),
-		identityMatch(requesterName),
-		identityMatch("i.requester_email"),
-		identityMatch(requesterLocal),
-	}, " OR ")
-	args = append(args, user.ID)
-	commentByUser := "c.author_user_id = ? OR (c.author_user_id IS NULL AND " + identityMatch("c.author") + ")"
+	requesterName := "COALESCE(requester.display_name, '')"
+	requesterEmail := "COALESCE(requester.email, '')"
+	openedByUser := "i.requester_user_id = ?"
+	commentByUser := "c.author_user_id = ?"
+	args = append(args, user.ID, user.ID)
 
 	internalComments := "0 = 1"
 	if role == "admin" {
@@ -869,13 +827,13 @@ func ticketSummarySelect(user User, ticketID int64, filter *TicketSummaryFilter)
 	conditions := []string{"1 = 1"}
 	args = append(args, user.ID, user.ID)
 	if role != "admin" {
-		ownTicket := "lower(i.reporter) = ? OR lower(i.requester_email) = ?"
+		ownTicket := "i.requester_user_id = ?"
 		if role == "staff" {
 			conditions = append(conditions, "pm.user_id IS NOT NULL AND (pm.role != 'customer' OR "+ownTicket+")")
 		} else {
 			conditions = append(conditions, "pm.user_id IS NOT NULL AND ("+ownTicket+")")
 		}
-		args = append(args, email, email)
+		args = append(args, user.ID)
 	}
 	if ticketID > 0 {
 		conditions = append(conditions, "i.id = ?")
@@ -886,44 +844,44 @@ func ticketSummarySelect(user User, ticketID int64, filter *TicketSummaryFilter)
 			conditions = append(conditions, "i.product_id = ?")
 			args = append(args, filter.ProductID)
 		}
-		if assignee := strings.TrimSpace(filter.Assignee); assignee != "" && role != "customer" {
-			condition := "i.assignee = ?"
+		if filter.AssigneeUserID > 0 && role != "customer" {
+			condition := "i.assignee_user_id = ?"
 			if role != "admin" {
 				condition = "pm.role != 'customer' AND " + condition
 			}
 			conditions = append(conditions, condition)
-			args = append(args, assignee)
+			args = append(args, filter.AssigneeUserID)
 		}
 		if search := strings.ToLower(strings.TrimSpace(filter.Query)); search != "" {
 			q := "%" + search + "%"
 			searches := []string{
 				"lower(i.title) LIKE ?", "lower(i.description) LIKE ?", "lower(p.key) LIKE ?",
-				"lower(p.name) LIKE ?", "lower(i.reporter) LIKE ?", "lower(" + requesterName + ") LIKE ?",
-				"lower(i.requester_email) LIKE ?",
+				"lower(p.name) LIKE ?", "lower(" + requesterName + ") LIKE ?", "lower(" + requesterEmail + ") LIKE ?",
 			}
 			for range searches {
 				args = append(args, q)
 			}
 			if role != "customer" {
-				assigneeSearch := "lower(i.assignee) LIKE ?"
+				assigneeSearch := "(lower(assigned_user.email) LIKE ? OR lower(assigned_user.display_name) LIKE ?)"
 				if role != "admin" {
 					assigneeSearch = "(pm.role != 'customer' AND " + assigneeSearch + ")"
 				}
 				searches = append(searches, assigneeSearch)
-				args = append(args, q)
+				args = append(args, q, q)
 			}
 			conditions = append(conditions, "("+strings.Join(searches, " OR ")+")")
 		}
 	}
 
 	query := `SELECT i.id, i.product_id, p.key AS product_key, p.name AS product_name,
-		       i.number, i.title, i.status, i.priority, i.assignee, i.reporter,
-		       ` + requesterName + ` AS requester_name, i.requester_email,
+		       i.number, i.title, i.status, i.priority, COALESCE(i.assignee_user_id, 0), COALESCE(assigned_user.email, ''),
+		       COALESCE(i.requester_user_id, 0), ` + requesterName + ` AS requester_name, ` + requesterEmail + ` AS requester_email,
 		       COALESCE(pm.role, '') AS product_role, tr.last_read_at,
 		       ` + unreadCount + ` AS unread_count, i.created_at, i.updated_at
 		FROM tickets i
 		JOIN products p ON p.id = i.product_id
-		LEFT JOIN users requester ON lower(requester.email) = lower(i.reporter)
+		LEFT JOIN users assigned_user ON assigned_user.id = i.assignee_user_id
+		LEFT JOIN users requester ON requester.id = i.requester_user_id
 		LEFT JOIN product_members pm ON pm.product_id = i.product_id AND pm.user_id = ?
 		LEFT JOIN ticket_reads tr ON tr.ticket_id = i.id AND tr.user_id = ?
 		WHERE ` + strings.Join(conditions, " AND ")
@@ -1024,8 +982,8 @@ func scanTicketSummary(row scanner) (TicketSummary, error) {
 	var created, updated string
 	if err := row.Scan(
 		&summary.ID, &summary.ProductID, &summary.ProductKey, &summary.ProductName, &summary.Number,
-		&summary.Title, &summary.Status, &summary.Priority, &summary.Assignee,
-		&summary.Reporter, &summary.RequesterName, &summary.RequesterEmail, &summary.ProductRole,
+		&summary.Title, &summary.Status, &summary.Priority, &summary.AssigneeUserID, &summary.AssigneeEmail,
+		&summary.RequesterUserID, &summary.RequesterName, &summary.RequesterEmail, &summary.ProductRole,
 		&lastRead, &summary.UnreadCount, &created, &updated,
 	); err != nil {
 		return TicketSummary{}, err
@@ -1037,14 +995,6 @@ func scanTicketSummary(row scanner) (TicketSummary, error) {
 	summary.CreatedAt = parseTime(created)
 	summary.UpdatedAt = parseTime(updated)
 	return summary, nil
-}
-
-func emailLocalPart(email string) string {
-	local, _, ok := strings.Cut(strings.TrimSpace(email), "@")
-	if !ok {
-		return ""
-	}
-	return local
 }
 
 func scanAttachment(rows scanner) (Attachment, error) {
@@ -1065,15 +1015,4 @@ func scanAttachment(rows scanner) (Attachment, error) {
 	}
 	attachment.CreatedAt = parseTime(created)
 	return attachment, nil
-}
-
-func publicComments(comments []Comment) []Comment {
-	result := make([]Comment, 0, len(comments))
-	for _, comment := range comments {
-		if comment.Visibility == "" || comment.Visibility == "public" {
-			comment.Visibility = "public"
-			result = append(result, comment)
-		}
-	}
-	return result
 }

@@ -399,6 +399,7 @@ async function loadHealth() {
 async function loadProducts() {
   const payload = await request("/api/products");
   state.products = payload.products || [];
+  state.assignees = payload.assignees || [];
   if (state.ticketProductId && !state.products.some((product) => product.id === state.ticketProductId)) {
     state.ticketProductId = null;
   }
@@ -407,6 +408,7 @@ async function loadProducts() {
     state.productMode = "index";
   }
   renderProductFilter();
+  renderAssigneeFilter();
   renderProductIndex();
   updateProductActions();
   await loadTickets();
@@ -424,7 +426,7 @@ async function loadTickets({ renderDetail = true, resetPage = false, offset = nu
   }
   const params = new URLSearchParams();
   if (state.filters.q) params.set("q", state.filters.q);
-  if (canUseAssigneeFilter() && state.filters.assignee) params.set("assignee", state.filters.assignee);
+  if (canUseAssigneeFilter() && state.filters.assigneeUserId) params.set("assignee_user_id", state.filters.assigneeUserId);
   if (state.filters.unread) params.set("unread", "1");
   for (const status of state.filters.statuses) params.append("status", status);
   if (usesDefaultStatusView()) params.set("include_unread_outside_status", "1");
@@ -570,13 +572,14 @@ function ticketConversationRevision(ticket) {
   return JSON.stringify([
     ticket.id,
     ticket.description || "",
-    ticket.requester || "",
+    ticket.requester_user_id || 0,
     ticket.requester_name || "",
     ticket.requester_email || "",
     ticket.created_at || "",
     attachmentRevision(ticket.attachments),
     (ticket.comments || []).map((comment) => [
       comment.id,
+      comment.author_user_id || 0,
       comment.author || "",
       comment.body || "",
       comment.visibility || "",
@@ -811,15 +814,15 @@ function toggleStatusFilter(status) {
 function renderAssigneeFilter() {
   const section = els.assigneeFilter?.closest(".popover-section");
   if (!canUseAssigneeFilter()) {
-    state.filters.assignee = "";
+    state.filters.assigneeUserId = "";
     if (section) section.hidden = true;
     if (els.assigneeFilter) els.assigneeFilter.replaceChildren(new Option("Anyone", ""));
     renderTicketFilterButton();
     return;
   }
   if (section) section.hidden = false;
-  const current = state.filters.assignee;
-  const options = assigneeOptions(current);
+  const current = state.filters.assigneeUserId;
+  const options = assigneeOptions(state.ticketProductId, current);
   options[0] = { value: "", label: "Anyone" };
   els.assigneeFilter.replaceChildren();
   for (const option of options) {
@@ -867,7 +870,7 @@ function hasActiveTicketFilters() {
   return Boolean(
     state.filters.q ||
     state.ticketProductId ||
-    (canUseAssigneeFilter() && state.filters.assignee) ||
+    (canUseAssigneeFilter() && state.filters.assigneeUserId) ||
     state.filters.unread ||
     state.filters.statusCustomized ||
     !sameStatuses(state.filters.statuses, defaultStatusFilters())
@@ -877,7 +880,7 @@ function hasActiveTicketFilters() {
 function activeTicketFilterCount() {
   let count = 0;
   if (state.ticketProductId) count += 1;
-  if (canUseAssigneeFilter() && state.filters.assignee) count += 1;
+  if (canUseAssigneeFilter() && state.filters.assigneeUserId) count += 1;
   if (state.filters.unread) count += 1;
   if (state.filters.statusCustomized || !sameStatuses(state.filters.statuses, defaultStatusFilters())) count += 1;
   return count;
@@ -911,7 +914,7 @@ function usesDefaultStatusView() {
 
 function clearTicketFilters() {
   state.filters.q = "";
-  state.filters.assignee = "";
+  state.filters.assigneeUserId = "";
   state.filters.statuses = defaultStatusFilters();
   state.filters.statusCustomized = false;
   state.filters.unread = false;
@@ -1028,14 +1031,13 @@ async function toggleTicketSelection(summary) {
 }
 
 function ticketPersonLabel(ticket) {
-  if (ticket.assignee) return accountLabelByEmail(ticket.assignee);
-  return ticket.requester_name || ticket.requester_email || ticket.requester || "Unassigned";
-}
-
-function accountLabelByEmail(email) {
-  const normalized = String(email || "").trim().toLowerCase();
-  const user = state.users.find((candidate) => String(candidate.email || "").trim().toLowerCase() === normalized);
-  return user ? accountName(user) || user.email : email;
+  if (ticket.assignee_user_id) {
+    const assignee = state.assignees.find((candidate) =>
+      candidate.product_id === ticket.product_id && candidate.user_id === ticket.assignee_user_id
+    );
+    return assignee ? accountName(assignee) : ticket.assignee_email || "Unavailable assignee";
+  }
+  return ticket.requester_name || ticket.requester_email || "Unassigned";
 }
 
 function renderSortHeaders() {
@@ -1071,7 +1073,7 @@ function setTicketSortValue(value) {
 function ticketProductParts(ticket) {
   const product = currentProduct(ticket.product_id);
   const key = ticket.product_key || product?.key || "";
-  const name = ticket.product_name || productDisplayName(product) || ticket.product || key || "Product";
+  const name = ticket.product_name || productDisplayName(product) || key || "Product";
   return {
     key,
     name
@@ -1220,7 +1222,7 @@ function ticketSidePanel(ticket, editable) {
 function ticketSideSections(ticket, editable) {
   const sections = [];
   if (editable && !isCustomer()) {
-    sections.push(sideSection("Workflow", workflowEditor(ticket || { assignee: "", priority: "normal", status: "new" })));
+    sections.push(sideSection("Workflow", workflowEditor(ticket || { assignee_user_id: 0, priority: "normal", status: "new" })));
   }
   const requester = requesterBlock(ticket);
   if (requester) {
@@ -1232,7 +1234,7 @@ function ticketSideSections(ticket, editable) {
     factBlock("Created", relativeTime(ticket.created_at)),
     factBlock("Updated", relativeTime(ticket.updated_at))
   ];
-  if (!canEditTicket(ticket) && !isCustomer()) facts.splice(1, 0, factBlock("Assignee", ticket.assignee || "Unassigned"));
+  if (!canEditTicket(ticket) && !isCustomer()) facts.splice(1, 0, factBlock("Assignee", ticket.assignee_email || "Unassigned"));
   sections.push(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
   if (isAdmin()) {
     sections.push(sideSection("Danger zone", ticketDangerActions(ticket)));
@@ -1467,11 +1469,11 @@ function sideSection(title, content) {
 }
 
 function requesterBlock(ticket) {
-  if (!ticket.requester_email && ticket.source !== "portal") return null;
+  if (ticket.source !== "portal") return null;
   const block = el("div", { className: "requester-block" });
   block.append(
     el("strong", {}, ticket.requester_name || "Unknown"),
-    ticket.requester_email ? el("span", {}, ticket.requester_email) : el("span", {}, ticket.requester || "Requester")
+    el("span", {}, ticket.requester_email || "Deleted account")
   );
   return block;
 }
@@ -1929,7 +1931,7 @@ function renderAuditEvents() {
     row.append(
       el("div", { className: "admin-row-main" }, [
         el("strong", {}, labelize(event.action)),
-        el("span", {}, `${event.actor_username || "system"} / ${event.target_type}${event.target_name ? ` / ${event.target_name}` : ""}`)
+        el("span", {}, `${event.actor_email || "system"} / ${event.target_type}${event.target_name ? ` / ${event.target_name}` : ""}`)
       ]),
       el("span", { className: "muted" }, relativeTime(event.created_at))
     );
@@ -1967,7 +1969,7 @@ function workflowEditor(ticket) {
   ];
   controls.push(
     ticketSelectField("Priority", "priority", ticket.priority || "normal", selectOptions(state.meta.priorities), { required: true }),
-    ticketSelectField("Assignee", "assignee", ticket.assignee || "", assigneeOptions(ticket.assignee))
+    ticketSelectField("Assignee", "assignee_user_id", String(ticket.assignee_user_id || ""), assigneeOptions(ticket.product_id, ticket.assignee_user_id))
   );
   const controlList = el("div", { className: "detail-controls" }, controls);
   return el("div", { className: "workflow-editor" }, [controlList]);
@@ -2040,10 +2042,6 @@ function ticketCreatePayload(data, fallbackProductId) {
     product_id: Number(data.product_id || fallbackProductId),
     title: String(data.title || "").trim()
   };
-  if (!isCustomer()) {
-    const assignee = String(data.assignee || "").trim();
-    if (assignee) payload.assignee = assignee;
-  }
   return payload;
 }
 
@@ -2076,9 +2074,9 @@ function ticketUpdatePatch(ticket, data) {
     const priority = String(data.priority || "").trim();
     if (priority && priority !== ticket.priority) patch.priority = priority;
   }
-  if (hasFormValue(data, "assignee")) {
-    const assignee = String(data.assignee || "").trim();
-    if (assignee !== (ticket.assignee || "")) patch.assignee = assignee;
+  if (hasFormValue(data, "assignee_user_id")) {
+    const assigneeUserId = Number(data.assignee_user_id || 0);
+    if (assigneeUserId !== Number(ticket.assignee_user_id || 0)) patch.assignee_user_id = assigneeUserId;
   }
   return patch;
 }
@@ -2099,22 +2097,22 @@ function ticketCommentPayload(ticket, data) {
 function bindTicketAutosave(form, ticket) {
   let currentTicket = ticket;
   let saveQueue = Promise.resolve();
-  const controls = Array.from(form.querySelectorAll("[name='title'], [name='status'], [name='priority'], [name='assignee']"));
+  const controls = Array.from(form.querySelectorAll("[name='title'], [name='status'], [name='priority'], [name='assignee_user_id']"));
   const save = () => {
     saveQueue = saveQueue.then(async () => {
       const data = Object.fromEntries(new FormData(form).entries());
       const patch = ticketUpdatePatch(currentTicket, data);
       if (Object.keys(patch).length === 0) return;
       const statusChanged = hasFormValue(patch, "status");
-      const assigneeChanged = hasFormValue(patch, "assignee");
+      const assigneeChanged = hasFormValue(patch, "assignee_user_id");
       try {
         const updated = await saveTicketPatch(currentTicket, patch);
         currentTicket = updated;
         if (statusChanged && updated.status && !state.filters.statuses.includes(updated.status)) {
           state.filters.statuses = [...state.filters.statuses, updated.status];
         }
-        if (assigneeChanged && state.filters.assignee && updated.assignee !== state.filters.assignee) {
-          state.filters.assignee = "";
+        if (assigneeChanged && state.filters.assigneeUserId && String(updated.assignee_user_id || "") !== state.filters.assigneeUserId) {
+          state.filters.assigneeUserId = "";
           renderAssigneeFilter();
         }
         if (statusChanged || assigneeChanged) {
@@ -2282,21 +2280,22 @@ function updateTicketCreateStep(step, { enabled, active, complete }) {
   });
 }
 
-function assigneeOptions(current = "") {
+function assigneeOptions(productID = null, current = 0) {
   const options = [{ value: "", label: "Unassigned" }];
   const seen = new Set([""]);
-  for (const user of state.users) {
-    if (user.disabled || !["admin", "staff"].includes(user.role)) continue;
-    const email = String(user.email || "").trim();
-    if (!email || seen.has(email.toLowerCase())) continue;
-    seen.add(email.toLowerCase());
+  for (const member of state.assignees) {
+    if (productID && member.product_id !== productID) continue;
+    const userID = String(member.user_id || "");
+    if (!userID || seen.has(userID)) continue;
+    seen.add(userID);
     options.push({
-      value: email,
-      label: accountLabel(user)
+      value: userID,
+      label: accountLabel(member)
     });
   }
-  if (current && !seen.has(current)) {
-    options.push({ value: current, label: `${current} / current` });
+  const currentID = String(current || "");
+  if (currentID && !seen.has(currentID)) {
+    options.push({ value: currentID, label: "Unavailable assignee" });
   }
   return options;
 }
@@ -2335,7 +2334,7 @@ function comments(ticket) {
 }
 
 function conversationMessages(ticket) {
-  const opener = ticket.requester_name || ticket.requester || "Requester";
+  const opener = ticket.requester_name || ticket.requester_email || "Deleted account";
   const messages = [{
     author: opener,
     avatar: initials(opener),
@@ -2344,7 +2343,7 @@ function conversationMessages(ticket) {
     visibility: "public",
     attachments: ticket.attachments || [],
     createdAt: ticket.created_at,
-    side: isCurrentUserMessage(ticket, { author: opener, opening: true }) ? "current" : "other",
+    side: isCurrentUserMessage(ticket, { opening: true }) ? "current" : "other",
     className: "opening-message"
   }];
   for (const comment of ticket.comments || []) {
@@ -2401,30 +2400,8 @@ function initials(value) {
 }
 
 function isCurrentUserMessage(ticket, entry) {
-  const currentValues = currentUserAuthorValues();
-  const author = normalizeAuthor(entry.author);
-  if (author && currentValues.includes(author)) return true;
-  if (!entry.opening) return false;
-  const requesterValues = [
-    ticket.requester,
-    ticket.requester_name,
-    ticket.requester_email,
-    String(ticket.requester_email || "").split("@")[0]
-  ].map(normalizeAuthor).filter(Boolean);
-  return requesterValues.some((value) => currentValues.includes(value));
-}
-
-function currentUserAuthorValues() {
-  const email = state.user?.email || "";
-  return [
-    state.user?.display_name,
-    email,
-    String(email).split("@")[0]
-  ].map(normalizeAuthor).filter(Boolean);
-}
-
-function normalizeAuthor(value) {
-  return String(value || "").trim().toLowerCase();
+  const userID = Number(state.user?.id || 0);
+  return userID > 0 && userID === Number(entry.opening ? ticket.requester_user_id : entry.author_user_id);
 }
 
 function commentComposer(ticket) {
@@ -2519,12 +2496,12 @@ function svgPath(d, attrs = {}) {
 
 async function updateUser(id, patch) {
   await request(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-  await loadUsers();
+  await Promise.all([loadUsers(), loadProducts()]);
 }
 
 async function deleteUser(id) {
   await request(`/api/users/${id}`, { method: "DELETE" });
-  await loadUsers();
+  await Promise.all([loadUsers(), loadProducts()]);
 }
 
 async function deleteToken(id) {
@@ -3256,11 +3233,12 @@ function bindEvents() {
     state.ticketProductId = Number(els.productFilter.value) || null;
     setSelectedTicket(null);
     renderProductFilter();
+    renderAssigneeFilter();
     updateProductActions();
     await loadTickets({ resetPage: true });
   });
   els.assigneeFilter.addEventListener("change", () => {
-    state.filters.assignee = els.assigneeFilter.value.trim();
+    state.filters.assigneeUserId = els.assigneeFilter.value.trim();
     renderTicketFilterButton();
     loadTickets({ resetPage: true }).catch(showError);
   });
@@ -3417,18 +3395,6 @@ async function openProductDetail(productId, section = DEFAULT_PRODUCT_SECTION) {
   state.productSection = validProductSection(section) ? section : DEFAULT_PRODUCT_SECTION;
   switchView("product", { load: false });
   await loadProductAdmin();
-}
-
-async function refreshCurrent() {
-  if (state.view === "admin") {
-    await loadAdmin();
-    return;
-  }
-  if (state.view === "product") {
-    await loadProductAdmin();
-    return;
-  }
-  await loadProducts();
 }
 
 function currentProduct(productId) {

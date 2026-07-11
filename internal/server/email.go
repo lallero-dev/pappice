@@ -9,17 +9,19 @@ import (
 	"pappice/internal/store"
 )
 
-func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, actor store.User, sendAfter time.Time) []store.CreateEmailNotification {
+func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, actor store.EventActor, sendAfter time.Time) ([]store.CreateEmailNotification, error) {
 	if !s.options.EmailNotifications {
-		return nil
+		return nil, nil
 	}
 	sendAfter = normalizeNotificationSendAfter(sendAfter)
-	recipients := s.store.TicketEmailRecipients(event, ticket, actor)
-	if len(recipients) == 0 {
-		return nil
+	recipients, err := s.store.TicketEmailRecipients(event, ticket, actor.UserID)
+	if err != nil {
+		return nil, err
 	}
-	product, _ := s.store.GetProduct(ticket.ProductID)
-	subject, textBody, htmlBody := s.ticketEmailContent(event, product, ticket, actor)
+	if len(recipients) == 0 {
+		return nil, nil
+	}
+	subject, textBody, htmlBody := s.ticketEmailContent(event, ticket, actor)
 	inputs := make([]store.CreateEmailNotification, 0, len(recipients))
 	for _, recipient := range recipients {
 		inputs = append(inputs, store.CreateEmailNotification{
@@ -36,11 +38,11 @@ func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, act
 			Coalesce:       true,
 		})
 	}
-	return inputs
+	return inputs, nil
 }
 
 func (s *Server) requesterEmailNotifications(event string, ticket store.Ticket, actorName string, sendAfter time.Time) []store.CreateEmailNotification {
-	if !s.options.EmailNotifications || strings.TrimSpace(ticket.RequesterEmail) == "" || strings.TrimSpace(ticket.CustomerToken) == "" {
+	if !s.options.EmailNotifications || ticket.Source != "portal" || ticket.RequesterUserID == 0 || strings.TrimSpace(ticket.RequesterEmail) == "" {
 		return nil
 	}
 	sendAfter = normalizeNotificationSendAfter(sendAfter)
@@ -48,7 +50,7 @@ func (s *Server) requesterEmailNotifications(event string, ticket store.Ticket, 
 	return []store.CreateEmailNotification{{
 		ProductID:      ticket.ProductID,
 		TicketID:       ticket.ID,
-		UserID:         0,
+		UserID:         ticket.RequesterUserID,
 		RecipientEmail: ticket.RequesterEmail,
 		RecipientName:  defaultString(ticket.RequesterName, ticket.RequesterEmail),
 		Event:          event,
@@ -152,12 +154,11 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
 
-func (s *Server) ticketEmailContent(event string, product store.Product, ticket store.Ticket, actor store.User) (string, string, string) {
+func (s *Server) ticketEmailContent(event string, ticket store.Ticket, actor store.EventActor) (string, string, string) {
 	actorName := defaultString(actor.DisplayName, actor.Email)
 	action := ticketEventAction(event)
 	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, ticketEmailSubjectAction(event), ticket.Title)
-	productLabel := defaultString(product.Name, ticket.ProductName)
-	productLabel = defaultString(productLabel, ticket.ProductKey)
+	productLabel := defaultString(ticket.ProductName, ticket.ProductKey)
 	link := strings.TrimRight(s.options.PublicURL, "/")
 	if link != "" {
 		link += "/"
@@ -168,8 +169,8 @@ func (s *Server) ticketEmailContent(event string, product store.Product, ticket 
 		{Label: "Product", Value: productLabel},
 		{Label: "Status", Value: ticket.Status},
 		{Label: "Priority", Value: ticket.Priority},
-		{Label: "Assignee", Value: ticket.Assignee},
-		{Label: "Requester", Value: ticket.Reporter},
+		{Label: "Assignee", Value: ticket.AssigneeEmail},
+		{Label: "Requester", Value: defaultString(ticket.RequesterName, ticket.RequesterEmail)},
 	}
 	blocks := make([]emailBlock, 0, 2)
 	if desc := strings.TrimSpace(ticket.Description); desc != "" {

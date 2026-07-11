@@ -31,6 +31,7 @@ export const state = {
     offset: 0,
     hasMore: false
   },
+  assignees: [],
   products: [],
   users: [],
   members: [],
@@ -82,7 +83,7 @@ export const state = {
   filters: {
     q: "",
     statuses: [...DEFAULT_TICKET_STATUSES],
-    assignee: "",
+    assigneeUserId: "",
     statusCustomized: false,
     unread: false
   },

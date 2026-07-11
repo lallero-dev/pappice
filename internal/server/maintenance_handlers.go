@@ -16,6 +16,11 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	emailStats, err := s.store.EmailNotificationStats()
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"version":                        s.options.Version,
 		"started_at":                     s.started,
@@ -28,7 +33,7 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 			"enabled":                    s.options.EmailNotifications,
 			"public_url":                 strings.TrimSpace(s.options.PublicURL),
 			"notification_delay_seconds": int(s.options.NotificationDelay.Seconds()),
-			"stats":                      s.store.EmailNotificationStats(),
+			"stats":                      emailStats,
 		},
 	})
 }

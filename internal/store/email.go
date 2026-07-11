@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-func (s *Store) TicketEmailRecipients(event string, ticket Ticket, actor User) []EmailRecipient {
+func (s *Store) TicketEmailRecipients(event string, ticket Ticket, actorUserID int64) ([]EmailRecipient, error) {
 	recipients := make(map[int64]EmailRecipient)
 	add := func(recipient EmailRecipient) {
-		if recipient.UserID == 0 || recipient.UserID == actor.ID || strings.TrimSpace(recipient.Email) == "" {
+		if recipient.UserID == 0 || recipient.UserID == actorUserID || strings.TrimSpace(recipient.Email) == "" {
 			return
 		}
 		if recipient.Role == "customer" {
@@ -19,22 +19,37 @@ func (s *Store) TicketEmailRecipients(event string, ticket Ticket, actor User) [
 		}
 		recipients[recipient.UserID] = recipient
 	}
+	addUser := func(userID int64) error {
+		recipient, err := s.emailRecipientByUserID(userID)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		add(recipient)
+		return nil
+	}
 
 	switch event {
 	case "ticket.created":
-		for _, recipient := range s.productManagerEmailRecipients(ticket.ProductID) {
+		managers, err := s.productManagerEmailRecipients(ticket.ProductID)
+		if err != nil {
+			return nil, err
+		}
+		for _, recipient := range managers {
 			add(recipient)
 		}
 	case "ticket.updated", "ticket.commented":
-		if recipient, ok := s.emailRecipientByIdentity(ticket.Reporter); ok {
-			add(recipient)
+		if err := addUser(ticket.RequesterUserID); err != nil {
+			return nil, err
 		}
-		if recipient, ok := s.emailRecipientByIdentity(ticket.Assignee); ok {
-			add(recipient)
+		if err := addUser(ticket.AssigneeUserID); err != nil {
+			return nil, err
 		}
 	case "ticket.assigned":
-		if recipient, ok := s.emailRecipientByIdentity(ticket.Assignee); ok {
-			add(recipient)
+		if err := addUser(ticket.AssigneeUserID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -42,7 +57,7 @@ func (s *Store) TicketEmailRecipients(event string, ticket Ticket, actor User) [
 	for _, recipient := range recipients {
 		result = append(result, recipient)
 	}
-	return result
+	return result, nil
 }
 
 func (s *Store) EnqueueEmailNotifications(inputs []CreateEmailNotification) ([]EmailNotification, error) {
@@ -119,6 +134,9 @@ func enqueueEmailNotificationsTx(tx *sql.Tx, inputs []CreateEmailNotification, n
 			NextAttemptAt:  now,
 			CreatedAt:      now,
 		}
+		if input.Coalesce && notification.UserID < 1 {
+			return nil, fmt.Errorf("%w: user_id is required to coalesce email notifications", ErrValidation)
+		}
 		if notification.RecipientName == "" {
 			notification.RecipientName = email
 		}
@@ -139,10 +157,10 @@ func enqueueEmailNotificationsTx(tx *sql.Tx, inputs []CreateEmailNotification, n
 			if ok {
 				_, err := tx.Exec(`
 					UPDATE email_notifications
-					SET event = ?, subject = ?, body_text = ?, body_html = ?, status = 'pending',
+					SET recipient_email = ?, recipient_name = ?, event = ?, subject = ?, body_text = ?, body_html = ?, status = 'pending',
 					    attempts = 0, next_attempt_at = ?, locked_until = NULL, last_error = ''
 					WHERE id = ?`,
-					notification.Event, notification.Subject, notification.BodyText, notification.BodyHTML,
+					notification.RecipientEmail, notification.RecipientName, notification.Event, notification.Subject, notification.BodyText, notification.BodyHTML,
 					formatTime(notification.NextAttemptAt), existingID,
 				)
 				if err != nil {
@@ -169,7 +187,10 @@ func enqueueEmailNotificationsTx(tx *sql.Tx, inputs []CreateEmailNotification, n
 		if err != nil {
 			return nil, normalizeSQLError(err)
 		}
-		notification.ID, _ = result.LastInsertId()
+		notification.ID, err = insertedID(result)
+		if err != nil {
+			return nil, err
+		}
 		created = append(created, notification)
 	}
 	return created, nil
@@ -228,7 +249,11 @@ func (s *Store) ClaimEmailNotifications(limit int, leaseFor time.Duration) ([]Em
 		if err != nil {
 			return nil, err
 		}
-		if changed, _ := result.RowsAffected(); changed == 0 {
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if changed == 0 {
 			continue
 		}
 		notification, err := getEmailNotificationTx(tx, id)
@@ -254,10 +279,7 @@ func (s *Store) MarkEmailSent(id int64) error {
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return requireChangedRow(result)
 }
 
 func (s *Store) MarkEmailFailed(id int64, sendErr error, maxAttempts int) error {
@@ -290,10 +312,7 @@ func (s *Store) MarkEmailFailed(id int64, sendErr error, maxAttempts int) error 
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return requireChangedRow(result)
 }
 
 func (s *Store) GetEmailNotification(id int64) (EmailNotification, error) {
@@ -309,15 +328,18 @@ func (s *Store) GetEmailNotification(id int64) (EmailNotification, error) {
 	return notification, err
 }
 
-func (s *Store) ListEmailNotifications(limit int) []EmailNotification {
-	return s.ListEmailNotificationsPage(EmailNotificationFilter{Limit: limit}).Notifications
+func (s *Store) ListEmailNotifications(limit int) ([]EmailNotification, error) {
+	page, err := s.ListEmailNotificationsPage(EmailNotificationFilter{Limit: limit})
+	return page.Notifications, err
 }
 
-func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) EmailNotificationPage {
+func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) (EmailNotificationPage, error) {
 	limit, offset := normalizePage(filter.Limit, filter.Offset, 25, 100)
 	where, args := emailNotificationWhere(filter)
 	page := EmailNotificationPage{Limit: limit, Offset: offset}
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM email_notifications `+where, args...).Scan(&page.Total)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM email_notifications `+where, args...).Scan(&page.Total); err != nil {
+		return EmailNotificationPage{}, err
+	}
 
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit, offset)
@@ -329,18 +351,19 @@ func (s *Store) ListEmailNotificationsPage(filter EmailNotificationFilter) Email
 		ORDER BY created_at DESC, id DESC
 		LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
-		return page
+		return EmailNotificationPage{}, err
 	}
 	defer rows.Close()
 
 	page.Notifications = make([]EmailNotification, 0, limit)
 	for rows.Next() {
 		notification, err := scanEmailNotification(rows)
-		if err == nil {
-			page.Notifications = append(page.Notifications, notification)
+		if err != nil {
+			return EmailNotificationPage{}, err
 		}
+		page.Notifications = append(page.Notifications, notification)
 	}
-	return page
+	return page, rows.Err()
 }
 
 func emailNotificationWhere(filter EmailNotificationFilter) (string, []any) {
@@ -363,18 +386,18 @@ func emailNotificationWhere(filter EmailNotificationFilter) (string, []any) {
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
 
-func (s *Store) EmailNotificationStats() EmailNotificationStats {
+func (s *Store) EmailNotificationStats() (EmailNotificationStats, error) {
 	var stats EmailNotificationStats
 	rows, err := s.db.Query(`SELECT status, count(*) FROM email_notifications GROUP BY status`)
 	if err != nil {
-		return stats
+		return EmailNotificationStats{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var status string
 		var count int
 		if err := rows.Scan(&status, &count); err != nil {
-			continue
+			return EmailNotificationStats{}, err
 		}
 		stats.Total += count
 		switch status {
@@ -388,18 +411,25 @@ func (s *Store) EmailNotificationStats() EmailNotificationStats {
 			stats.Failed = count
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return EmailNotificationStats{}, err
+	}
 	var sentAt sql.NullString
 	var lastError sql.NullString
-	_ = s.db.QueryRow(`SELECT sent_at FROM email_notifications WHERE sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1`).Scan(&sentAt)
+	if err := s.db.QueryRow(`SELECT sent_at FROM email_notifications WHERE sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1`).Scan(&sentAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return EmailNotificationStats{}, err
+	}
 	if sentAt.Valid {
 		parsed := parseTime(sentAt.String)
 		stats.LastSentAt = &parsed
 	}
-	_ = s.db.QueryRow(`SELECT last_error FROM email_notifications WHERE last_error <> '' ORDER BY created_at DESC LIMIT 1`).Scan(&lastError)
+	if err := s.db.QueryRow(`SELECT last_error FROM email_notifications WHERE last_error <> '' ORDER BY created_at DESC LIMIT 1`).Scan(&lastError); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return EmailNotificationStats{}, err
+	}
 	if lastError.Valid {
 		stats.LastError = lastError.String
 	}
-	return stats
+	return stats, nil
 }
 
 func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNotification, error) {
@@ -421,8 +451,8 @@ func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNo
 	if err != nil {
 		return EmailNotification{}, err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return EmailNotification{}, ErrNotFound
+	if err := requireChangedRow(result); err != nil {
+		return EmailNotification{}, err
 	}
 	notification, err := getEmailNotificationTx(tx, id)
 	if err != nil {
@@ -437,7 +467,7 @@ func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNo
 	return notification, nil
 }
 
-func (s *Store) productManagerEmailRecipients(productID int64) []EmailRecipient {
+func (s *Store) productManagerEmailRecipients(productID int64) ([]EmailRecipient, error) {
 	rows, err := s.db.Query(`
 		SELECT DISTINCT u.id, u.display_name, u.email, u.role
 		FROM users u
@@ -448,34 +478,34 @@ func (s *Store) productManagerEmailRecipients(productID int64) []EmailRecipient 
 		  AND (u.role = 'admin' OR pm.role = 'manager')
 		ORDER BY u.email`, productID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
 	recipients := make([]EmailRecipient, 0)
 	for rows.Next() {
 		recipient, err := scanEmailRecipient(rows)
-		if err == nil {
-			recipients = append(recipients, recipient)
+		if err != nil {
+			return nil, err
 		}
+		recipients = append(recipients, recipient)
 	}
-	return recipients
+	return recipients, rows.Err()
 }
 
-func (s *Store) emailRecipientByIdentity(identity string) (EmailRecipient, bool) {
-	identity = strings.ToLower(strings.TrimSpace(identity))
-	if identity == "" {
-		return EmailRecipient{}, false
+func (s *Store) emailRecipientByUserID(userID int64) (EmailRecipient, error) {
+	if userID == 0 {
+		return EmailRecipient{}, ErrNotFound
 	}
 	row := s.db.QueryRow(`
 		SELECT id, display_name, email, role
 		FROM users
-		WHERE lower(email) = ?
-		  AND disabled = 0
-		  AND email IS NOT NULL
-		  AND trim(email) <> ''`, identity)
+		WHERE id = ? AND disabled = 0 AND trim(email) <> ''`, userID)
 	recipient, err := scanEmailRecipient(row)
-	return recipient, err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return EmailRecipient{}, ErrNotFound
+	}
+	return recipient, err
 }
 
 func scanEmailRecipient(rows scanner) (EmailRecipient, error) {
@@ -486,6 +516,13 @@ func scanEmailRecipient(rows scanner) (EmailRecipient, error) {
 	return recipient, nil
 }
 
+func cancelPendingUserEmailsTx(tx *sql.Tx, userID int64) error {
+	_, err := tx.Exec(`
+		DELETE FROM email_notifications
+		WHERE user_id = ? AND status = 'pending'`, userID)
+	return err
+}
+
 func pendingEmailNotificationIDTx(tx *sql.Tx, notification EmailNotification) (int64, bool, error) {
 	var row *sql.Row
 	if notification.TicketID > 0 {
@@ -494,19 +531,19 @@ func pendingEmailNotificationIDTx(tx *sql.Tx, notification EmailNotification) (i
 			FROM email_notifications
 			WHERE status = 'pending'
 			  AND ticket_id = ?
-			  AND lower(recipient_email) = lower(?)
+			  AND user_id = ?
 			ORDER BY created_at DESC
-			LIMIT 1`, notification.TicketID, notification.RecipientEmail)
+			LIMIT 1`, notification.TicketID, notification.UserID)
 	} else {
 		row = tx.QueryRow(`
 			SELECT id
 			FROM email_notifications
 			WHERE status = 'pending'
 			  AND ticket_id IS NULL
-			  AND lower(recipient_email) = lower(?)
+			  AND user_id = ?
 			  AND event = ?
 			ORDER BY created_at DESC
-			LIMIT 1`, notification.RecipientEmail, notification.Event)
+			LIMIT 1`, notification.UserID, notification.Event)
 	}
 	var id int64
 	if err := row.Scan(&id); err != nil {

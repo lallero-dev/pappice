@@ -72,9 +72,7 @@ func (s *Store) CreateUser(input CreateUser) (User, error) {
 		return User{}, err
 	}
 	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Email, map[string]any{
-		"role":            user.Role,
-		"email":           user.Email != "",
-		"email_requested": false,
+		"role": user.Role,
 	}, nil); err != nil {
 		return User{}, err
 	}
@@ -99,10 +97,9 @@ func (s *Store) CreateUserWithSetupLink(input CreateUser, expiresFor time.Durati
 		return User{}, AccountLink{}, "", err
 	}
 	if err := insertAppEventTx(tx, time.Now().UTC(), input.Event, "user.created", "user", user.ID, user.Email, map[string]any{
-		"role":            user.Role,
-		"email":           user.Email != "",
-		"email_requested": AccountLinkEmailRequested(user, token),
-	}, accountLinkEventPayload("account.setup", user, token, link.ExpiresAt)); err != nil {
+		"role":       user.Role,
+		"setup_link": true,
+	}, accountLinkEventPayload(user, token, link.ExpiresAt)); err != nil {
 		return User{}, AccountLink{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -111,21 +108,22 @@ func (s *Store) CreateUserWithSetupLink(input CreateUser, expiresFor time.Durati
 	return publicUserCopy(user), link, token, nil
 }
 
-func (s *Store) ListUsers() []User {
+func (s *Store) ListUsers() ([]User, error) {
 	rows, err := s.db.Query(`SELECT id, display_name, email, role, disabled, password_reset_required, created_at, updated_at FROM users ORDER BY email, display_name`)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
 	var users []User
 	for rows.Next() {
 		user, err := scanUser(rows)
-		if err == nil {
-			users = append(users, user)
+		if err != nil {
+			return nil, err
 		}
+		users = append(users, user)
 	}
-	return users
+	return users, rows.Err()
 }
 
 func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
@@ -140,8 +138,7 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 		return User{}, err
 	}
 	before := user
-	oldRole := user.Role
-	oldDisabled := user.Disabled
+	wasActiveAdmin := user.Role == "admin" && !user.Disabled
 
 	if patch.DisplayName != nil {
 		user.DisplayName = defaultString(*patch.DisplayName, user.Email)
@@ -180,18 +177,20 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	); err != nil {
 		return User{}, normalizeSQLError(err)
 	}
-	if patch.Email != nil && before.Email != user.Email {
-		if err := updateUserIdentityReferencesTx(tx, before, user.Email); err != nil {
-			return User{}, err
-		}
-	}
 	if patch.Password != nil {
 		if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, user.ID); err != nil {
 			return User{}, err
 		}
 	}
-	if (oldRole == "admin" || !oldDisabled) && !hasActiveAdminTx(tx) {
-		return User{}, fmt.Errorf("%w: at least one active admin is required", ErrValidation)
+	if user.Disabled && !before.Disabled {
+		if err := cancelPendingUserEmailsTx(tx, user.ID); err != nil {
+			return User{}, err
+		}
+	}
+	if wasActiveAdmin && (user.Role != "admin" || user.Disabled) {
+		if err := requireActiveAdminTx(tx); err != nil {
+			return User{}, err
+		}
 	}
 	if err := insertAppEventTx(tx, time.Now().UTC(), patch.Event, "user.updated", "user", user.ID, user.Email, userPatchEventDetails(before, user, patch), nil); err != nil {
 		return User{}, err
@@ -213,11 +212,16 @@ func (s *Store) DeleteUser(id int64, event ...EventContext) error {
 	if err != nil {
 		return err
 	}
+	if err := cancelPendingUserEmailsTx(tx, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE id = ?`, id); err != nil {
 		return err
 	}
-	if user.Role == "admin" && !hasActiveAdminTx(tx) {
-		return fmt.Errorf("%w: at least one active admin is required", ErrValidation)
+	if user.Role == "admin" && !user.Disabled {
+		if err := requireActiveAdminTx(tx); err != nil {
+			return err
+		}
 	}
 	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "user.deleted", "user", user.ID, user.Email, map[string]any{"role": user.Role}, nil); err != nil {
 		return err
@@ -411,9 +415,7 @@ func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration, 
 	}
 	user.PasswordResetRequired = true
 	user.UpdatedAt = now
-	if err := insertAppEventTx(tx, now, firstEventContext(event), "user.password_reset_requested", "user", user.ID, user.Email, map[string]any{
-		"email_requested": AccountLinkEmailRequested(user, token),
-	}, accountLinkEventPayload("account.reset", user, token, link.ExpiresAt)); err != nil {
+	if err := insertAppEventTx(tx, now, firstEventContext(event), "user.password_reset_requested", "user", user.ID, user.Email, nil, accountLinkEventPayload(user, token, link.ExpiresAt)); err != nil {
 		return User{}, AccountLink{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -530,7 +532,10 @@ func (s *Store) CreateAPIToken(userID int64, input CreateAPIToken) (PublicAPITok
 	if err != nil {
 		return PublicAPIToken{}, "", err
 	}
-	id, _ := result.LastInsertId()
+	id, err := insertedID(result)
+	if err != nil {
+		return PublicAPIToken{}, "", err
+	}
 	apiToken := APIToken{
 		ID:        id,
 		UserID:    userID,
@@ -548,13 +553,13 @@ func (s *Store) CreateAPIToken(userID int64, input CreateAPIToken) (PublicAPITok
 	return publicAPIToken(apiToken), token, nil
 }
 
-func (s *Store) ListAPITokens(userID int64) []PublicAPIToken {
+func (s *Store) ListAPITokens(userID int64) ([]PublicAPIToken, error) {
 	rows, err := s.db.Query(
 		`SELECT id, user_id, name, prefix, created_at, last_used_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC`,
 		userID,
 	)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -563,13 +568,14 @@ func (s *Store) ListAPITokens(userID int64) []PublicAPIToken {
 		var token PublicAPIToken
 		var created string
 		var last sql.NullString
-		if err := rows.Scan(&token.ID, &token.UserID, &token.Name, &token.Prefix, &created, &last); err == nil {
-			token.CreatedAt = parseTime(created)
-			token.LastUsedAt = parseNullTime(last)
-			tokens = append(tokens, token)
+		if err := rows.Scan(&token.ID, &token.UserID, &token.Name, &token.Prefix, &created, &last); err != nil {
+			return nil, err
 		}
+		token.CreatedAt = parseTime(created)
+		token.LastUsedAt = parseNullTime(last)
+		tokens = append(tokens, token)
 	}
-	return tokens
+	return tokens, rows.Err()
 }
 
 func (s *Store) DeleteAPIToken(userID, tokenID int64, event ...EventContext) error {
@@ -584,8 +590,8 @@ func (s *Store) DeleteAPIToken(userID, tokenID int64, event ...EventContext) err
 	if err != nil {
 		return err
 	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrNotFound
+	if err := requireChangedRow(result); err != nil {
+		return err
 	}
 	if strings.TrimSpace(targetName) == "" {
 		targetName = fmt.Sprintf("%d", tokenID)
@@ -633,25 +639,7 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 }
 
 func (s *Store) GetUser(id int64) (User, error) {
-	row := s.db.QueryRow(`SELECT id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE id = ?`, id)
-	var user User
-	var disabled int
-	var resetRequired int
-	var email sql.NullString
-	var created, updated string
-	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, ErrNotFound
-		}
-		return User{}, err
-	}
-	user.Email = nullString(email)
-	user.Role = normalizeGlobalRole(user.Role)
-	user.Disabled = disabled != 0
-	user.PasswordResetRequired = resetRequired != 0
-	user.CreatedAt = parseTime(created)
-	user.UpdatedAt = parseTime(updated)
-	return user, nil
+	return scanStoredUser(s.db.QueryRow(userSelectSQL+` WHERE id = ?`, id))
 }
 
 func createUserTx(tx *sql.Tx, input CreateUser) (User, error) {
@@ -708,7 +696,10 @@ func insertUserTx(tx *sql.Tx, displayName, email, role, hash string, passwordRes
 	if err != nil {
 		return User{}, normalizeSQLError(err)
 	}
-	id, _ := result.LastInsertId()
+	id, err := insertedID(result)
+	if err != nil {
+		return User{}, err
+	}
 	return User{
 		ID:                    id,
 		DisplayName:           displayName,
@@ -742,44 +733,6 @@ func userPatchEventDetails(before, after User, patch UpdateUser) map[string]any 
 	return details
 }
 
-func updateUserIdentityReferencesTx(tx *sql.Tx, before User, email string) error {
-	oldValues := compactIdentityValues(before.Email)
-	if len(oldValues) == 0 {
-		return nil
-	}
-	for _, value := range oldValues {
-		if _, err := tx.Exec(`UPDATE tickets SET assignee = ? WHERE lower(assignee) = ?`, email, value); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`UPDATE tickets SET reporter = ? WHERE lower(reporter) = ?`, email, value); err != nil {
-			return err
-		}
-	}
-	if before.Email != "" {
-		if _, err := tx.Exec(`UPDATE tickets SET requester_email = ? WHERE lower(requester_email) = ?`, email, strings.ToLower(before.Email)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func compactIdentityValues(values ...string) []string {
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.ToLower(strings.TrimSpace(value))
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
-}
-
 func createAccountLinkTx(tx *sql.Tx, userID int64, purpose string, expiresFor time.Duration) (AccountLink, string, error) {
 	purpose = strings.TrimSpace(purpose)
 	if !isValid(validAccountLinkPurposes, purpose) {
@@ -806,7 +759,10 @@ func createAccountLinkTx(tx *sql.Tx, userID int64, purpose string, expiresFor ti
 	if err != nil {
 		return AccountLink{}, "", normalizeSQLError(err)
 	}
-	id, _ := result.LastInsertId()
+	id, err := insertedID(result)
+	if err != nil {
+		return AccountLink{}, "", err
+	}
 	return AccountLink{
 		ID:        id,
 		UserID:    userID,
@@ -877,7 +833,14 @@ func accountLinkByTokenTx(tx *sql.Tx, token string) (AccountLink, User, error) {
 }
 
 func getUserTx(tx *sql.Tx, id int64) (User, error) {
-	row := tx.QueryRow(`SELECT id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE id = ?`, id)
+	return scanStoredUser(tx.QueryRow(userSelectSQL+` WHERE id = ?`, id))
+}
+
+const userSelectSQL = `
+	SELECT id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at
+	FROM users`
+
+func scanStoredUser(row scanner) (User, error) {
 	var user User
 	var disabled int
 	var resetRequired int
@@ -916,33 +879,22 @@ func scanUser(rows scanner) (User, error) {
 	return user, nil
 }
 
-func hasActiveAdminTx(tx *sql.Tx) bool {
+func requireActiveAdminTx(tx *sql.Tx) error {
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0`).Scan(&count); err != nil {
-		return false
+		return err
 	}
-	return count > 0
+	if count == 0 {
+		return fmt.Errorf("%w: at least one active admin is required", ErrValidation)
+	}
+	return nil
 }
 
 func (s *Store) userByEmail(address string, includeHash bool) (User, error) {
-	row := s.db.QueryRow(`SELECT id, display_name, email, role, password_hash, disabled, password_reset_required, created_at, updated_at FROM users WHERE lower(email) = ?`, strings.ToLower(strings.TrimSpace(address)))
-	var user User
-	var disabled int
-	var resetRequired int
-	var emailValue sql.NullString
-	var created, updated string
-	if err := row.Scan(&user.ID, &user.DisplayName, &emailValue, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, ErrNotFound
-		}
+	user, err := scanStoredUser(s.db.QueryRow(userSelectSQL+` WHERE lower(email) = ?`, strings.ToLower(strings.TrimSpace(address))))
+	if err != nil {
 		return User{}, err
 	}
-	user.Email = nullString(emailValue)
-	user.Role = normalizeGlobalRole(user.Role)
-	user.Disabled = disabled != 0
-	user.PasswordResetRequired = resetRequired != 0
-	user.CreatedAt = parseTime(created)
-	user.UpdatedAt = parseTime(updated)
 	if !includeHash {
 		user.PasswordHash = ""
 	}

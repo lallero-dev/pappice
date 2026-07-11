@@ -559,8 +559,8 @@ func TestProductMemberRemovalAPI(t *testing.T) {
 		"role":         "staff",
 	})
 	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, userID, "staff")
-	if role, ok := tracker.ProductRole(userID, productID); !ok || role != "staff" {
-		t.Fatalf("product role before delete = %q ok=%v", role, ok)
+	if role, err := tracker.ProductRole(userID, productID); err != nil || role != "staff" {
+		t.Fatalf("product role before delete = %q err=%v", role, err)
 	}
 
 	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/products/"+itoa(productID)+"/members/"+itoa(userID), nil, adminCookie, adminCSRF, server.URL)
@@ -568,8 +568,8 @@ func TestProductMemberRemovalAPI(t *testing.T) {
 	if !decodeBool(t, body, "ok") {
 		t.Fatalf("delete member response = %s", body)
 	}
-	if role, ok := tracker.ProductRole(userID, productID); ok {
-		t.Fatalf("product role after delete = %q, want none", role)
+	if role, err := tracker.ProductRole(userID, productID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("product role after delete = %q err=%v, want none", role, err)
 	}
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products/"+itoa(productID)+"/members", nil, adminCookie, "", "")
@@ -680,6 +680,94 @@ func TestTicketListPaginationAndSorting(t *testing.T) {
 	if len(byPriority.Tickets) != 3 || byPriority.Tickets[0].Title != "Zulu" || byPriority.Tickets[2].Title != "Alpha" {
 		t.Fatalf("priority-sorted tickets = %#v", byPriority.Tickets)
 	}
+}
+
+func TestTicketAssigneeRequiresProductStaff(t *testing.T) {
+	_, server, client := newTestServer(t)
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+
+	eligibleID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"display_name": "Eligible Staff",
+		"email":        "eligible@example.test",
+		"password":     "correct horse",
+		"role":         "staff",
+	})
+	viewerID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"display_name": "Product Viewer",
+		"email":        "viewer@example.test",
+		"password":     "correct horse",
+		"role":         "staff",
+	})
+	disabledID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"display_name": "Disabled Staff",
+		"email":        "disabled@example.test",
+		"password":     "correct horse",
+		"role":         "staff",
+	})
+	otherID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"display_name": "Other Staff",
+		"email":        "other@example.test",
+		"password":     "correct horse",
+		"role":         "staff",
+	})
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, eligibleID, "staff")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, viewerID, "viewer")
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, disabledID, "staff")
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/users/"+itoa(disabledID), map[string]any{
+		"disabled": true,
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("eligible@example.test")) ||
+		bytes.Contains(body, []byte("viewer@example.test")) || bytes.Contains(body, []byte("other@example.test")) ||
+		bytes.Contains(body, []byte("disabled@example.test")) {
+		t.Fatalf("product assignee candidates = %s", body)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"product_id": productID,
+		"title":      "Assignment eligibility",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	ticketID := decodeInt64(t, body, "id")
+
+	for _, userID := range []int64{viewerID, otherID, disabledID, 999999} {
+		resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
+			"assignee_user_id": userID,
+		}, adminCookie, adminCSRF, server.URL)
+		requireStatus(t, resp, body, http.StatusBadRequest)
+		if !bytes.Contains(body, []byte("active staff member of this product")) {
+			t.Fatalf("invalid assignee response = %s", body)
+		}
+	}
+
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
+		"assignee_user_id": eligibleID,
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeInt64(t, body, "assignee_user_id") != eligibleID || decodeString(t, body, "assignee_email") != "eligible@example.test" {
+		t.Fatalf("assignee response = %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/users/"+itoa(eligibleID), map[string]any{
+		"email": "renamed@example.test",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeInt64(t, body, "assignee_user_id") != eligibleID || decodeString(t, body, "assignee_email") != "renamed@example.test" {
+		t.Fatalf("assignment did not follow user id after email change: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+		"product_id":       productID,
+		"title":            "Invalid initial assignee",
+		"assignee_user_id": otherID,
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusBadRequest)
 }
 
 func TestAPIValidationContracts(t *testing.T) {
@@ -926,7 +1014,7 @@ func TestAdminCreatesUserWithManualPassword(t *testing.T) {
 		!bytes.Contains(body, []byte(`"password_reset_required":false`)) {
 		t.Fatalf("manual password create response = %s", body)
 	}
-	if notifications := tracker.ListEmailNotifications(10); len(notifications) != 0 {
+	if notifications := mustEmailNotifications(t, tracker, 10); len(notifications) != 0 {
 		t.Fatalf("manual password create queued email notifications: %#v", notifications)
 	}
 	loginUser(t, client, server.URL, "manual", "manual horse battery")
@@ -1135,11 +1223,11 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusCreated)
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status":   "assigned",
-		"assignee": "dev@example.test",
+		"status":           "assigned",
+		"assignee_user_id": devID,
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?product_id="+itoa(productID)+"&status=new&status=assigned&assignee=dev@example.test&q=dashboard", nil, adminCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?product_id="+itoa(productID)+"&status=new&status=assigned&assignee_user_id="+itoa(devID)+"&q=dashboard", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Dashboard fails")) {
 		t.Fatalf("filtered tickets missing ticket: %s", body)
@@ -1204,7 +1292,7 @@ func TestAdminHistoryPaginationAndFilters(t *testing.T) {
 		resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/test", map[string]any{}, adminCookie, adminCSRF, server.URL)
 		requireStatus(t, resp, body, http.StatusCreated)
 	}
-	notifications := tracker.ListEmailNotifications(10)
+	notifications := mustEmailNotifications(t, tracker, 10)
 	if len(notifications) < 2 {
 		t.Fatalf("test notifications = %#v", notifications)
 	}
@@ -1273,8 +1361,8 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 	ticketID := decodeInt64(t, body, "id")
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status":   "assigned",
-		"assignee": "dev@example.test",
+		"status":           "assigned",
+		"assignee_user_id": devID,
 		"comment": map[string]any{
 			"body":       "This should roll back",
 			"visibility": "private",
@@ -1288,8 +1376,8 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 	}
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status":   "assigned",
-		"assignee": "dev@example.test",
+		"status":           "assigned",
+		"assignee_user_id": devID,
 		"comment": map[string]any{
 			"body":       "Taking this now",
 			"visibility": "public",
@@ -1618,6 +1706,20 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 		if !bytes.Contains(payload, []byte("Second webhook update")) || bytes.Contains(payload, []byte("First webhook update")) {
 			t.Fatalf("coalesced webhook payload = %s", payload)
 		}
+		var envelope struct {
+			Actor map[string]json.RawMessage `json:"actor"`
+		}
+		if err := json.Unmarshal(payload, &envelope); err != nil {
+			t.Fatalf("decode webhook payload: %v", err)
+		}
+		if _, ok := envelope.Actor["id"]; !ok {
+			t.Fatalf("webhook actor has no id: %s", payload)
+		}
+		for _, field := range []string{"disabled", "password_reset_required", "created_at", "updated_at"} {
+			if _, ok := envelope.Actor[field]; ok {
+				t.Fatalf("webhook actor contains non-snapshot field %q: %s", field, payload)
+			}
+		}
 	default:
 		t.Fatalf("coalesced webhook was not delivered")
 	}
@@ -1742,16 +1844,17 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	var created struct {
-		ID             int64  `json:"id"`
-		Key            string `json:"key"`
-		Title          string `json:"title"`
-		Source         string `json:"source"`
-		RequesterEmail string `json:"requester_email"`
+		ID              int64  `json:"id"`
+		Key             string `json:"key"`
+		Title           string `json:"title"`
+		Source          string `json:"source"`
+		RequesterUserID int64  `json:"requester_user_id"`
+		RequesterEmail  string `json:"requester_email"`
 	}
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("decode created ticket: %v", err)
 	}
-	if created.ID == 0 || created.Key == "" || created.Source != "portal" || created.RequesterEmail != "customer@example.test" {
+	if created.ID == 0 || created.Key == "" || created.Source != "portal" || created.RequesterUserID != customerID || created.RequesterEmail != "customer@example.test" {
 		t.Fatalf("created ticket = %#v", created)
 	}
 
@@ -1916,6 +2019,13 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
+	supportID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
+		"display_name": "Support",
+		"email":        "support@example.test",
+		"password":     "correct horse",
+		"role":         "staff",
+	})
+	addProductMember(t, client, server.URL, adminCookie, adminCSRF, productID, supportID, "staff")
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
 		"key":  "BILL",
 		"name": "Billing",
@@ -1933,11 +2043,11 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	customerCookie, customerCSRF := loginUser(t, client, server.URL, "customer", "correct horse")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
-		"product_id":  productID,
-		"title":       "Customer-owned ticket",
-		"description": "Customer-visible request",
-		"priority":    "urgent",
-		"assignee":    "admin@example.test",
+		"product_id":       productID,
+		"title":            "Customer-owned ticket",
+		"description":      "Customer-visible request",
+		"priority":         "urgent",
+		"assignee_user_id": supportID,
 	}, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	customerTicketID := decodeInt64(t, body, "id")
@@ -1945,30 +2055,30 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("decode customer ticket: %v", err)
 	}
-	if created.Priority != "urgent" || created.Assignee != "" || created.Source != "portal" {
+	if created.Priority != "urgent" || created.AssigneeUserID != 0 || created.AssigneeEmail != "" || created.RequesterUserID != customerID || created.Source != "portal" {
 		t.Fatalf("customer-controlled fields were not normalized: %#v", created)
 	}
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(customerTicketID), map[string]any{
-		"assignee": "support@example.test",
+		"assignee_user_id": supportID,
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte(`"assignee":"support@example.test"`)) {
+	if !bytes.Contains(body, []byte(`"assignee_email":"support@example.test"`)) {
 		t.Fatalf("admin assignment response = %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(customerTicketID), nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if bytes.Contains(body, []byte(`"assignee":"support@example.test"`)) || bytes.Contains(body, []byte(`"assignee":`)) {
+	if bytes.Contains(body, []byte(`"assignee_email":`)) || bytes.Contains(body, []byte(`"assignee_user_id":`)) {
 		t.Fatalf("customer ticket detail leaked assignee: %s", body)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?assignee=support@example.test", nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?assignee_user_id="+itoa(supportID), nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee":`)) {
+	if !bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee_email":`)) || bytes.Contains(body, []byte(`"assignee_user_id":`)) {
 		t.Fatalf("customer assignee filter should be ignored and sanitized: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?q=support@example.test", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee":`)) {
+	if bytes.Contains(body, []byte("Customer-owned ticket")) || bytes.Contains(body, []byte(`"assignee_email":`)) || bytes.Contains(body, []byte(`"assignee_user_id":`)) {
 		t.Fatalf("customer search leaked assignee matches: %s", body)
 	}
 
@@ -1995,11 +2105,15 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	if bytes.Contains(body, []byte("Other product staff ticket")) {
 		t.Fatalf("customer ticket list leaked another product: %s", body)
 	}
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(customerTicketID), map[string]any{
+		"assignee_user_id": 0,
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
 
 	for name, patch := range map[string]map[string]any{
 		"status":      {"status": "assigned"},
 		"priority":    {"priority": "low"},
-		"assignee":    {"assignee": "admin@example.test"},
+		"assignee":    {"assignee_user_id": supportID},
 		"title":       {"title": "Customer renamed ticket"},
 		"description": {"description": "Customer edited description"},
 		"mixed": {
@@ -2021,7 +2135,8 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 		bytes.Contains(body, []byte("Customer edited description")) ||
 		bytes.Contains(body, []byte(`"status":"assigned"`)) ||
 		bytes.Contains(body, []byte(`"priority":"low"`)) ||
-		bytes.Contains(body, []byte(`"assignee":"admin@example.test"`)) {
+		bytes.Contains(body, []byte(`"assignee_email":`)) ||
+		bytes.Contains(body, []byte(`"assignee_user_id":`)) {
 		t.Fatalf("blocked customer workflow change persisted: %s", body)
 	}
 }
@@ -2275,13 +2390,13 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 	ticketID := decodeInt64(t, body, "id")
 
 	resp, body = doMultipart(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]string{
-		"title":       "Multipart patched ticket",
-		"description": "Updated through a multipart save",
-		"status":      "assigned",
-		"priority":    "high",
-		"assignee":    "patchdev@example.test",
-		"body":        "Patch evidence attached",
-		"visibility":  "public",
+		"title":            "Multipart patched ticket",
+		"description":      "Updated through a multipart save",
+		"status":           "assigned",
+		"priority":         "high",
+		"assignee_user_id": itoa(devID),
+		"body":             "Patch evidence attached",
+		"visibility":       "public",
 	}, []testUpload{{
 		Field:    "attachments",
 		Filename: "patch-evidence.txt",
@@ -2296,7 +2411,7 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 		patched.Description != "Updated through a multipart save" ||
 		patched.Status != "assigned" ||
 		patched.Priority != "high" ||
-		patched.Assignee != "patchdev@example.test" {
+		patched.AssigneeUserID != devID || patched.AssigneeEmail != "patchdev@example.test" {
 		t.Fatalf("multipart patch did not update workflow fields: %#v", patched)
 	}
 
@@ -2399,9 +2514,9 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 	}
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(workflowOnlyID), map[string]any{
-		"status":   "assigned",
-		"priority": "urgent",
-		"assignee": "dev@example.test",
+		"status":           "assigned",
+		"priority":         "urgent",
+		"assignee_user_id": devID,
 		"comment": map[string]any{
 			"body":       "Internal triage details",
 			"visibility": "internal",
@@ -2424,8 +2539,8 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 
 	publicReplyID := createTicket("Grouped public reply")
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(publicReplyID), map[string]any{
-		"status":   "assigned",
-		"assignee": "dev@example.test",
+		"status":           "assigned",
+		"assignee_user_id": devID,
 		"comment": map[string]any{
 			"body":       "Visible staff reply",
 			"visibility": "public",
@@ -2841,7 +2956,7 @@ func decodeFirstProductID(t *testing.T, body []byte) int64 {
 func requireNotificationForTicketEmail(t *testing.T, tracker *store.Store, ticketID int64, email string) store.EmailNotification {
 	t.Helper()
 	var matches []store.EmailNotification
-	for _, notification := range tracker.ListEmailNotifications(100) {
+	for _, notification := range mustEmailNotifications(t, tracker, 100) {
 		if notification.TicketID == ticketID && strings.EqualFold(notification.RecipientEmail, email) {
 			matches = append(matches, notification)
 		}
@@ -2854,4 +2969,22 @@ func requireNotificationForTicketEmail(t *testing.T, tracker *store.Store, ticke
 
 func itoa(value int64) string {
 	return strconv.FormatInt(value, 10)
+}
+
+func requireStoreList[T any](t *testing.T, values []T, err error) []T {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("list store values: %v", err)
+	}
+	return values
+}
+
+func mustDomainEvents(t *testing.T, tracker *store.Store, limit int) []store.DomainEvent {
+	values, err := tracker.ListDomainEvents(limit)
+	return requireStoreList(t, values, err)
+}
+
+func mustEmailNotifications(t *testing.T, tracker *store.Store, limit int) []store.EmailNotification {
+	values, err := tracker.ListEmailNotifications(limit)
+	return requireStoreList(t, values, err)
 }
