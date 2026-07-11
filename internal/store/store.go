@@ -616,6 +616,59 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+type dbTime struct {
+	time.Time
+}
+
+func (value *dbTime) Scan(source any) error {
+	text, err := databaseText(source)
+	if err != nil {
+		return err
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return fmt.Errorf("invalid database timestamp %q: %w", text, err)
+	}
+	value.Time = parsed
+	return nil
+}
+
+type nullDBTime struct {
+	Time *time.Time
+}
+
+func (value *nullDBTime) Scan(source any) error {
+	if source == nil {
+		value.Time = nil
+		return nil
+	}
+	text, err := databaseText(source)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" {
+		value.Time = nil
+		return nil
+	}
+	var parsed dbTime
+	if err := parsed.Scan(text); err != nil {
+		return err
+	}
+	value.Time = &parsed.Time
+	return nil
+}
+
+func databaseText(value any) (string, error) {
+	switch value := value.(type) {
+	case string:
+		return value, nil
+	case []byte:
+		return string(value), nil
+	default:
+		return "", fmt.Errorf("database value has type %T, want text", value)
+	}
+}
+
 type rowQueryer interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
@@ -783,19 +836,6 @@ func formatTimePtr(value *time.Time) any {
 		return nil
 	}
 	return formatTime(*value)
-}
-
-func parseTime(value string) time.Time {
-	parsed, _ := time.Parse(time.RFC3339Nano, value)
-	return parsed
-}
-
-func parseNullTime(value sql.NullString) *time.Time {
-	if !value.Valid || strings.TrimSpace(value.String) == "" {
-		return nil
-	}
-	parsed := parseTime(value.String)
-	return &parsed
 }
 
 const schemaSQL = `

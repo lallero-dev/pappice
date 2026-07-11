@@ -112,7 +112,7 @@ func scanAuditEvent(rows scanner) (AuditEvent, error) {
 	var domainEventID sql.NullInt64
 	var actorID sql.NullInt64
 	var targetID sql.NullInt64
-	var created string
+	var created dbTime
 	if err := rows.Scan(
 		&event.ID, &domainEventID, &actorID, &event.ActorEmail, &event.Action, &event.TargetType, &targetID,
 		&event.TargetName, &event.IP, &event.DetailsJSON, &created,
@@ -128,6 +128,6 @@ func scanAuditEvent(rows scanner) (AuditEvent, error) {
 	if targetID.Valid {
 		event.TargetID = targetID.Int64
 	}
-	event.CreatedAt = parseTime(created)
+	event.CreatedAt = created.Time
 	return event, nil
 }

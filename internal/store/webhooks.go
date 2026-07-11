@@ -572,7 +572,7 @@ func (s *Store) ListDeliveries(productID *int64, limit int) ([]WebhookDelivery, 
 	for rows.Next() {
 		var delivery WebhookDelivery
 		var productID, ticketID, status sql.NullInt64
-		var created string
+		var created dbTime
 		if err := rows.Scan(&delivery.ID, &delivery.WebhookID, &productID, &delivery.Event, &ticketID, &status, &delivery.Error, &delivery.DurationMS, &created); err != nil {
 			return nil, err
 		}
@@ -586,7 +586,7 @@ func (s *Store) ListDeliveries(productID *int64, limit int) ([]WebhookDelivery, 
 		if status.Valid {
 			delivery.StatusCode = int(status.Int64)
 		}
-		delivery.CreatedAt = parseTime(created)
+		delivery.CreatedAt = created.Time
 		deliveries = append(deliveries, delivery)
 	}
 	return deliveries, rows.Err()
@@ -607,8 +607,8 @@ func getWebhookNotificationTx(tx *sql.Tx, id int64) (WebhookNotification, error)
 func scanWebhookNotification(rows scanner) (WebhookNotification, error) {
 	var notification WebhookNotification
 	var productID, ticketID sql.NullInt64
-	var nextAttemptAt, createdAt string
-	var lockedUntil, sentAt sql.NullString
+	var nextAttemptAt, createdAt dbTime
+	var lockedUntil, sentAt nullDBTime
 	if err := rows.Scan(
 		&notification.ID, &notification.WebhookID, &productID, &ticketID, &notification.Event, &notification.PayloadJSON,
 		&notification.Status, &notification.Attempts, &nextAttemptAt, &lockedUntil, &notification.LastError, &createdAt, &sentAt,
@@ -622,10 +622,10 @@ func scanWebhookNotification(rows scanner) (WebhookNotification, error) {
 	if ticketID.Valid {
 		notification.TicketID = ticketID.Int64
 	}
-	notification.NextAttemptAt = parseTime(nextAttemptAt)
-	notification.LockedUntil = parseNullTime(lockedUntil)
-	notification.CreatedAt = parseTime(createdAt)
-	notification.SentAt = parseNullTime(sentAt)
+	notification.NextAttemptAt = nextAttemptAt.Time
+	notification.LockedUntil = lockedUntil.Time
+	notification.CreatedAt = createdAt.Time
+	notification.SentAt = sentAt.Time
 	return notification, nil
 }
 
@@ -650,8 +650,9 @@ func scanWebhook(rows scanner) (Webhook, error) {
 	var productID sql.NullInt64
 	var enabled int
 	var eventsJSON string
-	var created, updated string
-	var lastError, lastDelivered sql.NullString
+	var created, updated dbTime
+	var lastError sql.NullString
+	var lastDelivered nullDBTime
 	if err := rows.Scan(
 		&hook.ID, &productID, &hook.Name, &hook.URL, &hook.Secret, &eventsJSON, &enabled,
 		&created, &updated, &hook.LastStatus, &lastError, &lastDelivered,
@@ -666,12 +667,12 @@ func scanWebhook(rows scanner) (Webhook, error) {
 		return Webhook{}, fmt.Errorf("decode webhook events: %w", err)
 	}
 	hook.Enabled = enabled != 0
-	hook.CreatedAt = parseTime(created)
-	hook.UpdatedAt = parseTime(updated)
+	hook.CreatedAt = created.Time
+	hook.UpdatedAt = updated.Time
 	if lastError.Valid {
 		hook.LastError = lastError.String
 	}
-	hook.LastDeliveredAt = parseNullTime(lastDelivered)
+	hook.LastDeliveredAt = lastDelivered.Time
 	return hook, nil
 }
 

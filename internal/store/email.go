@@ -414,15 +414,12 @@ func (s *Store) EmailNotificationStats() (EmailNotificationStats, error) {
 	if err := rows.Err(); err != nil {
 		return EmailNotificationStats{}, err
 	}
-	var sentAt sql.NullString
+	var sentAt nullDBTime
 	var lastError sql.NullString
 	if err := s.db.QueryRow(`SELECT sent_at FROM email_notifications WHERE sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1`).Scan(&sentAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return EmailNotificationStats{}, err
 	}
-	if sentAt.Valid {
-		parsed := parseTime(sentAt.String)
-		stats.LastSentAt = &parsed
-	}
+	stats.LastSentAt = sentAt.Time
 	if err := s.db.QueryRow(`SELECT last_error FROM email_notifications WHERE last_error <> '' ORDER BY created_at DESC LIMIT 1`).Scan(&lastError); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return EmailNotificationStats{}, err
 	}
@@ -571,8 +568,8 @@ func getEmailNotificationTx(tx *sql.Tx, id int64) (EmailNotification, error) {
 func scanEmailNotification(rows scanner) (EmailNotification, error) {
 	var notification EmailNotification
 	var productID, ticketID, userID sql.NullInt64
-	var nextAttempt, created string
-	var lockedUntil, sentAt sql.NullString
+	var nextAttempt, created dbTime
+	var lockedUntil, sentAt nullDBTime
 	if err := rows.Scan(
 		&notification.ID, &productID, &ticketID, &userID, &notification.RecipientEmail,
 		&notification.RecipientName, &notification.Event, &notification.Subject, &notification.BodyText, &notification.BodyHTML,
@@ -589,10 +586,10 @@ func scanEmailNotification(rows scanner) (EmailNotification, error) {
 	if userID.Valid {
 		notification.UserID = userID.Int64
 	}
-	notification.NextAttemptAt = parseTime(nextAttempt)
-	notification.LockedUntil = parseNullTime(lockedUntil)
-	notification.CreatedAt = parseTime(created)
-	notification.SentAt = parseNullTime(sentAt)
+	notification.NextAttemptAt = nextAttempt.Time
+	notification.LockedUntil = lockedUntil.Time
+	notification.CreatedAt = created.Time
+	notification.SentAt = sentAt.Time
 	return notification, nil
 }
 

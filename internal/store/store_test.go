@@ -150,6 +150,23 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	}
 }
 
+func TestStoreRejectsMalformedTimestamps(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	if _, err := tracker.db.Exec(`UPDATE users SET created_at = 'invalid' WHERE id = ?`, admin.ID); err != nil {
+		t.Fatalf("corrupt timestamp: %v", err)
+	}
+	if _, err := tracker.GetUser(admin.ID); err == nil || !strings.Contains(err.Error(), "invalid database timestamp") {
+		t.Fatalf("get user error = %v, want invalid database timestamp", err)
+	}
+}
+
 func TestStoreSurfacesAuthenticationQueryErrors(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
 	if err != nil {

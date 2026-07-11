@@ -312,7 +312,8 @@ func (s *Store) UserBySession(token string) (User, string, error) {
 	var disabled int
 	var resetRequired int
 	var email sql.NullString
-	var created, updated, csrf string
+	var created, updated dbTime
+	var csrf string
 	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &csrf); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, "", ErrNotFound
@@ -323,8 +324,8 @@ func (s *Store) UserBySession(token string) (User, string, error) {
 	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.PasswordResetRequired = resetRequired != 0
-	user.CreatedAt = parseTime(created)
-	user.UpdatedAt = parseTime(updated)
+	user.CreatedAt = created.Time
+	user.UpdatedAt = updated.Time
 	if user.Disabled || user.PasswordResetRequired {
 		return User{}, "", ErrNotFound
 	}
@@ -446,8 +447,8 @@ func (s *Store) AccountLinkStatus(token string) (AccountLinkStatus, error) {
 		JOIN users u ON u.id = al.user_id
 		WHERE al.token_hash = ?`, security.HashToken(token))
 	var status AccountLinkStatus
-	var expires string
-	var used sql.NullString
+	var expires dbTime
+	var used nullDBTime
 	var disabled int
 	if err := row.Scan(&status.Purpose, &expires, &used, &disabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -455,8 +456,8 @@ func (s *Store) AccountLinkStatus(token string) (AccountLinkStatus, error) {
 		}
 		return AccountLinkStatus{}, err
 	}
-	status.ExpiresAt = parseTime(expires)
-	status.UsedAt = parseNullTime(used)
+	status.ExpiresAt = expires.Time
+	status.UsedAt = used.Time
 	status.UserDisabled = disabled != 0
 	return status, nil
 }
@@ -568,13 +569,13 @@ func (s *Store) ListAPITokens(userID int64) ([]PublicAPIToken, error) {
 	var tokens []PublicAPIToken
 	for rows.Next() {
 		var token PublicAPIToken
-		var created string
-		var last sql.NullString
+		var created dbTime
+		var last nullDBTime
 		if err := rows.Scan(&token.ID, &token.UserID, &token.Name, &token.Prefix, &created, &last); err != nil {
 			return nil, err
 		}
-		token.CreatedAt = parseTime(created)
-		token.LastUsedAt = parseNullTime(last)
+		token.CreatedAt = created.Time
+		token.LastUsedAt = last.Time
 		tokens = append(tokens, token)
 	}
 	return tokens, rows.Err()
@@ -618,8 +619,8 @@ func (s *Store) UserByAPIToken(token string) (User, error) {
 	var disabled int
 	var resetRequired int
 	var email sql.NullString
-	var created, updated string
-	var last sql.NullString
+	var created, updated dbTime
+	var last nullDBTime
 	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &tokenID, &last); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
@@ -630,13 +631,13 @@ func (s *Store) UserByAPIToken(token string) (User, error) {
 	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.PasswordResetRequired = resetRequired != 0
-	user.CreatedAt = parseTime(created)
-	user.UpdatedAt = parseTime(updated)
+	user.CreatedAt = created.Time
+	user.UpdatedAt = updated.Time
 	if user.Disabled {
 		return User{}, ErrNotFound
 	}
 	now := time.Now().UTC()
-	lastUsed := parseNullTime(last)
+	lastUsed := last.Time
 	if lastUsed == nil || now.Sub(*lastUsed) > time.Hour {
 		_, _ = s.db.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, formatTime(now), tokenID)
 	}
@@ -807,8 +808,8 @@ func accountLinkByTokenTx(tx *sql.Tx, token string) (AccountLink, User, error) {
 
 	var link AccountLink
 	var user User
-	var expires, created, userCreated, userUpdated string
-	var used sql.NullString
+	var expires, created, userCreated, userUpdated dbTime
+	var used nullDBTime
 	var email sql.NullString
 	var disabled int
 	var resetRequired int
@@ -822,15 +823,15 @@ func accountLinkByTokenTx(tx *sql.Tx, token string) (AccountLink, User, error) {
 		}
 		return AccountLink{}, User{}, err
 	}
-	link.ExpiresAt = parseTime(expires)
-	link.UsedAt = parseNullTime(used)
-	link.CreatedAt = parseTime(created)
+	link.ExpiresAt = expires.Time
+	link.UsedAt = used.Time
+	link.CreatedAt = created.Time
 	user.Email = nullString(email)
 	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.PasswordResetRequired = resetRequired != 0
-	user.CreatedAt = parseTime(userCreated)
-	user.UpdatedAt = parseTime(userUpdated)
+	user.CreatedAt = userCreated.Time
+	user.UpdatedAt = userUpdated.Time
 	if link.UsedAt != nil || !link.ExpiresAt.After(time.Now().UTC()) || user.Disabled {
 		return AccountLink{}, User{}, ErrNotFound
 	}
@@ -850,7 +851,7 @@ func scanStoredUser(row scanner) (User, error) {
 	var disabled int
 	var resetRequired int
 	var email sql.NullString
-	var created, updated string
+	var created, updated dbTime
 	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &user.PasswordHash, &disabled, &resetRequired, &created, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
@@ -861,8 +862,8 @@ func scanStoredUser(row scanner) (User, error) {
 	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.PasswordResetRequired = resetRequired != 0
-	user.CreatedAt = parseTime(created)
-	user.UpdatedAt = parseTime(updated)
+	user.CreatedAt = created.Time
+	user.UpdatedAt = updated.Time
 	return user, nil
 }
 
@@ -871,7 +872,7 @@ func scanUser(rows scanner) (User, error) {
 	var disabled int
 	var resetRequired int
 	var email sql.NullString
-	var created, updated string
+	var created, updated dbTime
 	if err := rows.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated); err != nil {
 		return User{}, err
 	}
@@ -879,8 +880,8 @@ func scanUser(rows scanner) (User, error) {
 	user.Role = normalizeGlobalRole(user.Role)
 	user.Disabled = disabled != 0
 	user.PasswordResetRequired = resetRequired != 0
-	user.CreatedAt = parseTime(created)
-	user.UpdatedAt = parseTime(updated)
+	user.CreatedAt = created.Time
+	user.UpdatedAt = updated.Time
 	return user, nil
 }
 

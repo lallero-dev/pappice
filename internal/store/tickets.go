@@ -707,7 +707,7 @@ func hydrateTicketWithQuery(queryer ticketQueryer, ticket *Ticket) error {
 	for commentRows.Next() {
 		var comment Comment
 		var authorUserID sql.NullInt64
-		var created string
+		var created dbTime
 		if err := commentRows.Scan(&comment.ID, &comment.Author, &authorUserID, &comment.Body, &comment.Visibility, &created); err != nil {
 			return err
 		}
@@ -717,7 +717,7 @@ func hydrateTicketWithQuery(queryer ticketQueryer, ticket *Ticket) error {
 		if comment.Visibility == "" {
 			comment.Visibility = "public"
 		}
-		comment.CreatedAt = parseTime(created)
+		comment.CreatedAt = created.Time
 		ticket.Comments = append(ticket.Comments, comment)
 	}
 	if err := commentRows.Err(); err != nil {
@@ -777,8 +777,8 @@ const ticketSelectSQL = `
 
 func scanTicket(rows scanner) (Ticket, error) {
 	var ticket Ticket
-	var closed sql.NullString
-	var created, updated string
+	var closed nullDBTime
+	var created, updated dbTime
 	if err := rows.Scan(
 		&ticket.ID, &ticket.ProductID, &ticket.ProductKey, &ticket.ProductName, &ticket.Number, &ticket.Title, &ticket.Description,
 		&ticket.Status, &ticket.Priority, &ticket.AssigneeUserID, &ticket.AssigneeEmail, &ticket.RequesterUserID,
@@ -789,9 +789,9 @@ func scanTicket(rows scanner) (Ticket, error) {
 	if ticket.Source == "" {
 		ticket.Source = "staff"
 	}
-	ticket.CreatedAt = parseTime(created)
-	ticket.UpdatedAt = parseTime(updated)
-	ticket.ClosedAt = parseNullTime(closed)
+	ticket.CreatedAt = created.Time
+	ticket.UpdatedAt = updated.Time
+	ticket.ClosedAt = closed.Time
 	ticket.Key = fmt.Sprintf("%s-%d", ticket.ProductKey, ticket.Number)
 	return ticket, nil
 }
@@ -978,8 +978,8 @@ func timestampKeySQL(column string) string {
 
 func scanTicketSummary(row scanner) (TicketSummary, error) {
 	var summary TicketSummary
-	var lastRead sql.NullString
-	var created, updated string
+	var lastRead nullDBTime
+	var created, updated dbTime
 	if err := row.Scan(
 		&summary.ID, &summary.ProductID, &summary.ProductKey, &summary.ProductName, &summary.Number,
 		&summary.Title, &summary.Status, &summary.Priority, &summary.AssigneeUserID, &summary.AssigneeEmail,
@@ -990,17 +990,17 @@ func scanTicketSummary(row scanner) (TicketSummary, error) {
 	}
 	summary.Key = fmt.Sprintf("%s-%d", summary.ProductKey, summary.Number)
 	summary.ProductRole = normalizeProductRole(summary.ProductRole)
-	summary.LastReadAt = parseNullTime(lastRead)
+	summary.LastReadAt = lastRead.Time
 	summary.HasUnread = summary.UnreadCount > 0
-	summary.CreatedAt = parseTime(created)
-	summary.UpdatedAt = parseTime(updated)
+	summary.CreatedAt = created.Time
+	summary.UpdatedAt = updated.Time
 	return summary, nil
 }
 
 func scanAttachment(rows scanner) (Attachment, error) {
 	var attachment Attachment
 	var commentID, createdBy sql.NullInt64
-	var created string
+	var created dbTime
 	if err := rows.Scan(
 		&attachment.ID, &attachment.TicketID, &commentID, &attachment.Filename, &attachment.ContentType,
 		&attachment.SizeBytes, &attachment.SHA256, &attachment.StorageKey, &createdBy, &created,
@@ -1013,6 +1013,6 @@ func scanAttachment(rows scanner) (Attachment, error) {
 	if createdBy.Valid {
 		attachment.CreatedByUserID = createdBy.Int64
 	}
-	attachment.CreatedAt = parseTime(created)
+	attachment.CreatedAt = created.Time
 	return attachment, nil
 }

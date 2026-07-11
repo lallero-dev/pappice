@@ -212,12 +212,12 @@ func scanProductMembers(rows *sql.Rows) ([]ProductMember, error) {
 	var members []ProductMember
 	for rows.Next() {
 		var member ProductMember
-		var created string
+		var created dbTime
 		if err := rows.Scan(&member.ProductID, &member.UserID, &member.Email, &member.DisplayName, &member.Role, &created); err != nil {
 			return nil, err
 		}
 		member.Role = normalizeProductRole(member.Role)
-		member.CreatedAt = parseTime(created)
+		member.CreatedAt = created.Time
 		members = append(members, member)
 	}
 	return members, rows.Err()
@@ -244,7 +244,7 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 		return ProductMember{}, fmt.Errorf("%w: user is disabled", ErrValidation)
 	}
 	now := time.Now().UTC()
-	var created string
+	var created dbTime
 	err = tx.QueryRow(`
 		INSERT INTO product_members (product_id, user_id, role, created_at)
 		VALUES (?, ?, ?, ?)
@@ -261,7 +261,7 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Role:        role,
-		CreatedAt:   parseTime(created),
+		CreatedAt:   created.Time,
 	}
 	if err := insertAppEventTx(tx, now, input.Event, "product_member.upserted", "user", member.UserID, member.Email, map[string]any{
 		"product_id": productID,
@@ -344,7 +344,7 @@ func getProductTx(tx *sql.Tx, id int64) (Product, error) {
 
 func scanProduct(rows scanner) (Product, error) {
 	var product Product
-	var created, updated string
+	var created, updated dbTime
 	if err := rows.Scan(
 		&product.ID, &product.Key, &product.Name, &product.Description, &product.Role,
 		&created, &updated,
@@ -352,7 +352,7 @@ func scanProduct(rows scanner) (Product, error) {
 		return Product{}, err
 	}
 	product.Role = normalizeProductRole(product.Role)
-	product.CreatedAt = parseTime(created)
-	product.UpdatedAt = parseTime(updated)
+	product.CreatedAt = created.Time
+	product.UpdatedAt = updated.Time
 	return product, nil
 }

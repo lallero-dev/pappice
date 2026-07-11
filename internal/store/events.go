@@ -381,8 +381,8 @@ func scanDomainEvents(rows *sql.Rows) ([]DomainEvent, error) {
 
 func scanDomainEvent(row scanner) (DomainEvent, error) {
 	var event DomainEvent
-	var lockedUntil, processedAt sql.NullString
-	var createdAt, updatedAt string
+	var lockedUntil, processedAt nullDBTime
+	var createdAt, updatedAt dbTime
 	err := row.Scan(
 		&event.ID, &event.Type, &event.ProductID, &event.TicketID, &event.ActorUserID,
 		&event.ActorDisplayName, &event.ActorEmail, &event.ActorRole, &event.PayloadJSON, &event.Status,
@@ -391,9 +391,9 @@ func scanDomainEvent(row scanner) (DomainEvent, error) {
 	if err != nil {
 		return DomainEvent{}, err
 	}
-	event.LockedUntil = parseNullTime(lockedUntil)
-	event.ProcessedAt = parseNullTime(processedAt)
-	event.CreatedAt = parseTime(createdAt)
-	event.UpdatedAt = parseTime(updatedAt)
+	event.LockedUntil = lockedUntil.Time
+	event.ProcessedAt = processedAt.Time
+	event.CreatedAt = createdAt.Time
+	event.UpdatedAt = updatedAt.Time
 	return event, nil
 }
