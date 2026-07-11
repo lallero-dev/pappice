@@ -157,11 +157,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	setupRequired, err := s.store.SetupRequired()
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"name":           "pappice",
 		"branding":       s.options.Branding,
 		"started_at":     s.started,
-		"needs_setup":    s.store.SetupRequired(),
+		"needs_setup":    setupRequired,
 		"statuses":       store.Statuses(),
 		"priorities":     store.Priorities(),
 		"roles":          store.Roles(),
@@ -177,12 +182,22 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	auth, ok := s.currentAuth(r)
+	setupRequired, err := s.store.SetupRequired()
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	auth, err := s.currentAuth(r)
+	authenticated := err == nil
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		respondStoreError(w, err)
+		return
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"authenticated": ok,
-		"needs_setup":   s.store.SetupRequired(),
-		"user":          nullableUser(auth.User, ok),
-		"csrf_token":    nullableString(auth.CSRF, ok && !auth.ViaToken),
+		"authenticated": authenticated,
+		"needs_setup":   setupRequired,
+		"user":          nullableUser(auth.User, authenticated),
+		"csrf_token":    nullableString(auth.CSRF, authenticated && !auth.ViaToken),
 	})
 }
 
@@ -1497,30 +1512,47 @@ func (s *Server) createSession(w http.ResponseWriter, userID int64) (string, boo
 	return csrf, true
 }
 
-func (s *Server) currentAuth(r *http.Request) (authContext, bool) {
+func (s *Server) currentAuth(r *http.Request) (authContext, error) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
-		if user, csrf, ok := s.store.UserBySession(cookie.Value); ok {
-			return authContext{User: user, CSRF: csrf, SessionToken: cookie.Value}, true
+		user, csrf, err := s.store.UserBySession(cookie.Value)
+		if err == nil {
+			return authContext{User: user, CSRF: csrf, SessionToken: cookie.Value}, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return authContext{}, err
 		}
 	}
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	if len(header) > 7 && strings.EqualFold(header[:7], "Bearer ") {
 		token := strings.TrimSpace(header[7:])
-		if user, ok := s.store.UserByAPIToken(token); ok {
-			return authContext{User: user, ViaToken: true}, true
+		user, err := s.store.UserByAPIToken(token)
+		if err == nil {
+			return authContext{User: user, ViaToken: true}, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return authContext{}, err
 		}
 	}
-	return authContext{}, false
+	return authContext{}, store.ErrNotFound
 }
 
 func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) (authContext, bool) {
-	if s.store.SetupRequired() {
+	setupRequired, err := s.store.SetupRequired()
+	if err != nil {
+		respondStoreError(w, err)
+		return authContext{}, false
+	}
+	if setupRequired {
 		respondError(w, http.StatusConflict, "setup is required")
 		return authContext{}, false
 	}
-	auth, ok := s.currentAuth(r)
-	if !ok {
+	auth, err := s.currentAuth(r)
+	if errors.Is(err, store.ErrNotFound) {
 		respondError(w, http.StatusUnauthorized, "authentication is required")
+		return authContext{}, false
+	}
+	if err != nil {
+		respondStoreError(w, err)
 		return authContext{}, false
 	}
 	if isUnsafeMethod(r.Method) && !auth.ViaToken {

@@ -10,12 +10,12 @@ import (
 	"pappice/internal/security"
 )
 
-func (s *Store) SetupRequired() bool {
+func (s *Store) SetupRequired() (bool, error) {
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		return true
+		return false, err
 	}
-	return count == 0
+	return count == 0, nil
 }
 
 func (s *Store) CreateFirstAdmin(input CreateUser) (User, error) {
@@ -298,7 +298,7 @@ func (s *Store) CreateSessionFor(userID int64, ttl time.Duration) (string, strin
 	return token, csrf, expires, nil
 }
 
-func (s *Store) UserBySession(token string) (User, string, bool) {
+func (s *Store) UserBySession(token string) (User, string, error) {
 	hash := security.HashToken(token)
 	now := formatTime(time.Now().UTC())
 	row := s.db.QueryRow(`
@@ -314,7 +314,10 @@ func (s *Store) UserBySession(token string) (User, string, bool) {
 	var email sql.NullString
 	var created, updated, csrf string
 	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &csrf); err != nil {
-		return User{}, "", false
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, "", ErrNotFound
+		}
+		return User{}, "", err
 	}
 	user.Email = nullString(email)
 	user.Role = normalizeGlobalRole(user.Role)
@@ -323,9 +326,9 @@ func (s *Store) UserBySession(token string) (User, string, bool) {
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
 	if user.Disabled || user.PasswordResetRequired {
-		return User{}, "", false
+		return User{}, "", ErrNotFound
 	}
-	return publicUserCopy(user), csrf, true
+	return publicUserCopy(user), csrf, nil
 }
 
 func (s *Store) DeleteSession(token string) error {
@@ -602,7 +605,7 @@ func (s *Store) DeleteAPIToken(userID, tokenID int64, event ...EventContext) err
 	return tx.Commit()
 }
 
-func (s *Store) UserByAPIToken(token string) (User, bool) {
+func (s *Store) UserByAPIToken(token string) (User, error) {
 	hash := security.HashToken(token)
 	row := s.db.QueryRow(`
 		SELECT u.id, u.display_name, u.email, u.role, u.disabled, u.password_reset_required, u.created_at, u.updated_at, t.id, t.last_used_at
@@ -619,7 +622,10 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 	var created, updated string
 	var last sql.NullString
 	if err := row.Scan(&user.ID, &user.DisplayName, &email, &user.Role, &disabled, &resetRequired, &created, &updated, &tokenID, &last); err != nil {
-		return User{}, false
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, err
 	}
 	user.Email = nullString(email)
 	user.Role = normalizeGlobalRole(user.Role)
@@ -628,14 +634,14 @@ func (s *Store) UserByAPIToken(token string) (User, bool) {
 	user.CreatedAt = parseTime(created)
 	user.UpdatedAt = parseTime(updated)
 	if user.Disabled {
-		return User{}, false
+		return User{}, ErrNotFound
 	}
 	now := time.Now().UTC()
 	lastUsed := parseNullTime(last)
 	if lastUsed == nil || now.Sub(*lastUsed) > time.Hour {
 		_, _ = s.db.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, formatTime(now), tokenID)
 	}
-	return publicUserCopy(user), true
+	return publicUserCopy(user), nil
 }
 
 func (s *Store) GetUser(id int64) (User, error) {

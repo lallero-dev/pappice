@@ -150,6 +150,37 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	}
 }
 
+func TestStoreSurfacesAuthenticationQueryErrors(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	session, _, _, err := tracker.CreateSession(admin.ID)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	_, token, err := tracker.CreateAPIToken(admin.ID, CreateAPIToken{Name: "test"})
+	if err != nil {
+		t.Fatalf("create API token: %v", err)
+	}
+	if err := tracker.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	if _, err := tracker.SetupRequired(); err == nil {
+		t.Fatal("setup lookup on closed store returned no error")
+	}
+	if _, _, err := tracker.UserBySession(session); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("session lookup error = %v, want database error", err)
+	}
+	if _, err := tracker.UserByAPIToken(token); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("API token lookup error = %v, want database error", err)
+	}
+}
+
 func TestStoreValidation(t *testing.T) {
 	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.json"))
 	if err != nil {
@@ -1099,8 +1130,8 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if !tracker.SetupRequired() {
-		t.Fatal("new store should require setup")
+	if required, err := tracker.SetupRequired(); err != nil || !required {
+		t.Fatalf("new store setup required = %v err=%v", required, err)
 	}
 
 	admin, err := tracker.CreateFirstAdmin(CreateUser{
@@ -1110,8 +1141,8 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create first admin: %v", err)
 	}
-	if tracker.SetupRequired() {
-		t.Fatal("store should not require setup after first admin")
+	if required, err := tracker.SetupRequired(); err != nil || required {
+		t.Fatalf("setup required after first admin = %v err=%v", required, err)
 	}
 
 	authenticated, err := tracker.Authenticate("admin@example.test", "correct horse")
@@ -1148,14 +1179,14 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if csrf == "" {
 		t.Fatal("session should include csrf token")
 	}
-	if user, gotCSRF, ok := tracker.UserBySession(session); !ok || user.ID != admin.ID || gotCSRF != csrf {
-		t.Fatalf("session user = %#v, %v", user, ok)
+	if user, gotCSRF, err := tracker.UserBySession(session); err != nil || user.ID != admin.ID || gotCSRF != csrf {
+		t.Fatalf("session user = %#v err=%v", user, err)
 	}
 	if err := tracker.DeleteSession(session); err != nil {
 		t.Fatalf("delete session: %v", err)
 	}
-	if _, _, ok := tracker.UserBySession(session); ok {
-		t.Fatal("deleted session should not authenticate")
+	if _, _, err := tracker.UserBySession(session); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted session error = %v, want ErrNotFound", err)
 	}
 	shortSession, _, expires, err := tracker.CreateSessionFor(admin.ID, 20*time.Millisecond)
 	if err != nil {
@@ -1167,8 +1198,8 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if _, err := tracker.db.Exec(`UPDATE sessions SET expires_at = ? WHERE token_hash = ?`, formatTime(time.Now().UTC().Add(-time.Hour)), security.HashToken(shortSession)); err != nil {
 		t.Fatalf("expire short session: %v", err)
 	}
-	if _, _, ok := tracker.UserBySession(shortSession); ok {
-		t.Fatal("expired short session should not authenticate")
+	if _, _, err := tracker.UserBySession(shortSession); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired session error = %v, want ErrNotFound", err)
 	}
 
 	token, raw, err := tracker.CreateAPIToken(admin.ID, CreateAPIToken{Name: "cli"})
@@ -1178,8 +1209,8 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if token.Prefix == "" || raw == "" {
 		t.Fatalf("token = %#v raw=%q", token, raw)
 	}
-	if user, ok := tracker.UserByAPIToken(raw); !ok || user.ID != admin.ID {
-		t.Fatalf("API token user = %#v, %v", user, ok)
+	if user, err := tracker.UserByAPIToken(raw); err != nil || user.ID != admin.ID {
+		t.Fatalf("API token user = %#v err=%v", user, err)
 	}
 	tokens := mustListAPITokens(t, tracker, admin.ID)
 	if len(tokens) != 1 || tokens[0].ID != token.ID || tokens[0].Prefix != token.Prefix {
@@ -1194,8 +1225,8 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if tokens := mustListAPITokens(t, tracker, admin.ID); len(tokens) != 0 {
 		t.Fatalf("API tokens after delete = %#v", tokens)
 	}
-	if user, ok := tracker.UserByAPIToken(raw); ok || user.ID != 0 {
-		t.Fatalf("deleted API token user = %#v, %v", user, ok)
+	if user, err := tracker.UserByAPIToken(raw); !errors.Is(err, ErrNotFound) || user.ID != 0 {
+		t.Fatalf("deleted API token user = %#v err=%v", user, err)
 	}
 
 	enabled := true
@@ -1329,11 +1360,11 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if _, err := tracker.Authenticate("pending@example.test", "changed password"); err != nil {
 		t.Fatalf("authenticate changed password: %v", err)
 	}
-	if _, _, ok := tracker.UserBySession(session); !ok {
-		t.Fatal("change password should keep current session")
+	if _, _, err := tracker.UserBySession(session); err != nil {
+		t.Fatalf("kept session error = %v", err)
 	}
-	if _, _, ok := tracker.UserBySession(extraSession); ok {
-		t.Fatal("change password should remove other sessions")
+	if _, _, err := tracker.UserBySession(extraSession); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("removed session error = %v, want ErrNotFound", err)
 	}
 	extraSession, _, _, err = tracker.CreateSession(user.ID)
 	if err != nil {
@@ -1342,11 +1373,11 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if err := tracker.DeleteUserSessions(user.ID, session); err != nil {
 		t.Fatalf("delete user sessions: %v", err)
 	}
-	if _, _, ok := tracker.UserBySession(session); !ok {
-		t.Fatal("delete user sessions should keep requested session")
+	if _, _, err := tracker.UserBySession(session); err != nil {
+		t.Fatalf("kept requested session error = %v", err)
 	}
-	if _, _, ok := tracker.UserBySession(extraSession); ok {
-		t.Fatal("delete user sessions should remove other sessions")
+	if _, _, err := tracker.UserBySession(extraSession); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("removed extra session error = %v, want ErrNotFound", err)
 	}
 
 	resetUser, resetLink, resetToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour)
@@ -1356,8 +1387,8 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if !resetUser.PasswordResetRequired || resetLink.Purpose != "reset" || resetToken == "" {
 		t.Fatalf("reset link = %#v user=%#v token=%q", resetLink, resetUser, resetToken)
 	}
-	if _, _, ok := tracker.UserBySession(session); ok {
-		t.Fatal("password reset should invalidate existing sessions")
+	if _, _, err := tracker.UserBySession(session); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reset-invalidated session error = %v, want ErrNotFound", err)
 	}
 	if _, err := tracker.Authenticate("pending@example.test", "changed password"); !errors.Is(err, ErrPasswordResetRequired) {
 		t.Fatalf("reset-required authenticate error = %v, want ErrPasswordResetRequired", err)
