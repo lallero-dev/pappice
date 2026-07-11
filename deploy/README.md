@@ -1,10 +1,16 @@
 # Production Deploy
 
-This setup uses nginx for public HTTPS and systemd for the Pappice process.
-Pappice listens on local HTTP at `127.0.0.1:8388`; nginx terminates public HTTPS
-and forwards `X-Forwarded-Proto: https`. `PAPPICE_TRUST_PROXY_HEADERS=true` is
-enabled in the production environment template, so do not expose the Pappice
-listener directly to the public internet.
+This is the reference deployment for Debian or Ubuntu using nginx for public
+HTTPS and systemd for the Pappice process. Pappice listens on local HTTP at
+`127.0.0.1:8388`; nginx terminates public HTTPS and forwards
+`X-Forwarded-Proto: https`. `PAPPICE_TRUST_PROXY_HEADERS=true` is enabled in the
+production environment template, so do not expose the Pappice listener directly
+to the public internet.
+
+Before starting, point the chosen hostname at the server and obtain a TLS
+certificate. The nginx template expects the certificate and key at
+`/etc/letsencrypt/live/<hostname>/fullchain.pem` and `privkey.pem`; edit the
+template if your ACME client stores them elsewhere.
 
 ## Files
 
@@ -81,8 +87,7 @@ enable email later from a known-good SMTP configuration. Keep
 point. Keep `PAPPICE_ALLOW_INSECURE_WEBHOOKS=false` and
 `PAPPICE_ALLOW_PRIVATE_WEBHOOKS=false` in production.
 
-Install the nginx site after issuing the public certificate with your preferred
-ACME flow:
+Install the nginx site after the certificate files described above exist:
 
 ```sh
 sudo install -o root -g root -m 0644 deploy/nginx/pappice.conf.example /etc/nginx/sites-available/pappice.conf
@@ -101,6 +106,27 @@ sudo systemctl enable --now pappice-backup.timer
 ```
 
 Open `https://$DOMAIN` and create the first admin account.
+
+## Configuration
+
+`deploy/env/pappice.env.example` is the complete production template. Every
+runtime setting is also available as a command-line flag; process environment
+variables override values loaded from an environment file. Run `pappice doctor`
+after changing configuration.
+
+Branding is configured with the `PAPPICE_BRAND_*` values. Attachments are stored
+under `PAPPICE_UPLOAD_DIR`; SQLite stores their metadata, so the database and
+upload directory must be backed up and restored together.
+
+Pappice sends no-reply email and never processes inbound replies. SMTP delivery
+is optional and uses the durable SQLite outbox. Email and webhook updates wait
+for `PAPPICE_NOTIFICATION_DELAY`, and pending updates for one ticket are
+coalesced.
+
+API automation uses bearer tokens. Webhook deliveries are signed with
+`X-Pappice-Signature`; secrets are shown once after creation or rotation.
+Webhook URLs must be public HTTPS unless the development-only escape hatches are
+explicitly enabled.
 
 ## Checks
 

@@ -3,7 +3,8 @@
 This path builds the image locally from a source checkout and runs Pappice with
 Docker Compose. Runtime state is kept in Docker named volumes.
 
-The container listens with plain HTTP on `127.0.0.1:8388`. Put nginx, Caddy, or
+Pappice listens on plain HTTP at `0.0.0.0:8388` inside the container. Compose
+publishes it only on host loopback at `127.0.0.1:8388`; put nginx, Caddy, or
 Traefik in front of it for public HTTPS.
 
 The Compose service runs as UID/GID `10001`, drops Linux capabilities, uses
@@ -21,6 +22,9 @@ cp deploy/docker/pappice.env.example deploy/docker/pappice.env
 At minimum, set `PAPPICE_PUBLIC_URL` and SMTP values if email notifications are
 enabled. Keep `PAPPICE_TRUST_PROXY_HEADERS=true` only when Pappice is behind a
 private reverse proxy that sets `X-Forwarded-Proto: https`.
+
+See the production guide's [configuration section](../README.md#configuration)
+for storage, branding, email, API, and webhook behavior.
 
 Start Pappice:
 
