@@ -563,7 +563,7 @@ func (s *Store) GetAttachment(id int64) (Attachment, error) {
 	return attachment, nil
 }
 
-func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) {
+func (s *Store) DeleteTicket(id int64, event EventContext) ([]string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
@@ -591,7 +591,7 @@ func (s *Store) DeleteTicket(id int64, event ...EventContext) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "ticket.deleted", "ticket", ticket.ID, ticket.Key, map[string]any{
+	if err := insertAppEventTx(tx, time.Now().UTC(), event, "ticket.deleted", "ticket", ticket.ID, ticket.Key, map[string]any{
 		"product_id": ticket.ProductID,
 		"title":      ticket.Title,
 	}, nil); err != nil {

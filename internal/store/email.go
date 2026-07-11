@@ -432,7 +432,7 @@ func (s *Store) EmailNotificationStats() (EmailNotificationStats, error) {
 	return stats, nil
 }
 
-func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNotification, error) {
+func (s *Store) RetryEmailNotification(id int64, event EventContext) (EmailNotification, error) {
 	if id < 1 {
 		return EmailNotification{}, ErrNotFound
 	}
@@ -458,7 +458,7 @@ func (s *Store) RetryEmailNotification(id int64, event ...EventContext) (EmailNo
 	if err != nil {
 		return EmailNotification{}, err
 	}
-	if err := insertAppEventTx(tx, now, firstEventContext(event), "email_notification.retried", "email_notification", notification.ID, notification.Subject, map[string]any{"recipient": notification.RecipientEmail}, nil); err != nil {
+	if err := insertAppEventTx(tx, now, event, "email_notification.retried", "email_notification", notification.ID, notification.Subject, map[string]any{"recipient": notification.RecipientEmail}, nil); err != nil {
 		return EmailNotification{}, err
 	}
 	if err := tx.Commit(); err != nil {

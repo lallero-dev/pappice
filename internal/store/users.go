@@ -201,7 +201,7 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	return publicUserCopy(user), nil
 }
 
-func (s *Store) DeleteUser(id int64, event ...EventContext) error {
+func (s *Store) DeleteUser(id int64, event EventContext) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -223,7 +223,7 @@ func (s *Store) DeleteUser(id int64, event ...EventContext) error {
 			return err
 		}
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "user.deleted", "user", user.ID, user.Email, map[string]any{"role": user.Role}, nil); err != nil {
+	if err := insertAppEventTx(tx, time.Now().UTC(), event, "user.deleted", "user", user.ID, user.Email, map[string]any{"role": user.Role}, nil); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -345,7 +345,7 @@ func (s *Store) DeleteUserSessions(userID int64, keepToken string) error {
 	return err
 }
 
-func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepSessionToken string, event ...EventContext) (User, error) {
+func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepSessionToken string, event EventContext) (User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return User{}, err
@@ -383,7 +383,7 @@ func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepS
 	user.PasswordHash = hash
 	user.PasswordResetRequired = false
 	user.UpdatedAt = now
-	if err := insertAppEventTx(tx, now, firstEventContext(event), "password.changed", "user", user.ID, user.Email, nil, nil); err != nil {
+	if err := insertAppEventTx(tx, now, event, "password.changed", "user", user.ID, user.Email, nil, nil); err != nil {
 		return User{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -392,7 +392,7 @@ func (s *Store) ChangePassword(userID int64, currentPassword, newPassword, keepS
 	return publicUserCopy(user), nil
 }
 
-func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration, event ...EventContext) (User, AccountLink, string, error) {
+func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration, event EventContext) (User, AccountLink, string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return User{}, AccountLink{}, "", err
@@ -418,7 +418,7 @@ func (s *Store) CreatePasswordResetLink(userID int64, expiresFor time.Duration, 
 	}
 	user.PasswordResetRequired = true
 	user.UpdatedAt = now
-	if err := insertAppEventTx(tx, now, firstEventContext(event), "user.password_reset_requested", "user", user.ID, user.Email, nil, accountLinkEventPayload(user, token, link.ExpiresAt)); err != nil {
+	if err := insertAppEventTx(tx, now, event, "user.password_reset_requested", "user", user.ID, user.Email, nil, accountLinkEventPayload(user, token, link.ExpiresAt)); err != nil {
 		return User{}, AccountLink{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -461,7 +461,7 @@ func (s *Store) AccountLinkStatus(token string) (AccountLinkStatus, error) {
 	return status, nil
 }
 
-func (s *Store) ConsumeAccountLink(token, password string, event ...EventContext) (User, error) {
+func (s *Store) ConsumeAccountLink(token, password string, event EventContext) (User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return User{}, err
@@ -495,12 +495,11 @@ func (s *Store) ConsumeAccountLink(token, password string, event ...EventContext
 	user.PasswordHash = hash
 	user.PasswordResetRequired = false
 	user.UpdatedAt = now
-	ctx := firstEventContext(event)
-	if ctx.Enabled {
-		if ctx.Actor.UserID == 0 {
-			ctx.Actor = EventActorFromUser(user)
+	if event.Enabled {
+		if event.Actor.UserID == 0 {
+			event.Actor = EventActorFromUser(user)
 		}
-		if err := insertAppEventTx(tx, now, ctx, "password.changed", "user", user.ID, user.Email, nil, nil); err != nil {
+		if err := insertAppEventTx(tx, now, event, "password.changed", "user", user.ID, user.Email, nil, nil); err != nil {
 			return User{}, err
 		}
 	}
@@ -581,7 +580,7 @@ func (s *Store) ListAPITokens(userID int64) ([]PublicAPIToken, error) {
 	return tokens, rows.Err()
 }
 
-func (s *Store) DeleteAPIToken(userID, tokenID int64, event ...EventContext) error {
+func (s *Store) DeleteAPIToken(userID, tokenID int64, event EventContext) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -599,7 +598,7 @@ func (s *Store) DeleteAPIToken(userID, tokenID int64, event ...EventContext) err
 	if strings.TrimSpace(targetName) == "" {
 		targetName = fmt.Sprintf("%d", tokenID)
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "api_token.deleted", "api_token", tokenID, targetName, nil, nil); err != nil {
+	if err := insertAppEventTx(tx, time.Now().UTC(), event, "api_token.deleted", "api_token", tokenID, targetName, nil, nil); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -22,13 +22,6 @@ type EventContext struct {
 	IP      string
 }
 
-func firstEventContext(values []EventContext) EventContext {
-	if len(values) == 0 {
-		return EventContext{}
-	}
-	return values[0]
-}
-
 type DomainEvent struct {
 	ID               int64      `json:"id"`
 	Type             string     `json:"type"`

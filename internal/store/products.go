@@ -115,7 +115,7 @@ func (s *Store) UpdateProduct(id int64, patch UpdateProduct) (Product, error) {
 	return s.GetProduct(id)
 }
 
-func (s *Store) DeleteProduct(id int64, event ...EventContext) ([]string, error) {
+func (s *Store) DeleteProduct(id int64, event EventContext) ([]string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ func (s *Store) DeleteProduct(id int64, event ...EventContext) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "product.deleted", "product", product.ID, product.Key, map[string]any{"name": product.Name}, nil); err != nil {
+	if err := insertAppEventTx(tx, time.Now().UTC(), event, "product.deleted", "product", product.ID, product.Key, map[string]any{"name": product.Name}, nil); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -275,7 +275,7 @@ func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) 
 	return member, nil
 }
 
-func (s *Store) DeleteProductMember(productID, userID int64, event ...EventContext) error {
+func (s *Store) DeleteProductMember(productID, userID int64, event EventContext) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -296,7 +296,7 @@ func (s *Store) DeleteProductMember(productID, userID int64, event ...EventConte
 	if targetName == "" {
 		targetName = strconv.FormatInt(userID, 10)
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "product_member.removed", "user", userID, targetName, map[string]any{"product_id": productID}, nil); err != nil {
+	if err := insertAppEventTx(tx, time.Now().UTC(), event, "product_member.removed", "user", userID, targetName, map[string]any{"product_id": productID}, nil); err != nil {
 		return err
 	}
 	return tx.Commit()

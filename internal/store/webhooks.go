@@ -200,7 +200,7 @@ func (s *Store) UpdateWebhook(id int64, patch UpdateWebhook) (Webhook, error) {
 	return s.GetWebhook(id)
 }
 
-func (s *Store) RotateWebhookSecret(id int64, event ...EventContext) (Webhook, string, error) {
+func (s *Store) RotateWebhookSecret(id int64, event EventContext) (Webhook, string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Webhook{}, "", err
@@ -224,7 +224,7 @@ func (s *Store) RotateWebhookSecret(id int64, event ...EventContext) (Webhook, s
 	}
 	hook.Secret = secret
 	hook.UpdatedAt = now
-	if err := insertAppEventTx(tx, now, firstEventContext(event), "webhook.secret_rotated", "webhook", hook.ID, hook.Name, nil, nil); err != nil {
+	if err := insertAppEventTx(tx, now, event, "webhook.secret_rotated", "webhook", hook.ID, hook.Name, nil, nil); err != nil {
 		return Webhook{}, "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -237,7 +237,7 @@ func (s *Store) RotateWebhookSecret(id int64, event ...EventContext) (Webhook, s
 	return hook, secret, nil
 }
 
-func (s *Store) DeleteWebhook(id int64, event ...EventContext) error {
+func (s *Store) DeleteWebhook(id int64, event EventContext) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -254,7 +254,7 @@ func (s *Store) DeleteWebhook(id int64, event ...EventContext) error {
 	if err := requireChangedRow(result); err != nil {
 		return err
 	}
-	if err := insertAppEventTx(tx, time.Now().UTC(), firstEventContext(event), "webhook.deleted", "webhook", hook.ID, hook.Name, webhookEventDetails(hook), nil); err != nil {
+	if err := insertAppEventTx(tx, time.Now().UTC(), event, "webhook.deleted", "webhook", hook.ID, hook.Name, webhookEventDetails(hook), nil); err != nil {
 		return err
 	}
 	return tx.Commit()

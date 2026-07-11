@@ -166,7 +166,7 @@ func seedDemoStore(dbPath string) (demoSeed, error) {
 	if err != nil {
 		return demoSeed{}, err
 	}
-	if _, err := tracker.DeleteProduct(defaultProductID); err != nil {
+	if _, err := tracker.DeleteProduct(defaultProductID, store.EventContext{}); err != nil {
 		return demoSeed{}, err
 	}
 	for _, member := range []struct {

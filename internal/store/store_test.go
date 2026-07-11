@@ -1036,7 +1036,7 @@ func TestDeleteTicketCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 	}
 	commentAttachmentID := saved.Ticket.Comments[0].Attachments[0].ID
 
-	orphaned, err := tracker.DeleteTicket(ticket.ID)
+	orphaned, err := tracker.DeleteTicket(ticket.ID, EventContext{})
 	if err != nil {
 		t.Fatalf("delete ticket: %v", err)
 	}
@@ -1056,7 +1056,7 @@ func TestDeleteTicketCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 	if len(kept.Attachments) != 1 || kept.Attachments[0].StorageKey != shared.StorageKey {
 		t.Fatalf("kept ticket attachments = %#v", kept.Attachments)
 	}
-	if _, err := tracker.DeleteTicket(ticket.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := tracker.DeleteTicket(ticket.ID, EventContext{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete missing ticket err = %v, want not found", err)
 	}
 }
@@ -1106,7 +1106,7 @@ func TestDeleteProductCascadesAndReportsOrphanedStorageKeys(t *testing.T) {
 		t.Fatalf("create kept product ticket: %v", err)
 	}
 
-	orphaned, err := tracker.DeleteProduct(deleteProductID)
+	orphaned, err := tracker.DeleteProduct(deleteProductID, EventContext{})
 	if err != nil {
 		t.Fatalf("delete product: %v", err)
 	}
@@ -1216,10 +1216,10 @@ func TestUsersSessionsTokensAndWebhooks(t *testing.T) {
 	if len(tokens) != 1 || tokens[0].ID != token.ID || tokens[0].Prefix != token.Prefix {
 		t.Fatalf("API tokens = %#v", tokens)
 	}
-	if err := tracker.DeleteAPIToken(admin.ID, token.ID+100); !errors.Is(err, ErrNotFound) {
+	if err := tracker.DeleteAPIToken(admin.ID, token.ID+100, EventContext{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete missing API token error = %v, want ErrNotFound", err)
 	}
-	if err := tracker.DeleteAPIToken(admin.ID, token.ID); err != nil {
+	if err := tracker.DeleteAPIToken(admin.ID, token.ID, EventContext{}); err != nil {
 		t.Fatalf("delete API token: %v", err)
 	}
 	if tokens := mustListAPITokens(t, tracker, admin.ID); len(tokens) != 0 {
@@ -1326,7 +1326,7 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if foundLink.ID != link.ID || foundUser.ID != user.ID || foundUser.PasswordHash != "" {
 		t.Fatalf("setup link lookup = %#v user=%#v", foundLink, foundUser)
 	}
-	activated, err := tracker.ConsumeAccountLink(setupToken, "correct horse")
+	activated, err := tracker.ConsumeAccountLink(setupToken, "correct horse", EventContext{})
 	if err != nil {
 		t.Fatalf("consume setup link: %v", err)
 	}
@@ -1347,10 +1347,10 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create extra activated session: %v", err)
 	}
-	if _, err := tracker.ChangePassword(user.ID, "wrong password", "changed password", session); !errors.Is(err, ErrValidation) {
+	if _, err := tracker.ChangePassword(user.ID, "wrong password", "changed password", session, EventContext{}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("wrong current password error = %v, want ErrValidation", err)
 	}
-	changedUser, err := tracker.ChangePassword(user.ID, "correct horse", "changed password", session)
+	changedUser, err := tracker.ChangePassword(user.ID, "correct horse", "changed password", session, EventContext{})
 	if err != nil {
 		t.Fatalf("change password: %v", err)
 	}
@@ -1380,7 +1380,7 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 		t.Fatalf("removed extra session error = %v, want ErrNotFound", err)
 	}
 
-	resetUser, resetLink, resetToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour)
+	resetUser, resetLink, resetToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour, EventContext{})
 	if err != nil {
 		t.Fatalf("create reset link: %v", err)
 	}
@@ -1393,7 +1393,7 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 	if _, err := tracker.Authenticate("pending@example.test", "changed password"); !errors.Is(err, ErrPasswordResetRequired) {
 		t.Fatalf("reset-required authenticate error = %v, want ErrPasswordResetRequired", err)
 	}
-	if _, newerLink, newerToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour); err != nil {
+	if _, newerLink, newerToken, err := tracker.CreatePasswordResetLink(user.ID, time.Hour, EventContext{}); err != nil {
 		t.Fatalf("create newer reset link: %v", err)
 	} else {
 		if newerLink.ID == resetLink.ID || newerToken == resetToken {
@@ -1405,7 +1405,7 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 		resetToken = newerToken
 	}
 
-	resetComplete, err := tracker.ConsumeAccountLink(resetToken, "better password")
+	resetComplete, err := tracker.ConsumeAccountLink(resetToken, "better password", EventContext{})
 	if err != nil {
 		t.Fatalf("consume reset link: %v", err)
 	}
@@ -1416,7 +1416,7 @@ func TestAccountLinksAndPasswordResetLifecycle(t *testing.T) {
 		t.Fatalf("authenticate reset user: %v", err)
 	}
 
-	_, _, expiringToken, err := tracker.CreatePasswordResetLink(user.ID, time.Nanosecond)
+	_, _, expiringToken, err := tracker.CreatePasswordResetLink(user.ID, time.Nanosecond, EventContext{})
 	if err != nil {
 		t.Fatalf("create expiring reset link: %v", err)
 	}
@@ -1478,7 +1478,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if role, err := tracker.ProductRole(user.ID, product.ID); err != nil || role != "customer" {
 		t.Fatalf("product role = %q err=%v", role, err)
 	}
-	if err := tracker.DeleteProductMember(product.ID, user.ID); err != nil {
+	if err := tracker.DeleteProductMember(product.ID, user.ID, EventContext{}); err != nil {
 		t.Fatalf("delete member: %v", err)
 	}
 	if _, err := tracker.ProductRole(user.ID, product.ID); !errors.Is(err, ErrNotFound) {
@@ -1527,7 +1527,7 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if hook.URL != "https://hooks.example.test/renamed" || hook.Secret != secret || !slices.Equal(hook.Events, events) {
 		t.Fatalf("updated hook details = %#v", hook)
 	}
-	rotated, rotatedSecret, err := tracker.RotateWebhookSecret(hook.ID)
+	rotated, rotatedSecret, err := tracker.RotateWebhookSecret(hook.ID, EventContext{})
 	if err != nil {
 		t.Fatalf("rotate webhook secret: %v", err)
 	}
@@ -1665,20 +1665,20 @@ func TestStoreAdminProductWebhookAndFailureLifecycle(t *testing.T) {
 	if stats.Total != 1 || stats.Failed != 1 || stats.LastError != "temporary failure" {
 		t.Fatalf("email stats = %#v", stats)
 	}
-	retried, err := tracker.RetryEmailNotification(queued[0].ID)
+	retried, err := tracker.RetryEmailNotification(queued[0].ID, EventContext{})
 	if err != nil {
 		t.Fatalf("retry email: %v", err)
 	}
 	if retried.Status != "pending" || retried.Attempts != 0 || retried.LastError != "" {
 		t.Fatalf("retried email = %#v", retried)
 	}
-	if err := tracker.DeleteWebhook(hook.ID); err != nil {
+	if err := tracker.DeleteWebhook(hook.ID, EventContext{}); err != nil {
 		t.Fatalf("delete webhook: %v", err)
 	}
-	if err := tracker.DeleteUser(user.ID); err != nil {
+	if err := tracker.DeleteUser(user.ID, EventContext{}); err != nil {
 		t.Fatalf("delete user: %v", err)
 	}
-	if _, err := tracker.DeleteProduct(product.ID); err != nil {
+	if _, err := tracker.DeleteProduct(product.ID, EventContext{}); err != nil {
 		t.Fatalf("delete product: %v", err)
 	}
 }

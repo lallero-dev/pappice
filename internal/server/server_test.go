@@ -983,7 +983,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 	loginUser(t, client, server.URL, "pending", "new correct horse")
 
-	_, _, expiredToken, err := tracker.CreatePasswordResetLink(userID, time.Nanosecond)
+	_, _, expiredToken, err := tracker.CreatePasswordResetLink(userID, time.Nanosecond, store.EventContext{})
 	if err != nil {
 		t.Fatalf("create expired reset link: %v", err)
 	}

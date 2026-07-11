@@ -46,7 +46,7 @@ func TestAccountLinkProjectionResolvesUserByID(t *testing.T) {
 		projection.EmailNotifications[0].RecipientEmail != newEmail || projection.EmailNotifications[0].RecipientName != newName {
 		t.Fatalf("email notifications = %#v", projection.EmailNotifications)
 	}
-	if err := tracker.DeleteUser(user.ID); err != nil {
+	if err := tracker.DeleteUser(user.ID, store.EventContext{}); err != nil {
 		t.Fatalf("delete pending user: %v", err)
 	}
 	projection, err = server.domainEventProjection(events[0])
