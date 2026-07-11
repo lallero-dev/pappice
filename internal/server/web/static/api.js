@@ -16,8 +16,8 @@ async function requestWithCSRFRefresh(path, options, retryCSRF) {
   }
   const response = await fetch(path, {
     credentials: "same-origin",
-    headers,
-    ...options
+    ...options,
+    headers
   });
   const text = await response.text();
   let payload = {};

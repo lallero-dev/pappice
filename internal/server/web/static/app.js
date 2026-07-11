@@ -30,6 +30,7 @@ import {
   bindAttachmentDropZone,
   bindAttachmentPasteZone,
   formatBytes,
+  setAttachmentFiles,
   selectedCommentFiles,
   selectedTicketFiles,
   ticketAttachmentField
@@ -43,6 +44,7 @@ let ticketLoadRequestID = 0;
 let ticketDetailRequestID = 0;
 let ticketRefreshTimer = 0;
 let ticketRefreshInFlight = false;
+let sectionLoadRequestID = 0;
 const commentDrafts = new Map();
 
 function formatSeconds(seconds) {
@@ -272,7 +274,6 @@ function renderAccountLinkForm({ purpose, user = null, expiresAt = "", loading =
 
 async function enterApp() {
   showApp();
-  await loadHealth();
   if (!isCustomer()) {
     await loadUsers();
   } else {
@@ -280,7 +281,7 @@ async function enterApp() {
   }
   await loadProducts();
   await applyRoute();
-  startTicketRefreshLoop({ immediate: true });
+  startTicketRefreshLoop();
 }
 
 function showAuth(mode) {
@@ -679,13 +680,19 @@ async function loadTokens() {
 }
 
 async function loadMembers() {
-  const payload = await request(`/api/products/${state.productDetailId}/members`);
+  const productID = state.productDetailId;
+  const requestID = ++sectionLoadRequestID;
+  const payload = await request(`/api/products/${productID}/members`);
+  if (requestID !== sectionLoadRequestID || state.productDetailId !== productID) return;
   state.members = payload.members || [];
   renderMembers();
 }
 
 async function loadProductWebhooks() {
-  const payload = await request(`/api/products/${state.productDetailId}/webhooks`);
+  const productID = state.productDetailId;
+  const requestID = ++sectionLoadRequestID;
+  const payload = await request(`/api/products/${productID}/webhooks`);
+  if (requestID !== sectionLoadRequestID || state.productDetailId !== productID) return;
   state.webhooks = payload.webhooks || [];
   renderWebhooks(els.webhookList, state.webhooks);
 }
@@ -697,6 +704,7 @@ async function loadGlobalWebhooks() {
 }
 
 async function loadEmailNotifications() {
+  const requestID = ++sectionLoadRequestID;
   const params = new URLSearchParams({
     limit: String(state.emailPage.limit),
     offset: String(state.emailPage.offset)
@@ -704,6 +712,7 @@ async function loadEmailNotifications() {
   if (state.emailPage.status) params.set("status", state.emailPage.status);
   if (state.emailPage.q) params.set("q", state.emailPage.q);
   const payload = await request(`/api/email-notifications?${params.toString()}`);
+  if (requestID !== sectionLoadRequestID) return;
   state.emailNotifications = payload.notifications || [];
   state.emailPage.total = Number(payload.total || 0);
   state.emailPage.limit = Number(payload.limit || state.emailPage.limit);
@@ -715,12 +724,14 @@ async function loadEmailNotifications() {
 }
 
 async function loadAuditEvents() {
+  const requestID = ++sectionLoadRequestID;
   const params = new URLSearchParams({
     limit: String(state.auditPage.limit),
     offset: String(state.auditPage.offset)
   });
   if (state.auditPage.q) params.set("q", state.auditPage.q);
   const payload = await request(`/api/audit-events?${params.toString()}`);
+  if (requestID !== sectionLoadRequestID) return;
   state.auditEvents = payload.events || [];
   state.auditPage.total = Number(payload.total || 0);
   state.auditPage.limit = Number(payload.limit || state.auditPage.limit);
@@ -735,7 +746,10 @@ async function loadMaintenance() {
 }
 
 async function loadProductDeliveries() {
-  const payload = await request(`/api/products/${state.productDetailId}/webhook-deliveries`);
+  const productID = state.productDetailId;
+  const requestID = ++sectionLoadRequestID;
+  const payload = await request(`/api/products/${productID}/webhook-deliveries`);
+  if (requestID !== sectionLoadRequestID || state.productDetailId !== productID) return;
   state.deliveries = payload.deliveries || [];
   renderDeliveries();
 }
@@ -1122,7 +1136,7 @@ function renderTicketDetail() {
 async function markTicketRead(ticket) {
   if (!ticket?.id || !ticket.has_unread) return;
   const updated = await request(`/api/tickets/${ticket.id}/read`, { method: "POST" });
-  setSelectedTicket(updated, { updateRoute: false });
+  if (state.selectedId === ticket.id) setSelectedTicket(updated, { updateRoute: false });
   replaceTicket(updated);
   await loadTickets({ renderDetail: false });
 }
@@ -1840,15 +1854,10 @@ function emailStat(label, value) {
 }
 
 function emailNotificationRow(notification) {
-  const row = el("div", { className: "admin-row email-row", role: "button", tabindex: "0" });
-  row.addEventListener("click", () => openEmailNotificationModal(notification));
-  row.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      openEmailNotificationModal(notification);
-    }
-  });
+  const row = el("div", { className: "admin-row email-row" });
   const status = badge(notification.status, emailStatusClass(notification.status));
+  const view = el("button", { className: "ghost-button", type: "button" }, "View");
+  view.addEventListener("click", () => openEmailNotificationModal(notification));
   const retry = el("button", { className: "ghost-button", type: "button" }, "Retry");
   retry.hidden = notification.status !== "failed";
   retry.addEventListener("click", (event) => {
@@ -1862,6 +1871,7 @@ function emailNotificationRow(notification) {
     ]),
     status,
     el("span", { className: "muted" }, notification.last_error || emailNotificationTime(notification)),
+    view,
     retry
   );
   return row;
@@ -2170,7 +2180,10 @@ function bindCommentComposer(form, ticket) {
     update();
   });
   visibility?.addEventListener("change", () => saveCommentDraft(ticket, composer));
-  composer.querySelectorAll("input[type='file']").forEach((input) => input.addEventListener("change", update));
+  composer.querySelectorAll("input[type='file']").forEach((input) => input.addEventListener("change", () => {
+    saveCommentDraft(ticket, composer);
+    update();
+  }));
   form.addEventListener("submit", async (event) => {
     if (event.submitter !== sendButton) return;
     event.preventDefault();
@@ -2231,11 +2244,12 @@ function saveCommentDraft(ticket, composer) {
   if (!key) return;
   const body = composer.querySelector("[name='body']")?.value || "";
   const visibility = composer.querySelector("[name='visibility']")?.value || "public";
-  if (String(body).trim() === "" && visibility === "public") {
+  const files = selectedCommentFiles(composer);
+  if (String(body).trim() === "" && visibility === "public" && files.length === 0) {
     commentDrafts.delete(key);
     return;
   }
-  commentDrafts.set(key, { body, visibility });
+  commentDrafts.set(key, { body, visibility, files });
 }
 
 function clearCommentDraft(ticket) {
@@ -2438,6 +2452,7 @@ function commentComposer(ticket) {
   wrap.append(entry, attachments);
   const attachmentInput = attachments.querySelector(".attachment-input");
   if (attachmentInput) {
+    if (draft?.files?.length) setAttachmentFiles(attachmentInput, draft.files);
     bindAttachmentDropZone(wrap, attachmentInput);
     bindAttachmentPasteZone(wrap, attachmentInput);
   }
@@ -3223,6 +3238,9 @@ function bindEvents() {
   }
   els.newTicketButton.addEventListener("click", () => openTicketCreateModal());
   els.modalHost.addEventListener("pappice-modal-error", (event) => showError(event.detail));
+  document.addEventListener("pappice-attachment-limit", (event) => {
+    showAppAlert(`You can attach up to ${event.detail.maxFiles} files.`);
+  });
 
   els.searchInput.addEventListener("input", debounce(() => {
     state.filters.q = els.searchInput.value.trim();

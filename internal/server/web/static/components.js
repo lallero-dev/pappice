@@ -4,10 +4,10 @@ export class PappiceModal extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this.shadowRoot.innerHTML = `
       <link rel="stylesheet" href="/static/components.css">
-      <dialog>
+      <dialog aria-labelledby="pappice-modal-title">
         <form method="dialog">
           <header>
-            <h2></h2>
+            <h2 id="pappice-modal-title"></h2>
             <button class="icon" type="button" value="cancel" aria-label="Close">x</button>
           </header>
           <p class="error" role="alert" hidden></p>

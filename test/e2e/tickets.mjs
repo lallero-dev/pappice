@@ -445,7 +445,7 @@ async function staffReplyAndResolve(cdp) {
   await pressKey(cdp, "Escape");
 
   await runInPage(cdp, async (input) => {
-    const { openModalRoot, setValue, waitFor } = pageTools();
+    const { openModalRoot, pasteFiles, setValue, waitFor } = pageTools();
     await waitFor(() => !document.querySelector(".image-preview-modal[open]"), "image preview closed with escape");
     let detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
@@ -453,6 +453,9 @@ async function staffReplyAndResolve(cdp) {
         pane?.textContent.includes(input.reply) ? pane : null;
     }, "ticket remains open after image preview escape");
     setValue(detail.querySelector("[name='body']"), input.draft);
+    pasteFiles(detail.querySelector("[name='body']"), [
+      new File(["draft attachment"], "e2e-draft.txt", { type: "text/plain" })
+    ]);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
@@ -466,7 +469,8 @@ async function staffReplyAndResolve(cdp) {
     detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
       return document.querySelector("#ticketList .ticket-row.active") &&
-        pane?.querySelector("[name='body']")?.value === input.draft ? pane : null;
+        pane?.querySelector("[name='body']")?.value === input.draft &&
+        pane.textContent.includes("e2e-draft.txt") ? pane : null;
     }, "local comment draft restored after reopening ticket");
     const deleteButton = detail.querySelector("[data-delete-ticket]");
     if (!deleteButton || !deleteButton.classList.contains("danger")) {

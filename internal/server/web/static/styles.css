@@ -2287,18 +2287,6 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.email-row {
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
-}
-
-.email-row:hover,
-.email-row:focus-visible {
-  background: #f8fbfd;
-}
-
 .pager {
   align-items: center;
   border-top: 1px solid var(--border-soft);

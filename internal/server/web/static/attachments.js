@@ -1,6 +1,16 @@
 import { el } from "./components.js";
 import { state } from "./state.js";
 
+class PappiceAttachmentPreview extends HTMLElement {
+  disconnectedCallback() {
+    cleanupAttachmentPreview(this);
+  }
+}
+
+if (!customElements.get("pappice-attachment-preview")) {
+  customElements.define("pappice-attachment-preview", PappiceAttachmentPreview);
+}
+
 export function ticketAttachmentField(label, name) {
   const control = document.createElement("input");
   control.type = "file";
@@ -12,7 +22,7 @@ export function ticketAttachmentField(label, name) {
   if (allowed.length > 0 && !allowed.includes("*") && !allowed.includes("*/*")) {
     control.accept = allowed.join(",");
   }
-  const preview = el("div", { className: "attachment-preview empty" });
+  const preview = el("pappice-attachment-preview", { className: "attachment-preview empty" });
   const trigger = el("button", { className: "attachment-trigger", type: "button" }, [
     attachmentIcon()
   ]);
@@ -191,8 +201,14 @@ function clipboardAttachmentFiles(clipboardData) {
   return Array.from(clipboardData?.files || []);
 }
 
-function setAttachmentFiles(input, files) {
+export function setAttachmentFiles(input, files) {
   const maxFiles = Number(state.meta.uploads?.max_files || 0);
+  if (maxFiles > 0 && files.length > maxFiles) {
+    input.dispatchEvent(new CustomEvent("pappice-attachment-limit", {
+      bubbles: true,
+      detail: { maxFiles }
+    }));
+  }
   const selected = maxFiles > 0 ? files.slice(0, maxFiles) : files;
   const transfer = new DataTransfer();
   for (const file of selected) transfer.items.add(file);

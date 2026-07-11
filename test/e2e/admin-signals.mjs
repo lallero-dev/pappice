@@ -16,7 +16,7 @@ async function verifyEmailOutbox(cdp) {
         return text.includes("ticket.commented") && text.includes(input.customerEmail);
       });
     }, "customer ticket.commented notification", 12000);
-    row.click();
+    row.querySelector("button").click();
     await waitFor(() => {
       const root = modalRoot();
       return root?.querySelector("dialog[open]") && root.textContent.includes(input.reply);
