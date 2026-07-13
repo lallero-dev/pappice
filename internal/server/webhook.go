@@ -99,7 +99,9 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64
 		return s.recordWebhookDelivery(delivery)
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); err != nil {
+		fmt.Errorf("failed to drain response body: %v", err)
+	}
 	delivery.StatusCode = resp.StatusCode
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		delivery.Error = fmt.Sprintf("webhook returned HTTP %d", resp.StatusCode)
