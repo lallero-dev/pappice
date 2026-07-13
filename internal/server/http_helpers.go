@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -270,9 +271,16 @@ func respondStoreError(w http.ResponseWriter, err error) {
 }
 
 func respondJSON(w http.ResponseWriter, status int, payload any) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("failed to encode JSON: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	w.Write(data)
 }
 
 func respondError(w http.ResponseWriter, status int, message string) {
