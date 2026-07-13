@@ -2,6 +2,7 @@ package server
 
 import (
 	"io/fs"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -62,7 +63,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "index asset not found")
 		return
 	}
-	_, _ = w.Write(content)
+	if _, err := w.Write(content); err != nil {
+		log.Printf("failed to write index response: %v", err)
+	}
 }
 
 func isAppIndexPath(path string) bool {
@@ -111,5 +114,7 @@ func (s *Server) handleAccountIndex(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "index asset not found")
 		return
 	}
-	_, _ = w.Write(content)
+	if _, err := w.Write(content); err != nil {
+		log.Printf("failed to write index response: %v", err)
+	}
 }
