@@ -259,7 +259,9 @@ func (s *Store) rehashPasswordIfNeeded(user User, password string) {
 	if err != nil {
 		return
 	}
-	_, _ = s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?`, hash, user.ID, user.PasswordHash)
+	if _, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?`, hash, user.ID, user.PasswordHash); err != nil {
+		fmt.Errorf("failed to update user password: %w", err)
+	}
 }
 
 func (s *Store) CreateSession(userID int64) (string, string, time.Time, error) {
@@ -579,7 +581,15 @@ func (s *Store) DeleteAPIToken(userID, tokenID int64, event EventContext) error 
 	}
 	defer tx.Rollback()
 	var targetName string
-	_ = tx.QueryRow(`SELECT name FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID).Scan(&targetName)
+
+	err = tx.QueryRow(`SELECT name FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID).Scan(&targetName)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to query api token: %w", err)
+	}
+
 	result, err := tx.Exec(`DELETE FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID)
 	if err != nil {
 		return err
@@ -630,7 +640,9 @@ func (s *Store) UserByAPIToken(token string) (User, error) {
 	now := time.Now().UTC()
 	lastUsed := last.Time
 	if lastUsed == nil || now.Sub(*lastUsed) > time.Hour {
-		_, _ = s.db.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, formatTime(now), tokenID)
+		if _, err := s.db.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, formatTime(now), tokenID); err != nil {
+			fmt.Errorf("failed to update api_token last_used_at: %v", err)
+		}
 	}
 	return publicUserCopy(user), nil
 }
