@@ -14,7 +14,11 @@ func TestAccountLinkProjectionResolvesUserByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = tracker.Close() })
+	t.Cleanup(func() {
+		if err := tracker.Close(); err != nil {
+			t.Errorf("failed to close tracker during cleanup: %v", err)
+		}
+	})
 	admin, err := tracker.CreateFirstAdmin(store.CreateUser{Email: "admin@example.test", Password: "correct horse"})
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
