@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -27,7 +28,9 @@ func copySQLiteDatabase(sourcePath, destinationPath string) error {
 	if _, err := db.Exec(`PRAGMA busy_timeout = 5000;`); err != nil {
 		return err
 	}
-	_, _ = db.Exec(`PRAGMA wal_checkpoint(PASSIVE);`)
+	if _, err := db.Exec(`PRAGMA wal_checkpoint(PASSIVE);`); err != nil {
+		return fmt.Errorf("failed to checkpoint sqlite: %w", err)
+	}
 
 	conn, err := db.Conn(context.Background())
 	if err != nil {
@@ -46,10 +49,15 @@ func copySQLiteDatabase(sourcePath, destinationPath string) error {
 		for more := true; more; {
 			more, err = backup.Step(-1)
 			if err != nil {
-				_ = backup.Finish()
+				if err := backup.Finish(); err != nil {
+					return fmt.Errorf("failed to finalize sqlite backup: %w", err)
+				}
 				return err
 			}
 		}
-		return backup.Finish()
+		if err := backup.Finish(); err != nil {
+			return fmt.Errorf("failed to finalize sqlite backup: %w", err)
+		}
+		return nil
 	})
 }
