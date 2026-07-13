@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -187,7 +188,9 @@ func (s *Server) parseMultipartForm(w http.ResponseWriter, r *http.Request) bool
 
 func cleanupMultipartForm(r *http.Request) {
 	if r != nil && r.MultipartForm != nil {
-		_ = r.MultipartForm.RemoveAll()
+		if err := r.MultipartForm.RemoveAll(); err != nil {
+			log.Printf("failed to remove multipart form temp files: %v", err)
+		}
 	}
 }
 
@@ -243,7 +246,11 @@ func (s *Server) saveMultipartAttachments(form *multipart.Form) ([]storedUpload,
 			return nil, err
 		}
 		upload, err := s.saveUploadedFile(file, header)
-		_ = file.Close()
+		closeErr := file.Close()
+		if closeErr != nil {
+			cleanupStoredUploads(uploads)
+			return nil, fmt.Errorf("failed to finalize upload file %s: %w", header.Filename, closeErr)
+		}
 		if err != nil {
 			cleanupStoredUploads(uploads)
 			return nil, err
@@ -267,10 +274,17 @@ func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHea
 	}
 	tempPath := temp.Name()
 	keepTemp := false
+
 	defer func() {
-		_ = temp.Close()
+		closeErr := temp.Close()
+		if closeErr != nil {
+			log.Printf("failed to close temp file: %v", closeErr)
+		}
 		if !keepTemp {
-			_ = os.Remove(tempPath)
+			removeErr := os.Remove(tempPath)
+			if removeErr != nil {
+				log.Printf("failed to remove temp file: %v", removeErr)
+			}
 		}
 	}()
 
@@ -372,7 +386,9 @@ func (s *Server) openAttachmentFile(storageKey string) (*os.File, os.FileInfo, e
 	}
 	stat, err := file.Stat()
 	if err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("failed to close file after stat error: %v", closeErr)
+		}
 		return nil, nil, err
 	}
 	return file, stat, nil
@@ -395,7 +411,9 @@ func (s *Server) removeOrphanedAttachmentFiles(storageKeys []string) {
 		seen[storageKey] = struct{}{}
 		path, err := s.attachmentFilePath(storageKey)
 		if err == nil {
-			_ = os.Remove(path)
+			if removeErr := os.Remove(path); removeErr != nil {
+				fmt.Errorf("cleanup failed for %s: %w", path, removeErr)
+			}
 		}
 	}
 }
@@ -403,7 +421,9 @@ func (s *Server) removeOrphanedAttachmentFiles(storageKeys []string) {
 func cleanupStoredUploads(uploads []storedUpload) {
 	for _, upload := range uploads {
 		if upload.Created && upload.Path != "" {
-			_ = os.Remove(upload.Path)
+			if err := os.Remove(upload.Path); err != nil {
+				log.Printf("failed to remove temporary file %s: %v", upload.Path, err)
+			}
 		}
 	}
 }
