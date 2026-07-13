@@ -59,7 +59,9 @@ func Create(cfg Config) (Result, error) {
 	committed := false
 	defer func() {
 		if !committed {
-			_ = os.RemoveAll(tempPath)
+			if err := os.RemoveAll(tempPath); err != nil {
+				fmt.Errorf("failed to remove temp path %s: %v", tempPath, err)
+			}
 		}
 	}()
 
@@ -122,7 +124,9 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	}
 	defer func() {
 		if !tempDBInstalled {
-			_ = os.Remove(tempDBPath)
+			if err := os.Remove(tempDBPath); err != nil {
+				fmt.Errorf("failed to remove temp db path %s: %v", tempDBPath, err)
+			}
 		}
 	}()
 
@@ -133,7 +137,9 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	tempUploadsInstalled := false
 	defer func() {
 		if !tempUploadsInstalled {
-			_ = os.RemoveAll(tempUploadDir)
+			if err := os.RemoveAll(tempUploadDir); err != nil {
+				fmt.Errorf("failed to remove temp upload dir %s: %v", tempUploadDir, err)
+			}
 		}
 	}()
 
