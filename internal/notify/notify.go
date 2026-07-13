@@ -114,8 +114,9 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) error {
 		return err
 	}
 	if _, err := writer.Write(renderMessage(from, to, message)); err != nil {
-		_ = writer.Close()
-		return err
+		if closeErr := writer.Close(); closeErr != nil {
+			return fmt.Errorf("write failed: %v; subsequent close failed: %w", err, closeErr)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		return err
@@ -139,17 +140,23 @@ func (m *SMTPMailer) connect() (*smtp.Client, error) {
 	}
 	client, err := smtp.NewClient(conn, m.config.Host)
 	if err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			return nil, fmt.Errorf("operation failed: %v; subsequent close failed: %w", err, closeErr)
+		}
 		return nil, err
 	}
 	if m.config.TLSMode == "starttls" {
 		ok, _ := client.Extension("STARTTLS")
 		if !ok {
-			_ = client.Close()
+			if err := client.Close(); err != nil {
+				return nil, fmt.Errorf("smtp server does not advertise STARTTLS and failed to close: %v", err)
+			}
 			return nil, errors.New("smtp server does not advertise STARTTLS")
 		}
 		if err := client.StartTLS(&tls.Config{ServerName: m.config.Host, MinVersion: tls.VersionTLS12}); err != nil {
-			_ = client.Close()
+			if closeErr := client.Close(); closeErr != nil {
+				return nil, fmt.Errorf("STARTTLS failed: %v; subsequent close failed: %w", err, closeErr)
+			}
 			return nil, err
 		}
 	}
@@ -175,7 +182,9 @@ func (w Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		_ = w.ProcessOnce(ctx)
+		if err := w.ProcessOnce(ctx); err != nil {
+			w.logf("worker process failed: %v", err)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -211,7 +220,9 @@ func (w Worker) ProcessOnce(ctx context.Context) error {
 		}
 		if err := w.Mailer.Send(ctx, message); err != nil {
 			w.logf("send email notification %d: %v", notification.ID, err)
-			_ = w.Store.MarkEmailFailed(notification.ID, err, w.MaxAttempts)
+			if markErr := w.Store.MarkEmailFailed(notification.ID, err, w.MaxAttempts); markErr != nil {
+				w.logf("CRITICAL: failed to mark email %d as failed: %v (original error: %v)", notification.ID, markErr, err)
+			}
 			continue
 		}
 		if err := w.Store.MarkEmailSent(notification.ID); err != nil {
