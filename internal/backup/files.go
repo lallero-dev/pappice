@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,9 @@ func prepareRestoreUploads(backupPath, uploadDir string) (string, error) {
 	committed := false
 	defer func() {
 		if !committed {
-			_ = os.RemoveAll(tempUploadDir)
+			if err := os.RemoveAll(tempUploadDir); err != nil {
+				log.Printf("failed to remove temp upload directory %s: %v", tempUploadDir, err)
+			}
 		}
 	}()
 	uploadsArchive := filepath.Join(backupPath, "uploads.tar")
