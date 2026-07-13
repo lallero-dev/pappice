@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -100,7 +101,7 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64
 	}
 	defer resp.Body.Close()
 	if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)); err != nil {
-		fmt.Errorf("failed to drain response body: %v", err)
+		log.Printf("failed to drain response body: %v", err)
 	}
 	delivery.StatusCode = resp.StatusCode
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {

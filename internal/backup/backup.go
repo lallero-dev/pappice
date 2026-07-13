@@ -3,6 +3,7 @@ package backup
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,7 +61,7 @@ func Create(cfg Config) (Result, error) {
 	defer func() {
 		if !committed {
 			if err := os.RemoveAll(tempPath); err != nil {
-				fmt.Errorf("failed to remove temp path %s: %v", tempPath, err)
+				log.Printf("failed to remove temp path %s: %v", tempPath, err)
 			}
 		}
 	}()
@@ -125,7 +126,7 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	defer func() {
 		if !tempDBInstalled {
 			if err := os.Remove(tempDBPath); err != nil {
-				fmt.Errorf("failed to remove temp db path %s: %v", tempDBPath, err)
+				log.Printf("failed to remove temp db path %s: %v", tempDBPath, err)
 			}
 		}
 	}()
@@ -138,7 +139,7 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	defer func() {
 		if !tempUploadsInstalled {
 			if err := os.RemoveAll(tempUploadDir); err != nil {
-				fmt.Errorf("failed to remove temp upload dir %s: %v", tempUploadDir, err)
+				log.Printf("failed to remove temp upload dir %s: %v", tempUploadDir, err)
 			}
 		}
 	}()

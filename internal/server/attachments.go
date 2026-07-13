@@ -412,7 +412,7 @@ func (s *Server) removeOrphanedAttachmentFiles(storageKeys []string) {
 		path, err := s.attachmentFilePath(storageKey)
 		if err == nil {
 			if removeErr := os.Remove(path); removeErr != nil {
-				fmt.Errorf("cleanup failed for %s: %w", path, removeErr)
+				log.Printf("cleanup failed for %s: %v", path, removeErr)
 			}
 		}
 	}

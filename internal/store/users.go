@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -260,7 +261,7 @@ func (s *Store) rehashPasswordIfNeeded(user User, password string) {
 		return
 	}
 	if _, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?`, hash, user.ID, user.PasswordHash); err != nil {
-		fmt.Errorf("failed to update user password: %w", err)
+		log.Printf("failed to update user password: %v", err)
 	}
 }
 
@@ -641,7 +642,7 @@ func (s *Store) UserByAPIToken(token string) (User, error) {
 	lastUsed := last.Time
 	if lastUsed == nil || now.Sub(*lastUsed) > time.Hour {
 		if _, err := s.db.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, formatTime(now), tokenID); err != nil {
-			fmt.Errorf("failed to update api_token last_used_at: %v", err)
+			log.Printf("failed to update api_token last_used_at: %v", err)
 		}
 	}
 	return publicUserCopy(user), nil
