@@ -87,7 +87,10 @@ func (report *doctorReport) checkDatabase(path string) {
 			report.err("database", err.Error())
 			return
 		}
-		_ = file.Close()
+		err = file.Close()
+		if err != nil {
+			report.err("database", fmt.Sprintf("could not close file: %v", err))
+		}
 		report.ok("database", path+" exists and is writable")
 		return
 	}
@@ -186,7 +189,10 @@ func (report *doctorReport) checkReadableFile(label, path string) bool {
 		report.err(label, err.Error())
 		return false
 	}
-	_ = file.Close()
+	err = file.Close()
+	if err != nil {
+		report.err("database", fmt.Sprintf("could not close file: %v", err))
+	}
 	return true
 }
 
@@ -280,9 +286,15 @@ func checkWritableDir(path string) error {
 		return err
 	}
 	name := file.Name()
-	if err := file.Close(); err != nil {
-		_ = os.Remove(name)
-		return err
+
+	closeErr := file.Close()
+	removeErr := os.Remove(name)
+
+	if closeErr != nil {
+		return fmt.Errorf("failed to close temp file: %w", closeErr)
 	}
-	return os.Remove(name)
+	if removeErr != nil {
+		return fmt.Errorf("failed to remove temp file: %w", removeErr)
+	}
+	return nil
 }
