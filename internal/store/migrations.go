@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -90,7 +91,11 @@ func Migrate(path string, opts MigrationOptions) (MigrationResult, error) {
 			return MigrationResult{DryRun: true}, err
 		}
 		targetPath = tempPath
-		cleanup = func() { _ = os.Remove(tempPath) }
+		cleanup = func() {
+			if err := os.Remove(tempPath); err != nil {
+				log.Printf("failed to remove temporary file %s: %v", tempPath, err)
+			}
+		}
 	}
 	defer cleanup()
 
@@ -123,7 +128,9 @@ func dryRunDatabase(sourcePath string) (string, error) {
 	}
 	tempPath := file.Name()
 	if err := file.Close(); err != nil {
-		_ = os.Remove(tempPath)
+		if err := os.Remove(tempPath); err != nil {
+			log.Printf("failed to remove temporary file %s: %v", tempPath, err)
+		}
 		return "", err
 	}
 	if err := os.Remove(tempPath); err != nil {
@@ -153,7 +160,9 @@ func dryRunDatabase(sourcePath string) (string, error) {
 		return "", err
 	}
 	if _, err := source.Exec(`VACUUM INTO ?`, tempPath); err != nil {
-		_ = os.Remove(tempPath)
+		if err := os.Remove(tempPath); err != nil {
+			log.Printf("failed to remove temporary file %s: %v", tempPath, err)
+		}
 		return "", fmt.Errorf("copy database for dry-run: %w", err)
 	}
 	return tempPath, nil
