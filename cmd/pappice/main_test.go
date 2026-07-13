@@ -536,7 +536,9 @@ func TestDoctorCommand(t *testing.T) {
 		t.Fatalf("open legacy db: %v", err)
 	}
 	if _, err := legacyDB.Exec(`CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY)`); err != nil {
-		_ = legacyDB.Close()
+		if closeErr := legacyDB.Close(); closeErr != nil {
+			t.Fatalf("failed to close legacy db: %v", closeErr)
+		}
 		t.Fatalf("create legacy db: %v", err)
 	}
 	if err := legacyDB.Close(); err != nil {

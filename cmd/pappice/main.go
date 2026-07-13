@@ -168,7 +168,9 @@ func serve(cfg appConfig, stderr io.Writer) error {
 	}
 	defer func() {
 		if debugSrv != nil {
-			_ = debugSrv.Close()
+			if err := debugSrv.Close(); err != nil {
+				logger.Printf("failed to close debug server: %v", err)
+			}
 		}
 	}()
 
