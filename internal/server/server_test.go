@@ -1628,7 +1628,11 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = tracker.Close() })
+	t.Cleanup(func() {
+		if err := tracker.Close(); err != nil {
+			t.Errorf("failed to close test.db during cleanup: %v", err)
+		}
+	})
 	app := NewServer(tracker, Options{
 		AllowInsecureWebhooks: true,
 		AllowPrivateWebhooks:  true,
@@ -1714,7 +1718,11 @@ func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = tracker.Close() })
+	t.Cleanup(func() {
+		if err := tracker.Close(); err != nil {
+			t.Errorf("failed to close test.db during cleanup: %v", err)
+		}
+	})
 	app := NewServer(tracker, Options{
 		AllowInsecureWebhooks: true,
 		AllowPrivateWebhooks:  true,
@@ -2540,7 +2548,11 @@ func newTestServer(t *testing.T, opts ...Options) (*store.Store, *httptest.Serve
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = tracker.Close() })
+	t.Cleanup(func() {
+		if err := tracker.Close(); err != nil {
+			t.Errorf("failed to close test.db during cleanup: %v", err)
+		}
+	})
 	server := httptest.NewTLSServer(New(tracker, opts...))
 	t.Cleanup(server.Close)
 	client := server.Client()
