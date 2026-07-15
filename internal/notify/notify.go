@@ -113,13 +113,10 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) error {
 	if err != nil {
 		return err
 	}
-	if _, err := writer.Write(renderMessage(from, to, message)); err != nil {
-		if closeErr := writer.Close(); closeErr != nil {
-			return fmt.Errorf("write failed: %v; subsequent close failed: %w", err, closeErr)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		return err
+	_, writeErr := writer.Write(renderMessage(from, to, message))
+	closeErr := writer.Close()
+	if writeErr != nil || closeErr != nil {
+		return errors.Join(writeErr, closeErr)
 	}
 	return client.Quit()
 }
@@ -140,24 +137,15 @@ func (m *SMTPMailer) connect() (*smtp.Client, error) {
 	}
 	client, err := smtp.NewClient(conn, m.config.Host)
 	if err != nil {
-		if closeErr := conn.Close(); closeErr != nil {
-			return nil, fmt.Errorf("operation failed: %v; subsequent close failed: %w", err, closeErr)
-		}
-		return nil, err
+		return nil, errors.Join(err, conn.Close())
 	}
 	if m.config.TLSMode == "starttls" {
 		ok, _ := client.Extension("STARTTLS")
 		if !ok {
-			if err := client.Close(); err != nil {
-				return nil, fmt.Errorf("smtp server does not advertise STARTTLS and failed to close: %v", err)
-			}
-			return nil, errors.New("smtp server does not advertise STARTTLS")
+			return nil, errors.Join(errors.New("smtp server does not advertise STARTTLS"), client.Close())
 		}
 		if err := client.StartTLS(&tls.Config{ServerName: m.config.Host, MinVersion: tls.VersionTLS12}); err != nil {
-			if closeErr := client.Close(); closeErr != nil {
-				return nil, fmt.Errorf("STARTTLS failed: %v; subsequent close failed: %w", err, closeErr)
-			}
-			return nil, err
+			return nil, errors.Join(err, client.Close())
 		}
 	}
 	return client, nil
