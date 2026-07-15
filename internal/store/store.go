@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"net/mail"
 	"os"
 	"path/filepath"
@@ -539,7 +538,7 @@ func Open(path string) (*Store, error) {
 	s := &Store{db: db, path: path}
 	if err := s.init(); err != nil {
 		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("failed to close database after init error: %v", closeErr)
+			err = errors.Join(err, closeErr)
 		}
 		return nil, err
 	}
