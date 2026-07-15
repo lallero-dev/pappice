@@ -247,13 +247,9 @@ func (s *Server) saveMultipartAttachments(form *multipart.Form) ([]storedUpload,
 		}
 		upload, err := s.saveUploadedFile(file, header)
 		closeErr := file.Close()
-		if closeErr != nil {
+		if err != nil || closeErr != nil {
 			cleanupStoredUploads(uploads)
-			return nil, fmt.Errorf("failed to finalize upload file %s: %w", header.Filename, closeErr)
-		}
-		if err != nil {
-			cleanupStoredUploads(uploads)
-			return nil, err
+			return nil, errors.Join(err, closeErr)
 		}
 		uploads = append(uploads, upload)
 	}
@@ -276,16 +272,12 @@ func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHea
 	keepTemp := false
 
 	defer func() {
+		var removeErr error
 		closeErr := temp.Close()
-		if closeErr != nil {
-			log.Printf("failed to close temp file: %v", closeErr)
-		}
 		if !keepTemp {
-			removeErr := os.Remove(tempPath)
-			if removeErr != nil {
-				log.Printf("failed to remove temp file: %v", removeErr)
-			}
+			removeErr = os.Remove(tempPath)
 		}
+		err = errors.Join(err, closeErr, removeErr)
 	}()
 
 	hash := sha256.New()
@@ -386,10 +378,7 @@ func (s *Server) openAttachmentFile(storageKey string) (*os.File, os.FileInfo, e
 	}
 	stat, err := file.Stat()
 	if err != nil {
-		if closeErr := file.Close(); closeErr != nil {
-			log.Printf("failed to close file after stat error: %v", closeErr)
-		}
-		return nil, nil, err
+		return nil, nil, errors.Join(err, file.Close())
 	}
 	return file, stat, nil
 }
