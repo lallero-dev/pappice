@@ -109,9 +109,6 @@ func ConstantTimeEqual(a, b string) bool {
 
 func HMACSHA256(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	if _, err := mac.Write(body); err != nil {
-		// This should theoretically never happen with sha256
-		panic(fmt.Errorf("failed to write to HMAC: %w", err))
-	}
+	_, _ := mac.Write(body)
 	return hex.EncodeToString(mac.Sum(nil))
 }
