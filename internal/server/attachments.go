@@ -295,9 +295,7 @@ func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHea
 				remaining := min(n, 512-len(sniff))
 				sniff = append(sniff, buffer[:remaining]...)
 			}
-			if _, err := hash.Write(buffer[:n]); err != nil {
-				return storedUpload{}, err
-			}
+			hash.Write(buffer[:n])
 			if _, err := temp.Write(buffer[:n]); err != nil {
 				return storedUpload{}, err
 			}
