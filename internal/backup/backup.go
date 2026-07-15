@@ -3,7 +3,6 @@ package backup
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,8 +59,8 @@ func Create(cfg Config) (Result, error) {
 	committed := false
 	defer func() {
 		if !committed {
-			if err := os.RemoveAll(tempPath); err != nil {
-				log.Printf("failed to remove temp path %s: %v", tempPath, err)
+			if cleanupErr := os.RemoveAll(tempPath); cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("failed to remove temp path %s: %w", tempPath, cleanupErr))
 			}
 		}
 	}()
@@ -125,8 +124,8 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	}
 	defer func() {
 		if !tempDBInstalled {
-			if err := os.Remove(tempDBPath); err != nil {
-				log.Printf("failed to remove temp db path %s: %v", tempDBPath, err)
+			if cleanupErr := os.Remove(tempDBPath); cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("cleanup failed: %w", cleanupErr))
 			}
 		}
 	}()
@@ -138,8 +137,8 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	tempUploadsInstalled := false
 	defer func() {
 		if !tempUploadsInstalled {
-			if err := os.RemoveAll(tempUploadDir); err != nil {
-				log.Printf("failed to remove temp upload dir %s: %v", tempUploadDir, err)
+			if cleanupErr := os.RemoveAll(tempUploadDir); cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("cleanup upload dir: %w", cleanupErr))
 			}
 		}
 	}()
