@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -271,16 +272,16 @@ func respondStoreError(w http.ResponseWriter, err error) {
 }
 
 func respondJSON(w http.ResponseWriter, status int, payload any) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("failed to encode JSON: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(payload); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write(data)
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		log.Printf("failed to write JSON response: %v", err)
+	}
 }
 
 func respondError(w http.ResponseWriter, status int, message string) {
