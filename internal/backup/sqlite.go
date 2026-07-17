@@ -46,8 +46,7 @@ func copySQLiteDatabase(sourcePath, destinationPath string) error {
 		for more := true; more; {
 			more, err = backup.Step(-1)
 			if err != nil {
-				_ = backup.Finish()
-				return err
+				return errors.Join(err, backup.Finish())
 			}
 		}
 		return backup.Finish()

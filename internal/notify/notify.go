@@ -113,11 +113,8 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) error {
 	if err != nil {
 		return err
 	}
-	if _, err := writer.Write(renderMessage(from, to, message)); err != nil {
-		_ = writer.Close()
-		return err
-	}
-	if err := writer.Close(); err != nil {
+	_, writeErr := writer.Write(renderMessage(from, to, message))
+	if err := errors.Join(writeErr, writer.Close()); err != nil {
 		return err
 	}
 	return client.Quit()
@@ -175,7 +172,9 @@ func (w Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		_ = w.ProcessOnce(ctx)
+		if err := w.ProcessOnce(ctx); err != nil && ctx.Err() == nil {
+			w.logf("worker process failed: %v", err)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -194,8 +193,7 @@ func (w Worker) ProcessOnce(ctx context.Context) error {
 	}
 	notifications, err := w.Store.ClaimEmailNotifications(w.BatchSize, leaseFor)
 	if err != nil {
-		w.logf("claim email notifications: %v", err)
-		return err
+		return fmt.Errorf("claim email notifications: %w", err)
 	}
 	for _, notification := range notifications {
 		if err := ctx.Err(); err != nil {
@@ -211,7 +209,9 @@ func (w Worker) ProcessOnce(ctx context.Context) error {
 		}
 		if err := w.Mailer.Send(ctx, message); err != nil {
 			w.logf("send email notification %d: %v", notification.ID, err)
-			_ = w.Store.MarkEmailFailed(notification.ID, err, w.MaxAttempts)
+			if markErr := w.Store.MarkEmailFailed(notification.ID, err, w.MaxAttempts); markErr != nil {
+				w.logf("mark email notification %d failed: %v", notification.ID, markErr)
+			}
 			continue
 		}
 		if err := w.Store.MarkEmailSent(notification.ID); err != nil {

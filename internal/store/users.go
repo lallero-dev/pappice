@@ -579,7 +579,12 @@ func (s *Store) DeleteAPIToken(userID, tokenID int64, event EventContext) error 
 	}
 	defer tx.Rollback()
 	var targetName string
-	_ = tx.QueryRow(`SELECT name FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID).Scan(&targetName)
+	if err := tx.QueryRow(`SELECT name FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID).Scan(&targetName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to query api token: %w", err)
+	}
 	result, err := tx.Exec(`DELETE FROM api_tokens WHERE id = ? AND user_id = ?`, tokenID, userID)
 	if err != nil {
 		return err
