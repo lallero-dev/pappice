@@ -1,1 +1,2 @@
 - [ ] Admin/staff should be able to create tickets on behalf of customers
+- [ ] Log status changes in conversations
