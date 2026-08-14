@@ -32,7 +32,7 @@ func TestSetupRequiresHTTPS(t *testing.T) {
 	}
 	defer tracker.Close()
 
-	server := httptest.NewServer(New(tracker))
+	server := httptest.NewServer(NewServer(tracker))
 	defer server.Close()
 
 	resp, body := doJSON(t, server.Client(), http.MethodPost, server.URL+"/api/setup", map[string]any{
@@ -59,7 +59,7 @@ func TestTrustedProxyHeadersAllowBrowserSession(t *testing.T) {
 	}
 	defer tracker.Close()
 
-	server := httptest.NewServer(New(tracker, Options{TrustProxyHeaders: true}))
+	server := httptest.NewServer(NewServer(tracker, Options{TrustProxyHeaders: true}))
 	defer server.Close()
 	client := server.Client()
 	headers := map[string]string{
@@ -133,7 +133,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	}
 	defer tracker.Close()
 
-	server := httptest.NewTLSServer(New(tracker))
+	server := httptest.NewTLSServer(NewServer(tracker))
 	defer server.Close()
 	client := server.Client()
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
@@ -556,6 +556,7 @@ func TestProductMemberRemovalAPI(t *testing.T) {
 	if bytes.Contains(body, []byte("removable@example.test")) {
 		t.Fatalf("member list still contains removed user: %s", body)
 	}
+	waitForDomainEvents(t, tracker)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events?q=product_member.removed", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("product_member.removed")) || !bytes.Contains(body, []byte("removable@example.test")) {
@@ -602,6 +603,7 @@ func TestTicketDeletionRequiresAdmin(t *testing.T) {
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
+	waitForDomainEvents(t, tracker)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events?q=ticket.deleted", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("ticket.deleted")) {
@@ -1056,6 +1058,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	ttlTracker, ttlServer, ttlClient := newTestServer(t, Options{SessionTTL: time.Hour})
 	adminCookie, _ := setupAdmin(t, ttlClient, ttlServer.URL, "admin", "admin@example.test")
 	requireSessionCookieTTL(t, adminCookie, ttlStarted, time.Hour)
+	waitForDomainEvents(t, ttlTracker)
 	expireSessionToken(t, ttlTracker, adminCookie.Value)
 	resp, body := doJSON(t, ttlClient, http.MethodGet, ttlServer.URL+"/api/session", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -1063,7 +1066,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 		t.Fatalf("short-lived session still authenticated: %s", body)
 	}
 
-	_, server, client := newTestServer(t, Options{
+	tracker, server, client := newTestServer(t, Options{
 		LoginRateLimit:       RateLimit{Limit: 2, Window: time.Minute},
 		AccountLinkRateLimit: RateLimit{Limit: 2, Window: time.Minute},
 	})
@@ -1102,6 +1105,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	}, nil, "", "")
 	requireStatus(t, resp, body, http.StatusTooManyRequests)
 
+	waitForDomainEvents(t, tracker)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/audit-events", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("setup.completed")) ||
@@ -1113,7 +1117,6 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 
 func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
-	_ = tracker
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
@@ -1216,6 +1219,7 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	if !bytes.Contains(body, []byte("Internal triage")) || !bytes.Contains(body, []byte(`"visibility":"internal"`)) {
 		t.Fatalf("ticket body missing internal note: %s", body)
 	}
+	waitForDomainEvents(t, tracker)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("ticket.updated")) ||
@@ -1317,7 +1321,7 @@ func TestAdminHistoryPaginationAndFilters(t *testing.T) {
 }
 
 func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
-	_, server, client := newTestServer(t, Options{EmailNotifications: true})
+	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
@@ -1367,6 +1371,7 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 		t.Fatalf("grouped ticket save response = %s", body)
 	}
 
+	waitForDomainEvents(t, tracker)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("ticket.updated")) ||
@@ -1391,7 +1396,7 @@ func TestWebhookGuardrails(t *testing.T) {
 	}))
 	defer target.Close()
 
-	blocking := httptest.NewTLSServer(New(tracker))
+	blocking := httptest.NewTLSServer(NewServer(tracker))
 	defer blocking.Close()
 	client := blocking.Client()
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
@@ -1425,7 +1430,7 @@ func TestWebhookGuardrails(t *testing.T) {
 		t.Fatalf("open permissive store: %v", err)
 	}
 	defer permissiveStore.Close()
-	permissive := httptest.NewTLSServer(New(permissiveStore, Options{AllowInsecureWebhooks: true, AllowPrivateWebhooks: true}))
+	permissive := httptest.NewTLSServer(NewServer(permissiveStore, Options{AllowInsecureWebhooks: true, AllowPrivateWebhooks: true}))
 	defer permissive.Close()
 	permissiveClient := permissive.Client()
 	permissiveClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
@@ -1486,6 +1491,133 @@ func TestWebhookValidationBlocksPrivateHTTP(t *testing.T) {
 			t.Fatalf("validateWebhookTarget(%q) succeeded, want private target error", target)
 		}
 	}
+}
+
+func TestMutationQueuesWebhookDelivery(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+	app := NewServer(tracker, Options{
+		AllowInsecureWebhooks: true,
+		AllowPrivateWebhooks:  true,
+	})
+	server := httptest.NewTLSServer(app)
+	t.Cleanup(server.Close)
+	client := server.Client()
+	client.Timeout = time.Second
+	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	if err := app.dispatchPendingEvents(context.Background(), eventDispatchBatchSize); err != nil {
+		t.Fatalf("dispatch setup event: %v", err)
+	}
+	select {
+	case <-app.eventWake:
+	default:
+	}
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	released := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(target.Close)
+
+	hook, err := tracker.CreateWebhook(store.CreateWebhook{
+		Name:   "blocked-hook",
+		URL:    target.URL,
+		Events: []string{"ticket.created"},
+	})
+	if err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+	notifications, err := tracker.EnqueueWebhookNotifications([]store.CreateWebhookNotification{{
+		WebhookID:   hook.ID,
+		Event:       "ticket.created",
+		PayloadJSON: `{}`,
+	}})
+	if err != nil {
+		t.Fatalf("enqueue webhook: %v", err)
+	}
+
+	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
+		"key":  "OPS",
+		"name": "Operations",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	select {
+	case <-app.eventWake:
+	default:
+		t.Fatal("mutation did not wake the event dispatcher")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.RunEventDispatcher(ctx, time.Hour)
+	}()
+	t.Cleanup(func() {
+		if !released {
+			close(release)
+		}
+		cancel()
+		<-done
+	})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background dispatcher did not deliver the webhook")
+	}
+	close(release)
+	released = true
+	eventually(t, func() bool {
+		notification, err := tracker.GetWebhookNotification(notifications[0].ID)
+		if err != nil {
+			t.Fatalf("get webhook notification: %v", err)
+		}
+		return notification.Status == "sent"
+	}, "webhook notification was not marked sent")
+}
+
+func TestEventDispatcherDrainsFullBatches(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+	for range eventDispatchBatchSize + 1 {
+		if _, err := tracker.CreateDomainEvent(store.CreateDomainEvent{Type: "user.updated"}); err != nil {
+			t.Fatalf("create domain event: %v", err)
+		}
+	}
+	app := NewServer(tracker)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.RunEventDispatcher(ctx, time.Hour)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	eventually(t, func() bool {
+		events := mustDomainEvents(t, tracker, eventDispatchBatchSize+1)
+		if len(events) != eventDispatchBatchSize+1 {
+			return false
+		}
+		for _, event := range events {
+			if event.Status != "processed" {
+				return false
+			}
+		}
+		return true
+	}, "event dispatcher did not drain a full batch")
 }
 
 func TestWebhookDeliveryFlow(t *testing.T) {
@@ -1549,9 +1681,9 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 		"title":      "Webhook-backed ticket",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
-	if webhookHits.Load() < 2 || !ticketEventSeen.Load() {
-		t.Fatalf("ticket webhook was not delivered: hits=%d seen=%v", webhookHits.Load(), ticketEventSeen.Load())
-	}
+	eventually(t, func() bool {
+		return webhookHits.Load() >= 2 && ticketEventSeen.Load()
+	}, "ticket webhook was not delivered")
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/webhooks/"+itoa(hookID)+"/secret", nil, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
@@ -1614,6 +1746,7 @@ func TestWebhookNotificationsUseNotificationDelay(t *testing.T) {
 	if webhookHits.Load() != 0 {
 		t.Fatalf("webhook was delivered before notification delay")
 	}
+	waitForDomainEvents(t, tracker)
 	claimed, err := tracker.ClaimWebhookNotifications(10, time.Minute)
 	if err != nil {
 		t.Fatalf("claim webhook notifications: %v", err)
@@ -1676,6 +1809,9 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 
+	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
+		t.Fatalf("project coalesced webhook events: %v", err)
+	}
 	makePendingWebhookNotificationsDue(t, tracker)
 	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
 		t.Fatalf("dispatch coalesced webhook: %v", err)
@@ -1749,6 +1885,9 @@ func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T)
 		"title":      "Projection ticket",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
+	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
+		t.Fatalf("dispatch pending events: %v", err)
+	}
 	if webhookHits.Load() != 1 {
 		t.Fatalf("webhook deliveries = %d, want 1", webhookHits.Load())
 	}
@@ -2680,12 +2819,46 @@ func newTestServer(t *testing.T, opts ...Options) (*store.Store, *httptest.Serve
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = tracker.Close() })
-	server := httptest.NewTLSServer(New(tracker, opts...))
-	t.Cleanup(server.Close)
+	app := NewServer(tracker, opts...)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.RunEventDispatcher(ctx, time.Hour)
+	}()
+	server := httptest.NewTLSServer(app)
+	t.Cleanup(func() {
+		server.Close()
+		cancel()
+		<-done
+		_ = tracker.Close()
+	})
 	client := server.Client()
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	return tracker, server, client
+}
+
+func waitForDomainEvents(t *testing.T, tracker *store.Store) {
+	t.Helper()
+	eventually(t, func() bool {
+		for _, event := range mustDomainEvents(t, tracker, 200) {
+			if event.Status == "pending" || event.Status == "processing" {
+				return false
+			}
+		}
+		return true
+	}, "domain events were not dispatched")
+}
+
+func eventually(t *testing.T, condition func() bool, message string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatal(message)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func setupAdmin(t *testing.T, client *http.Client, baseURL, name, email string) (*http.Cookie, string) {
@@ -3074,6 +3247,7 @@ func decodeFirstProductID(t *testing.T, body []byte) int64 {
 
 func requireNotificationForTicketEmail(t *testing.T, tracker *store.Store, ticketID int64, email string) store.EmailNotification {
 	t.Helper()
+	waitForDomainEvents(t, tracker)
 	var matches []store.EmailNotification
 	for _, notification := range mustEmailNotifications(t, tracker, 100) {
 		if notification.TicketID == ticketID && strings.EqualFold(notification.RecipientEmail, email) {

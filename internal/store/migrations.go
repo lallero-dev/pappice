@@ -45,6 +45,7 @@ var orderedMigrations = []migration{
 	{Version: 3, Name: "normalize_relational_data", Up: migrateRelationalData},
 	{Version: 4, Name: "require_ticket_participants", Up: migrateTicketParticipants},
 	{Version: 5, Name: "ticket_status_history", Up: migrateTicketStatusHistory},
+	{Version: 6, Name: "schedule_domain_event_retries", Up: migrateDomainEventRetries},
 }
 
 func CurrentSchemaVersion() int {
@@ -292,21 +293,21 @@ func applyPendingMigrations(db *sql.DB, pending []MigrationInfo) ([]MigrationInf
 			continue
 		}
 		if err := item.Up(tx); err != nil {
-			return applied, fmt.Errorf("migration %03d %s: %w", item.Version, item.Name, err)
-		}
-		if _, err := tx.Exec(schemaSQL); err != nil {
-			return applied, fmt.Errorf("migration %03d %s schema sync: %w", item.Version, item.Name, err)
+			return nil, fmt.Errorf("migration %03d %s: %w", item.Version, item.Name, err)
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
 			item.Version, item.Name, nowString(),
 		); err != nil {
-			return applied, err
+			return nil, err
 		}
 		applied = append(applied, MigrationInfo{Version: item.Version, Name: item.Name})
 	}
+	if _, err := tx.Exec(schemaSQL); err != nil {
+		return nil, fmt.Errorf("schema sync: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
-		return applied, err
+		return nil, err
 	}
 	return applied, nil
 }
@@ -487,6 +488,33 @@ func migrateTicketStatusHistory(tx *sql.Tx) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_ticket_status_changes_ticket
 			ON ticket_status_changes(ticket_id, created_at, id);
+	`)
+	return err
+}
+
+func migrateDomainEventRetries(tx *sql.Tx) error {
+	hasEvents, err := tableExists(tx, "domain_events")
+	if err != nil || !hasEvents {
+		return err
+	}
+	hasNextAttempt, err := tableHasColumn(tx, "domain_events", "next_attempt_at")
+	if err != nil {
+		return err
+	}
+	if !hasNextAttempt {
+		if _, err := tx.Exec(`ALTER TABLE domain_events ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z'`); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(`
+		UPDATE domain_events
+		SET status = CASE WHEN status IN ('processing', 'failed') THEN 'pending' ELSE status END,
+		    attempts = 0,
+		    next_attempt_at = updated_at,
+		    locked_until = NULL;
+		DROP INDEX IF EXISTS idx_domain_events_pending;
+		CREATE INDEX idx_domain_events_pending
+			ON domain_events(status, next_attempt_at, locked_until);
 	`)
 	return err
 }

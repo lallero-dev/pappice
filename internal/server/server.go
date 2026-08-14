@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -80,6 +79,7 @@ type Server struct {
 	mux                *http.ServeMux
 	handler            http.Handler
 	client             *http.Client
+	eventWake          chan struct{}
 	options            Options
 	loginLimiter       *requestLimiter
 	accountLinkLimiter *requestLimiter
@@ -115,10 +115,6 @@ func (input ticketPatchInput) hasTicketPatch() bool {
 	return input.Title != nil || input.Description != nil || input.Status != nil || input.Priority != nil || input.AssigneeUserID != nil
 }
 
-func New(tracker *store.Store, opts ...Options) http.Handler {
-	return NewServer(tracker, opts...)
-}
-
 func NewServer(tracker *store.Store, opts ...Options) *Server {
 	options := Options{}
 	if len(opts) > 0 {
@@ -143,6 +139,7 @@ func NewServer(tracker *store.Store, opts ...Options) *Server {
 		store:              tracker,
 		started:            time.Now().UTC(),
 		mux:                http.NewServeMux(),
+		eventWake:          make(chan struct{}, 1),
 		options:            options,
 		loginLimiter:       newRequestLimiter(options.LoginRateLimit),
 		accountLinkLimiter: newRequestLimiter(options.AccountLinkRateLimit),
@@ -1801,7 +1798,8 @@ func (s *Server) eventContext(r *http.Request, actor store.User) store.EventCont
 }
 
 func (s *Server) dispatchEventsSoon() {
-	if err := s.dispatchPendingEvents(context.Background(), 10); err != nil && s.options.Logger != nil {
-		s.options.Logger.Printf("domain event dispatch: %v", err)
+	select {
+	case s.eventWake <- struct{}{}:
+	default:
 	}
 }

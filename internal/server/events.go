@@ -11,16 +11,23 @@ import (
 	"pappice/internal/store"
 )
 
-const domainEventPruneInterval = time.Hour
+const (
+	domainEventPruneInterval = time.Hour
+	eventDispatchBatchSize   = 25
+	maxDispatchAttempts      = 5
+)
 
 func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration) {
 	logger := s.options.Logger
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	if err := s.dispatchPendingEvents(ctx, 25); err != nil && logger != nil {
-		logger.Printf("domain event dispatch: %v", err)
+	dispatch := func() {
+		if err := s.dispatchPendingEvents(ctx, eventDispatchBatchSize); err != nil && logger != nil {
+			logger.Printf("domain event dispatch: %v", err)
+		}
 	}
+	dispatch()
 	s.pruneProcessedDomainEvents(logger)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -30,10 +37,10 @@ func (s *Server) RunEventDispatcher(ctx context.Context, interval time.Duration)
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.eventWake:
+			dispatch()
 		case <-ticker.C:
-			if err := s.dispatchPendingEvents(ctx, 25); err != nil && logger != nil {
-				logger.Printf("domain event dispatch: %v", err)
-			}
+			dispatch()
 		case <-pruneTicker.C:
 			s.pruneProcessedDomainEvents(logger)
 		}
@@ -78,20 +85,21 @@ func (s *Server) dispatchPendingEvents(ctx context.Context, limit int) error {
 	var firstErr error
 	for _, event := range events {
 		if err := ctx.Err(); err != nil {
-			setFirstError(&firstErr, err)
-			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err))
-			continue
+			return err
 		}
 		projection, err := s.domainEventProjection(event)
 		if err != nil {
 			setFirstError(&firstErr, err)
-			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err))
+			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err, maxDispatchAttempts))
 			continue
 		}
 		if err := s.store.ApplyDomainEventProjection(event.ID, projection); err != nil {
 			setFirstError(&firstErr, err)
-			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err))
+			setFirstError(&firstErr, s.store.MarkDomainEventFailed(event.ID, err, maxDispatchAttempts))
 		}
+	}
+	if limit > 0 && len(events) == limit {
+		s.dispatchEventsSoon()
 	}
 	setFirstError(&firstErr, s.dispatchPendingWebhookNotifications(ctx, limit))
 	return firstErr
@@ -161,9 +169,7 @@ func (s *Server) dispatchPendingWebhookNotifications(ctx context.Context, limit 
 	var firstErr error
 	for _, notification := range notifications {
 		if err := ctx.Err(); err != nil {
-			setFirstError(&firstErr, err)
-			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, err, 5))
-			continue
+			return err
 		}
 		hook, err := s.store.GetWebhook(notification.WebhookID)
 		if errors.Is(err, store.ErrNotFound) {
@@ -172,7 +178,7 @@ func (s *Server) dispatchPendingWebhookNotifications(ctx context.Context, limit 
 		}
 		if err != nil {
 			setFirstError(&firstErr, err)
-			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, err, 5))
+			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, err, maxDispatchAttempts))
 			continue
 		}
 		delivery, recordErr := s.deliverWebhook(hook, notification.Event, notification.TicketID, []byte(notification.PayloadJSON))
@@ -180,11 +186,14 @@ func (s *Server) dispatchPendingWebhookNotifications(ctx context.Context, limit 
 			deliveryErr := errors.New(delivery.Error)
 			setFirstError(&firstErr, deliveryErr)
 			setFirstError(&firstErr, recordErr)
-			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, deliveryErr, 5))
+			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, deliveryErr, maxDispatchAttempts))
 			continue
 		}
 		setFirstError(&firstErr, s.store.MarkWebhookNotificationSent(notification.ID))
 		setFirstError(&firstErr, recordErr)
+	}
+	if limit > 0 && len(notifications) == limit {
+		s.dispatchEventsSoon()
 	}
 	return firstErr
 }

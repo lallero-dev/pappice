@@ -319,7 +319,7 @@ func (s *Store) MarkEmailFailed(id int64, sendErr error, maxAttempts int) error 
 	}
 	attempts := notification.Attempts + 1
 	status := "pending"
-	delay := emailRetryDelay(attempts)
+	delay := retryDelay(attempts)
 	nextAttempt := time.Now().UTC().Add(delay)
 	if attempts >= maxAttempts {
 		status = "failed"
@@ -613,9 +613,4 @@ func scanEmailNotification(rows scanner) (EmailNotification, error) {
 	notification.CreatedAt = created.Time
 	notification.SentAt = sentAt.Time
 	return notification, nil
-}
-
-func emailRetryDelay(attempts int) time.Duration {
-	attempts = min(max(attempts, 1), 6)
-	return time.Duration(1<<(attempts-1)) * time.Minute
 }

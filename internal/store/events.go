@@ -34,6 +34,7 @@ type DomainEvent struct {
 	PayloadJSON      string     `json:"payload_json"`
 	Status           string     `json:"status"`
 	Attempts         int        `json:"attempts"`
+	NextAttemptAt    time.Time  `json:"next_attempt_at"`
 	LockedUntil      *time.Time `json:"locked_until,omitempty"`
 	LastError        string     `json:"last_error,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -155,10 +156,10 @@ func (s *Store) ClaimDomainEvents(limit int, leaseFor time.Duration) ([]DomainEv
 	defer tx.Rollback()
 
 	rows, err := tx.Query(domainEventSelectSQL+`
-		WHERE status IN ('pending', 'failed')
+		WHERE (status = 'pending' AND next_attempt_at <= ?)
 		   OR (status = 'processing' AND locked_until IS NOT NULL AND locked_until <= ?)
-		ORDER BY id
-		LIMIT ?`, formatTime(now), limit)
+		ORDER BY next_attempt_at, id
+		LIMIT ?`, formatTime(now), formatTime(now), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,7 @@ func (s *Store) ClaimDomainEvents(limit int, leaseFor time.Duration) ([]DomainEv
 	for i := range events {
 		_, err := tx.Exec(`
 			UPDATE domain_events
-			SET status = 'processing', attempts = attempts + 1, locked_until = ?, updated_at = ?
+			SET status = 'processing', locked_until = ?, updated_at = ?
 			WHERE id = ?`,
 			formatTime(lockedUntil), formatTime(now), events[i].ID,
 		)
@@ -186,7 +187,6 @@ func (s *Store) ClaimDomainEvents(limit int, leaseFor time.Duration) ([]DomainEv
 			return nil, err
 		}
 		events[i].Status = "processing"
-		events[i].Attempts++
 		events[i].LockedUntil = &lockedUntil
 		events[i].UpdatedAt = now
 	}
@@ -255,20 +255,35 @@ func markDomainEventProcessedTx(tx *sql.Tx, id int64, now time.Time) error {
 	return requireChangedRow(result)
 }
 
-func (s *Store) MarkDomainEventFailed(id int64, err error) error {
-	message := ""
+func (s *Store) MarkDomainEventFailed(id int64, eventErr error, maxAttempts int) error {
+	if maxAttempts < 1 {
+		maxAttempts = 5
+	}
+	event, err := s.GetDomainEvent(id)
 	if err != nil {
-		message = strings.TrimSpace(err.Error())
+		return err
 	}
 	now := time.Now().UTC()
-	result, updateErr := s.db.Exec(`
+	attempts := event.Attempts + 1
+	status := "pending"
+	nextAttempt := now.Add(retryDelay(attempts))
+	if attempts >= maxAttempts {
+		status = "failed"
+		nextAttempt = now
+	}
+	message := "event projection failed"
+	if eventErr != nil {
+		message = strings.TrimSpace(eventErr.Error())
+	}
+	message = truncateString(message, 1000)
+	result, err := s.db.Exec(`
 		UPDATE domain_events
-		SET status = 'failed', locked_until = NULL, last_error = ?, updated_at = ?
-		WHERE id = ?`,
-		message, formatTime(now), id,
+		SET status = ?, attempts = ?, next_attempt_at = ?, locked_until = NULL, last_error = ?, updated_at = ?
+		WHERE id = ? AND status = 'processing'`,
+		status, attempts, formatTime(nextAttempt), message, formatTime(now), id,
 	)
-	if updateErr != nil {
-		return updateErr
+	if err != nil {
+		return err
 	}
 	return requireChangedRow(result)
 }
@@ -311,12 +326,12 @@ func insertDomainEventTx(tx *sql.Tx, input CreateDomainEvent, now time.Time) (in
 	result, err := tx.Exec(`
 		INSERT INTO domain_events (
 			type, product_id, ticket_id, actor_user_id, actor_display_name, actor_email, actor_role,
-			payload_json, status, attempts, created_at, updated_at
+			payload_json, status, attempts, next_attempt_at, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
 		eventType, input.ProductID, input.TicketID, input.Actor.UserID,
 		strings.TrimSpace(input.Actor.DisplayName), strings.TrimSpace(input.Actor.Email), normalizeGlobalRole(input.Actor.Role),
-		payload, formatTime(now), formatTime(now),
+		payload, formatTime(now), formatTime(now), formatTime(now),
 	)
 	if err != nil {
 		return 0, normalizeSQLError(err)
@@ -350,7 +365,7 @@ func insertAppEventTx(tx *sql.Tx, now time.Time, ctx EventContext, eventType, ta
 
 const domainEventSelectSQL = `
 	SELECT id, type, product_id, ticket_id, actor_user_id, actor_display_name, actor_email, actor_role,
-	       payload_json, status, attempts, locked_until, last_error, created_at, updated_at, processed_at
+	       payload_json, status, attempts, next_attempt_at, locked_until, last_error, created_at, updated_at, processed_at
 	FROM domain_events`
 
 func scanDomainEvents(rows *sql.Rows) ([]DomainEvent, error) {
@@ -368,17 +383,18 @@ func scanDomainEvents(rows *sql.Rows) ([]DomainEvent, error) {
 func scanDomainEvent(row scanner) (DomainEvent, error) {
 	var event DomainEvent
 	var lockedUntil, processedAt nullDBTime
-	var createdAt, updatedAt dbTime
+	var nextAttemptAt, createdAt, updatedAt dbTime
 	err := row.Scan(
 		&event.ID, &event.Type, &event.ProductID, &event.TicketID, &event.ActorUserID,
 		&event.ActorDisplayName, &event.ActorEmail, &event.ActorRole, &event.PayloadJSON, &event.Status,
-		&event.Attempts, &lockedUntil, &event.LastError, &createdAt, &updatedAt, &processedAt,
+		&event.Attempts, &nextAttemptAt, &lockedUntil, &event.LastError, &createdAt, &updatedAt, &processedAt,
 	)
 	if err != nil {
 		return DomainEvent{}, err
 	}
 	event.LockedUntil = lockedUntil.Time
 	event.ProcessedAt = processedAt.Time
+	event.NextAttemptAt = nextAttemptAt.Time
 	event.CreatedAt = createdAt.Time
 	event.UpdatedAt = updatedAt.Time
 	return event, nil

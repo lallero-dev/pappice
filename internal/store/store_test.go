@@ -306,7 +306,7 @@ func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect migration: %v", err)
 	}
-	if status.CurrentVersion != 0 || len(status.Pending) != 5 || status.Pending[0].Name != "baseline_schema" || status.Pending[1].Name != "rename_product_roles" || status.Pending[2].Name != "normalize_relational_data" || status.Pending[3].Name != "require_ticket_participants" || status.Pending[4].Name != "ticket_status_history" {
+	if got, want := migrationNames(status.Pending), []string{"baseline_schema", "rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; status.CurrentVersion != 0 || !slices.Equal(got, want) {
 		t.Fatalf("migration status = %#v", status)
 	}
 	if _, err := Migrate(path, MigrationOptions{DryRun: true}); !errors.Is(err, ErrMigrationRequired) {
@@ -388,14 +388,14 @@ func TestMigrateRenamesProductRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect before migration: %v", err)
 	}
-	if status.CurrentVersion != 1 || len(status.Pending) != 4 || status.Pending[0].Name != "rename_product_roles" || status.Pending[1].Name != "normalize_relational_data" || status.Pending[2].Name != "require_ticket_participants" || status.Pending[3].Name != "ticket_status_history" {
+	if got, want := migrationNames(status.Pending), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; status.CurrentVersion != 1 || !slices.Equal(got, want) {
 		t.Fatalf("before migration status = %#v", status)
 	}
 	result, err := Migrate(path, MigrationOptions{})
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if len(result.Applied) != 4 || result.Applied[0].Name != "rename_product_roles" || result.Applied[1].Name != "normalize_relational_data" || result.Applied[2].Name != "require_ticket_participants" || result.Applied[3].Name != "ticket_status_history" {
+	if got, want := migrationNames(result.Applied), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; !slices.Equal(got, want) {
 		t.Fatalf("applied migrations = %#v", result.Applied)
 	}
 
@@ -498,7 +498,7 @@ func TestMigrateRelationalData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if len(result.Applied) != 3 || result.Applied[0].Name != "normalize_relational_data" || result.Applied[1].Name != "require_ticket_participants" || result.Applied[2].Name != "ticket_status_history" {
+	if got, want := migrationNames(result.Applied), []string{"normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; !slices.Equal(got, want) {
 		t.Fatalf("applied migrations = %#v", result.Applied)
 	}
 	db, err = sql.Open("sqlite", path)
@@ -556,6 +556,58 @@ func TestMigrateRelationalData(t *testing.T) {
 	}
 	if auditEmail != "staff@example.test" || eventEmail != auditEmail {
 		t.Fatalf("migrated actor emails = audit %q event %q", auditEmail, eventEmail)
+	}
+}
+
+func TestMigrateSchedulesFailedDomainEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.db")
+	tracker, err := Open(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	event, err := tracker.CreateDomainEvent(CreateDomainEvent{Type: "user.updated"})
+	if err != nil {
+		t.Fatalf("create domain event: %v", err)
+	}
+	if err := tracker.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	_, err = db.Exec(`
+		DROP INDEX idx_domain_events_pending;
+		ALTER TABLE domain_events DROP COLUMN next_attempt_at;
+		UPDATE domain_events SET status = 'failed', attempts = 7, last_error = 'old failure' WHERE id = ?;
+		DELETE FROM schema_migrations WHERE version = 6;
+	`, event.ID)
+	if err != nil {
+		t.Fatalf("prepare version 5 database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	result, err := Migrate(path, MigrationOptions{})
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if got, want := migrationNames(result.Applied), []string{"schedule_domain_event_retries"}; !slices.Equal(got, want) {
+		t.Fatalf("applied migrations = %#v, want %#v", got, want)
+	}
+	tracker, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer tracker.Close()
+	migrated, err := tracker.GetDomainEvent(event.ID)
+	if err != nil {
+		t.Fatalf("get migrated event: %v", err)
+	}
+	if migrated.Status != "pending" || migrated.Attempts != 0 || migrated.NextAttemptAt.IsZero() {
+		t.Fatalf("migrated event = %#v", migrated)
 	}
 }
 
@@ -618,8 +670,12 @@ func TestMigrateRollsBackFailedPlan(t *testing.T) {
 		t.Fatalf("close db: %v", err)
 	}
 
-	if _, err := Migrate(path, MigrationOptions{}); err == nil {
+	result, err := Migrate(path, MigrationOptions{})
+	if err == nil {
 		t.Fatal("migration should fail")
+	}
+	if len(result.Applied) != 0 {
+		t.Fatalf("rolled-back migrations reported as applied: %#v", result.Applied)
 	}
 	db, err = sql.Open("sqlite", path)
 	if err != nil {
@@ -813,6 +869,66 @@ func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	}
 	if events := mustListDomainEvents(t, tracker, 10); len(events) != 3 {
 		t.Fatalf("prune removed non-processed events: %#v", events)
+	}
+}
+
+func TestDomainEventFailuresAreDeferredAndBounded(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer tracker.Close()
+
+	failed, err := tracker.CreateDomainEvent(CreateDomainEvent{Type: "user.updated"})
+	if err != nil {
+		t.Fatalf("create failing event: %v", err)
+	}
+	claimed, err := tracker.ClaimDomainEvents(1, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].ID != failed.ID {
+		t.Fatalf("claimed failing event = %#v err=%v", claimed, err)
+	}
+	if err := tracker.MarkDomainEventFailed(failed.ID, errors.New("projection failed"), 2); err != nil {
+		t.Fatalf("defer failing event: %v", err)
+	}
+	deferred, err := tracker.GetDomainEvent(failed.ID)
+	if err != nil {
+		t.Fatalf("get deferred event: %v", err)
+	}
+	if deferred.Status != "pending" || deferred.Attempts != 1 || !deferred.NextAttemptAt.After(time.Now().UTC()) {
+		t.Fatalf("deferred event = %#v", deferred)
+	}
+
+	fresh, err := tracker.CreateDomainEvent(CreateDomainEvent{Type: "user.updated"})
+	if err != nil {
+		t.Fatalf("create fresh event: %v", err)
+	}
+	claimed, err = tracker.ClaimDomainEvents(1, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].ID != fresh.ID {
+		t.Fatalf("claimed fresh event = %#v err=%v", claimed, err)
+	}
+	if err := tracker.ApplyDomainEventProjection(fresh.ID, DomainEventProjection{}); err != nil {
+		t.Fatalf("process fresh event: %v", err)
+	}
+	if _, err := tracker.db.Exec(`UPDATE domain_events SET next_attempt_at = ? WHERE id = ?`, formatTime(time.Now().UTC().Add(-time.Second)), failed.ID); err != nil {
+		t.Fatalf("make deferred event due: %v", err)
+	}
+	claimed, err = tracker.ClaimDomainEvents(1, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].ID != failed.ID {
+		t.Fatalf("reclaimed failing event = %#v err=%v", claimed, err)
+	}
+	if err := tracker.MarkDomainEventFailed(failed.ID, errors.New("still broken"), 2); err != nil {
+		t.Fatalf("fail event permanently: %v", err)
+	}
+	terminal, err := tracker.GetDomainEvent(failed.ID)
+	if err != nil {
+		t.Fatalf("get terminal event: %v", err)
+	}
+	if terminal.Status != "failed" || terminal.Attempts != 2 || terminal.LastError != "still broken" {
+		t.Fatalf("terminal event = %#v", terminal)
+	}
+	claimed, err = tracker.ClaimDomainEvents(1, time.Minute)
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("claimed terminal event = %#v err=%v", claimed, err)
 	}
 }
 
@@ -2155,6 +2271,14 @@ func hasRecipient(recipients []EmailRecipient, email string) bool {
 		}
 	}
 	return false
+}
+
+func migrationNames(migrations []MigrationInfo) []string {
+	names := make([]string, len(migrations))
+	for i, migration := range migrations {
+		names[i] = migration.Name
+	}
+	return names
 }
 
 func requireList[T any](t *testing.T, values []T, err error) []T {

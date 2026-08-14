@@ -510,7 +510,7 @@ func (s *Store) MarkWebhookNotificationFailed(id int64, sendErr error, maxAttemp
 		return err
 	}
 	status := "pending"
-	nextAttempt := time.Now().UTC().Add(emailRetryDelay(notification.Attempts))
+	nextAttempt := time.Now().UTC().Add(retryDelay(notification.Attempts))
 	if notification.Attempts >= maxAttempts {
 		status = "failed"
 		nextAttempt = time.Now().UTC()

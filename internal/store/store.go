@@ -536,6 +536,11 @@ func truncateString(value string, maximum int) string {
 	return value
 }
 
+func retryDelay(attempts int) time.Duration {
+	attempts = min(max(attempts, 1), 6)
+	return time.Duration(1<<(attempts-1)) * time.Minute
+}
+
 var productKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}$`)
 
 func Open(path string) (*Store, error) {
@@ -1059,6 +1064,7 @@ CREATE TABLE IF NOT EXISTS domain_events (
 	payload_json TEXT NOT NULL DEFAULT '{}',
 	status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'processed', 'failed')) DEFAULT 'pending',
 	attempts INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00Z',
 	locked_until TEXT,
 	last_error TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
@@ -1087,6 +1093,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_events_domain_event ON audit_events(
 CREATE INDEX IF NOT EXISTS idx_email_notifications_pending ON email_notifications(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_ticket ON email_notifications(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_email_notifications_user ON email_notifications(user_id);
-CREATE INDEX IF NOT EXISTS idx_domain_events_pending ON domain_events(status, locked_until, created_at);
+CREATE INDEX IF NOT EXISTS idx_domain_events_pending ON domain_events(status, next_attempt_at, locked_until);
 CREATE INDEX IF NOT EXISTS idx_domain_events_ticket ON domain_events(ticket_id, id);
 `
