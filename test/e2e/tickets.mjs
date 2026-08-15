@@ -112,9 +112,17 @@ async function createCustomerTicket(cdp) {
       throw new Error("current sender message should be visually aligned to the right");
     }
     const replyInput = createdDetail.querySelector(".comment-input");
-    if (replyInput && getComputedStyle(replyInput).resize !== "none") {
-      throw new Error("reply composer textarea should not be resizable");
+    const resizeBar = createdDetail.querySelector(".comment-resize-bar");
+    if (!replyInput || !resizeBar || getComputedStyle(replyInput).resize !== "none") {
+      throw new Error("reply composer should use its custom vertical resize control");
     }
+    const replyHeight = replyInput.getBoundingClientRect().height;
+    const conversationHeight = ownConversation.getBoundingClientRect().height;
+    resizeBar.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    if (replyInput.getBoundingClientRect().height <= replyHeight || ownConversation.getBoundingClientRect().height >= conversationHeight) {
+      throw new Error("resizing the reply composer should reduce the conversation height");
+    }
+    resizeBar.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     await waitFor(() => /^#[A-Z][A-Z0-9]{1,15}-[1-9][0-9]*$/.test(window.location.hash), "ticket hash route after create");
     return decodeURIComponent(window.location.hash.slice(1));
   }, {

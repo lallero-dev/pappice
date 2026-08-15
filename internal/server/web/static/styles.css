@@ -1484,7 +1484,7 @@ button:focus-visible {
   box-shadow: 0 -1px 0 rgba(15, 23, 42, 0.03);
   display: grid;
   gap: 6px;
-  padding: 8px;
+  padding: 2px 8px 8px;
 }
 
 .comment-form:focus-within {
@@ -1498,6 +1498,39 @@ button:focus-visible {
   box-shadow: inset 0 0 0 2px rgba(35, 103, 164, 0.18);
   outline: 2px dashed #7fb1dc;
   outline-offset: -7px;
+}
+
+.comment-resize-bar {
+  cursor: ns-resize;
+  height: 10px;
+  position: relative;
+  touch-action: none;
+}
+
+.comment-resize-bar::after {
+  background: #cbd7e2;
+  border-radius: 999px;
+  content: "";
+  height: 2px;
+  left: 50%;
+  opacity: 0.45;
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  transition: background-color 120ms ease, opacity 120ms ease, width 120ms ease;
+  width: 44px;
+}
+
+.comment-resize-bar:hover::after,
+.comment-resize-bar:focus-visible::after,
+.comment-form.is-resizing .comment-resize-bar::after {
+  background: #6e9fc8;
+  opacity: 1;
+  width: 64px;
+}
+
+.comment-resize-bar:focus-visible {
+  outline: 0;
 }
 
 .comment-form .ticket-form-field {
@@ -1750,9 +1783,10 @@ button:focus-visible {
 }
 
 .comment-input {
-  border: 0;
   background: transparent;
-  min-height: 64px;
+  border: 0;
+  max-height: 45dvh;
+  min-height: 84px;
   padding: 0;
   resize: none;
 }
@@ -2636,11 +2670,11 @@ button:focus-visible {
     border-left: 0;
     border-radius: 0;
     border-right: 0;
-    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+    padding: 2px 10px max(8px, env(safe-area-inset-bottom));
   }
 
   .comment-input {
-    min-height: 52px;
+    min-height: 72px;
   }
 
   .message-avatar {

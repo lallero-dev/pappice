@@ -1225,6 +1225,7 @@ function bindCommentComposer(form, ticket) {
   const sendButton = composer.querySelector("[data-comment-send]");
   const body = composer.querySelector("[name='body']");
   const visibility = composer.querySelector("[name='visibility']");
+  bindCommentResize(composer, body);
   const update = () => {
     sendButton.disabled = String(body.value || "").trim() === "" && selectedFiles(composer).length === 0;
   };
@@ -1257,6 +1258,65 @@ function bindCommentComposer(form, ticket) {
     }
   });
   update();
+}
+
+function bindCommentResize(composer, body) {
+  const bar = composer.querySelector("[data-comment-resize]");
+  const conversation = composer.previousElementSibling;
+  if (!bar || !conversation) return;
+
+  const limits = () => {
+    const height = body.getBoundingClientRect().height;
+    const minimum = Number.parseFloat(getComputedStyle(body).minHeight) || 72;
+    const maximum = height + Math.max(0, conversation.clientHeight - 96);
+    return { height, minimum, maximum };
+  };
+  const setARIA = (height, minimum, maximum) => {
+    bar.setAttribute("aria-valuemin", String(Math.round(minimum)));
+    bar.setAttribute("aria-valuemax", String(Math.round(maximum)));
+    bar.setAttribute("aria-valuenow", String(Math.round(height)));
+  };
+  const setHeight = (height, minimum, maximum) => {
+    const next = Math.round(Math.min(maximum, Math.max(minimum, height)));
+    body.style.height = `${next}px`;
+    setARIA(next, minimum, maximum);
+  };
+
+  requestAnimationFrame(() => {
+    if (!bar.isConnected) return;
+    const { height, minimum, maximum } = limits();
+    setARIA(height, minimum, maximum);
+  });
+
+  bar.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startY = event.clientY;
+    const { height, minimum, maximum } = limits();
+    bar.setPointerCapture(event.pointerId);
+    composer.classList.add("is-resizing");
+
+    const move = (moveEvent) => {
+      setHeight(height + startY - moveEvent.clientY, minimum, maximum);
+    };
+    const stop = () => {
+      composer.classList.remove("is-resizing");
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", stop);
+      bar.removeEventListener("pointercancel", stop);
+    };
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", stop);
+    bar.addEventListener("pointercancel", stop);
+  });
+
+  bar.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const { height, minimum, maximum } = limits();
+    const step = event.shiftKey ? 32 : 16;
+    setHeight(height + (event.key === "ArrowUp" ? step : -step), minimum, maximum);
+  });
 }
 
 async function sendTicketComment(ticket, composer) {
@@ -1531,7 +1591,7 @@ function commentComposer(ticket) {
   const draft = commentDraft(ticket);
   const body = document.createElement("textarea");
   body.name = "body";
-  body.rows = 3;
+  body.rows = 4;
   body.className = "comment-input";
   body.dataset.ticketControl = "true";
   body.placeholder = "Write a reply";
@@ -1557,7 +1617,15 @@ function commentComposer(ticket) {
     body,
     el("div", { className: "comment-action-rail" }, actions)
   ]);
-  wrap.append(entry, attachments);
+  const resizeBar = el("div", {
+    className: "comment-resize-bar",
+    role: "separator",
+    tabindex: "0",
+    "aria-label": "Resize reply area",
+    "aria-orientation": "horizontal",
+    "data-comment-resize": "true"
+  });
+  wrap.append(resizeBar, entry, attachments);
   const attachmentInput = attachments.querySelector(".attachment-input");
   if (attachmentInput) {
     if (draft?.files?.length) setAttachmentFiles(attachmentInput, draft.files);
