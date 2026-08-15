@@ -266,7 +266,7 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 		t.Fatalf("session needs_setup = false before setup: %s", body)
 	}
 
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/session", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -309,7 +309,7 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 
 func TestAPIMethodContracts(t *testing.T) {
 	_, server, client := newTestServer(t, Options{EmailNotifications: true})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -407,7 +407,7 @@ func TestAPIMethodContracts(t *testing.T) {
 
 func TestAPIAuthAndCSRFContracts(t *testing.T) {
 	_, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/tokens", map[string]any{"name": "contract"}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
@@ -490,7 +490,7 @@ func TestAPIAuthAndCSRFContracts(t *testing.T) {
 
 func TestProductDeletionRequiresAdmin(t *testing.T) {
 	tracker, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -525,7 +525,7 @@ func TestProductDeletionRequiresAdmin(t *testing.T) {
 
 func TestProductMemberRemovalAPI(t *testing.T) {
 	tracker, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -566,7 +566,7 @@ func TestProductMemberRemovalAPI(t *testing.T) {
 
 func TestTicketDeletionRequiresAdmin(t *testing.T) {
 	tracker, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -613,7 +613,7 @@ func TestTicketDeletionRequiresAdmin(t *testing.T) {
 
 func TestTicketListPaginationAndSorting(t *testing.T) {
 	_, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -665,7 +665,7 @@ func TestTicketListPaginationAndSorting(t *testing.T) {
 
 func TestTicketAssigneeRequiresProductStaff(t *testing.T) {
 	_, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
@@ -753,7 +753,7 @@ func TestTicketAssigneeRequiresProductStaff(t *testing.T) {
 
 func TestAPIValidationContracts(t *testing.T) {
 	_, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -807,7 +807,7 @@ func TestAPIValidationContracts(t *testing.T) {
 
 	disabledTracker, disabledServer, disabledClient := newTestServer(t)
 	_ = disabledTracker
-	disabledCookie, disabledCSRF := setupAdmin(t, disabledClient, disabledServer.URL, "admin", "admin@example.test")
+	disabledCookie, disabledCSRF := setupAdmin(t, disabledClient, disabledServer.URL)
 	resp, body = doJSON(t, disabledClient, http.MethodPost, disabledServer.URL+"/api/email-notifications/test", map[string]any{}, disabledCookie, disabledCSRF, disabledServer.URL)
 	requireStatus(t, resp, body, http.StatusConflict)
 	if !bytes.Contains(body, []byte("email notifications are not configured")) {
@@ -856,7 +856,7 @@ func TestAdminMaintenanceEndpoint(t *testing.T) {
 		DomainEventRetention: 48 * time.Hour,
 		Version:              "test-version",
 	})
-	adminCookie, _ := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, _ := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/admin/maintenance", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -880,7 +880,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 		EmailNotifications: true,
 		PublicURL:          "https://tracker.example.test",
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
 		"display_name": "Pending User",
@@ -981,7 +981,7 @@ func TestAdminCreatesUserWithManualPassword(t *testing.T) {
 		EmailNotifications: true,
 		PublicURL:          "https://tracker.example.test",
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/users", map[string]any{
 		"display_name": "Manual Customer",
@@ -1003,7 +1003,7 @@ func TestAdminCreatesUserWithManualPassword(t *testing.T) {
 
 func TestProfileAndPasswordChangeFlow(t *testing.T) {
 	_, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	staffID := createUser(t, client, server.URL, adminCookie, adminCSRF, map[string]any{
 		"display_name": "Staffer",
 		"email":        "staffer@example.test",
@@ -1056,7 +1056,7 @@ func TestProfileAndPasswordChangeFlow(t *testing.T) {
 func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	ttlStarted := time.Now().UTC()
 	ttlTracker, ttlServer, ttlClient := newTestServer(t, Options{SessionTTL: time.Hour})
-	adminCookie, _ := setupAdmin(t, ttlClient, ttlServer.URL, "admin", "admin@example.test")
+	adminCookie, _ := setupAdmin(t, ttlClient, ttlServer.URL)
 	requireSessionCookieTTL(t, adminCookie, ttlStarted, time.Hour)
 	waitForDomainEvents(t, ttlTracker)
 	expireSessionToken(t, ttlTracker, adminCookie.Value)
@@ -1070,7 +1070,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 		LoginRateLimit:       RateLimit{Limit: 2, Window: time.Minute},
 		AccountLinkRateLimit: RateLimit{Limit: 2, Window: time.Minute},
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	for range 2 {
 		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
@@ -1117,7 +1117,7 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 
 func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
 		"key":         "OPS",
@@ -1230,7 +1230,7 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 
 func TestEmailNotificationAdminTools(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/test", map[string]any{}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusCreated)
@@ -1268,7 +1268,7 @@ func TestEmailNotificationAdminTools(t *testing.T) {
 
 func TestAdminHistoryPaginationAndFilters(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	for range 2 {
 		resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/email-notifications/test", map[string]any{}, adminCookie, adminCSRF, server.URL)
@@ -1321,7 +1321,7 @@ func TestAdminHistoryPaginationAndFilters(t *testing.T) {
 
 func TestTicketSaveGroupsPatchAndCommentEmail(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -1507,7 +1507,7 @@ func TestMutationQueuesWebhookDelivery(t *testing.T) {
 	client := server.Client()
 	client.Timeout = time.Second
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	if err := app.dispatchPendingEvents(context.Background(), eventDispatchBatchSize); err != nil {
 		t.Fatalf("dispatch setup event: %v", err)
 	}
@@ -1625,7 +1625,7 @@ func TestWebhookDeliveryFlow(t *testing.T) {
 		AllowPrivateWebhooks:  true,
 	})
 	_ = tracker
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -1717,7 +1717,7 @@ func TestWebhookNotificationsUseNotificationDelay(t *testing.T) {
 		AllowPrivateWebhooks:  true,
 		NotificationDelay:     time.Hour,
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -1771,7 +1771,7 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 	client := server.Client()
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
@@ -1860,7 +1860,7 @@ func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T)
 	client := server.Client()
 	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
@@ -1904,7 +1904,7 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 		EmailNotifications: true,
 		PublicURL:          "https://tracker.example.test",
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	users, err := tracker.ListUsers()
 	if err != nil || len(users) != 1 {
 		t.Fatalf("list initial users = %#v err=%v", users, err)
@@ -2168,7 +2168,7 @@ func TestStaffCreatesTicketForCustomer(t *testing.T) {
 		PublicURL:          "https://tracker.example.test",
 		UploadDir:          t.TempDir(),
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
@@ -2285,7 +2285,7 @@ func TestStaffCreatesTicketForCustomer(t *testing.T) {
 
 func TestCustomerPermissionBoundaries(t *testing.T) {
 	_, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -2414,7 +2414,7 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 
 func TestAdminOnlyEndpointsRejectStaffAndCustomers(t *testing.T) {
 	_, server, client := newTestServer(t)
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -2467,7 +2467,7 @@ func TestAdminOnlyEndpointsRejectStaffAndCustomers(t *testing.T) {
 
 func TestTicketAttachmentsVisibilityAndDownload(t *testing.T) {
 	_, server, client := newTestServer(t, Options{UploadDir: t.TempDir()})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -2639,7 +2639,7 @@ func TestSanitizeAttachmentFilenamePreservesUnicodeAndExtension(t *testing.T) {
 func TestMultipartTicketPatchUpdatesFieldsCommentAndAttachments(t *testing.T) {
 	uploadDir := t.TempDir()
 	tracker, server, client := newTestServer(t, Options{UploadDir: uploadDir})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -2721,7 +2721,7 @@ func TestBlockedUploadReturnsClearMessage(t *testing.T) {
 		UploadDir:     t.TempDir(),
 		MaxUploadSize: 8,
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	productID := decodeFirstProductID(t, body)
@@ -2746,7 +2746,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 		EmailNotifications: true,
 		PublicURL:          "https://tracker.example.test",
 	})
-	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	adminCookie, adminCSRF := setupAdmin(t, client, server.URL)
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -2886,13 +2886,10 @@ func eventually(t *testing.T, condition func() bool, message string) {
 	}
 }
 
-func setupAdmin(t *testing.T, client *http.Client, baseURL, name, email string) (*http.Cookie, string) {
+func setupAdmin(t *testing.T, client *http.Client, baseURL string) (*http.Cookie, string) {
 	t.Helper()
-	if email == "" {
-		email = fixtureEmail(name)
-	}
 	payload := map[string]any{
-		"email":    email,
+		"email":    fixtureEmail("admin"),
 		"password": "correct horse",
 	}
 	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/setup", payload, nil, "", "")

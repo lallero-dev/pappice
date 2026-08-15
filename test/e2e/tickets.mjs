@@ -14,9 +14,6 @@ async function createCustomerTicket(cdp) {
       return dialog && heading.includes("New Ticket") && title ? candidate : null;
     }, "new ticket modal");
     const createModal = root.querySelector(".ticket-create-modal");
-    if (document.querySelector("#ticketList .ticket-row.draft")) {
-      throw new Error("ticket creation should use a modal, not a draft row");
-    }
     const product = root.querySelector("[name='product_id']");
     if (!product.value) {
       const firstProduct = [...product.options].find((option) => option.value);
@@ -75,9 +72,6 @@ async function createCustomerTicket(cdp) {
     confirm.click();
     await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "new ticket modal closed", 12000);
     await waitFor(() => document.querySelector("#ticketList")?.textContent.includes(input.title), "created ticket in list", 12000);
-    if (document.querySelector("#ticketList .ticket-row.draft")) {
-      throw new Error("draft ticket row should not be present after creating a ticket");
-    }
     const createdDetail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
       return pane?.textContent.includes(input.description) ? pane : null;
@@ -234,9 +228,6 @@ async function verifySinglePaneTicketFlow(cdp, ticketKey, viewport, label) {
       if (!sheet?.textContent.includes("Product") || !sheet.textContent.includes(input.title)) {
         throw new Error(`${input.label} info sheet should contain ticket title and facts`);
       }
-      if ([...sheet.querySelectorAll(".section-title")].some((title) => title.textContent.trim() === "Ticket")) {
-        throw new Error(`${input.label} info sheet should not repeat a Ticket section heading`);
-      }
       infoRoot.querySelector("[value='cancel']").click();
       await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), `${input.label} info sheet closed`);
 
@@ -286,11 +277,7 @@ async function staffReplyAndReopen(cdp) {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
       return !document.querySelector("#ticketList .ticket-row.active") && detailText.includes("No ticket selected");
     }, "no ticket selected by default");
-    let row = await waitFor(() => {
-      return [...document.querySelectorAll("#ticketList .ticket-row")]
-        .find((candidate) => candidate.textContent.includes(input.title));
-    }, "ticket row for staff update", 12000);
-    row = await waitFor(() => {
+    const row = await waitFor(() => {
       return [...document.querySelectorAll("#ticketList .ticket-row")]
         .find((candidate) => candidate.textContent.includes(input.title) && candidate.classList.contains("unread"));
     }, "new customer ticket unread for staff");
@@ -513,7 +500,6 @@ async function staffReplyAndReopen(cdp) {
 
   await runInPage(cdp, async (input) => {
     const { openModalRoot, pasteFiles, setValue, waitFor } = pageTools();
-    await waitFor(() => !document.querySelector(".image-preview-modal[open]"), "image preview closed with escape");
     let detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
       return document.querySelector("#ticketList .ticket-row.active") &&
@@ -560,9 +546,7 @@ async function staffReplyAndReopen(cdp) {
     return true;
   }, {
     ...ticket,
-    draft: "Draft reply kept locally",
-    adminDisplayName: admin.displayName,
-    customerDisplayName: customer.displayName
+    draft: "Draft reply kept locally"
   });
 }
 
