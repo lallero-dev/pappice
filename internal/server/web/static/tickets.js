@@ -750,7 +750,7 @@ async function createTicketFromForm(data, form, fallbackProductId) {
   const body = ticketCreateRequestBody(payload, form);
   const created = await request(`/api/products/${payload.product_id}/tickets`, { method: "POST", body });
   state.ticketProductId = payload.product_id;
-  const createdStatus = created.status || "new";
+  const createdStatus = created.status || "open";
   if (createdStatus && !state.filters.statuses.includes(createdStatus)) {
     state.filters.statuses = [createdStatus];
   }
@@ -810,13 +810,6 @@ function ticketSidePanel(ticket, editable) {
 
 function ticketSideSections(ticket, editable) {
   const sections = [];
-  if (editable && !isCustomer()) {
-    sections.push(sideSection("Workflow", workflowEditor(ticket || { assignee_user_id: 0, priority: "normal", status: "new" })));
-  }
-  const requester = requesterBlock(ticket);
-  if (requester) {
-    sections.push(sideSection("Requester", requester));
-  }
   const facts = [
     factBlock("Title", ticket.title || "Untitled ticket"),
     factBlock("Product", ticketProductLabel(ticket)),
@@ -824,9 +817,18 @@ function ticketSideSections(ticket, editable) {
     factBlock("Updated", relativeTime(ticket.updated_at))
   ];
   if (!canEditTicket(ticket) && !isCustomer()) facts.splice(1, 0, factBlock("Assignee", ticket.assignee_email || "Unassigned"));
-  sections.push(sideSection("Ticket", el("div", { className: "fact-list" }, facts)));
+  sections.push(sideSection("", el("div", { className: "fact-list" }, facts)));
+  const requester = requesterBlock(ticket);
+  if (requester) {
+    sections.push(sideSection("Requester", requester));
+  }
+  if (editable && !isCustomer()) {
+    sections.push(sideSection("", ticketControls(ticket)));
+  }
   if (isAdmin()) {
-    sections.push(sideSection("Danger zone", ticketDangerActions(ticket)));
+    const danger = sideSection("Danger zone", ticketDangerActions(ticket));
+    danger.classList.add("ticket-danger-section");
+    sections.push(danger);
   }
   return sections;
 }
@@ -1070,16 +1072,51 @@ function requesterBlock(ticket) {
   return block;
 }
 
-function workflowEditor(ticket) {
+function ticketControls(ticket) {
   const controls = [
-    ticketSelectField("Status", "status", ticket.status, selectOptions(state.meta.statuses), { required: true })
-  ];
-  controls.push(
     ticketSelectField("Priority", "priority", ticket.priority || "normal", selectOptions(state.meta.priorities), { required: true }),
     ticketSelectField("Assignee", "assignee_user_id", String(ticket.assignee_user_id || ""), assigneeOptions(ticket.product_id, ticket.assignee_user_id))
-  );
-  const controlList = el("div", { className: "detail-controls" }, controls);
-  return el("div", { className: "workflow-editor" }, [controlList]);
+  ];
+  const statusAction = el("button", {
+    className: "ghost-button ticket-status-action",
+    type: "button"
+  });
+  const statusLabel = badge(ticket.status, `status-${ticket.status}`);
+  statusLabel.dataset.ticketStatusValue = ticket.status;
+  const statusControl = el("div", { className: "ticket-status-control" }, [
+    el("span", { className: "ticket-control-label" }, "Status"),
+    el("div", { className: "ticket-status-row" }, [statusLabel, statusAction])
+  ]);
+  updateTicketStatusAction(statusAction, ticket.status);
+  return el("div", { className: "detail-controls" }, [...controls, statusControl]);
+}
+
+function updateTicketStatusAction(button, status) {
+  const closed = status === "closed";
+  button.dataset.ticketStatusTarget = closed ? "open" : "closed";
+  button.textContent = closed ? "Reopen" : "Close";
+  const label = button.closest(".ticket-status-row")?.querySelector("[data-ticket-status-value]");
+  if (label) {
+    label.className = `badge status-${status}`;
+    label.dataset.ticketStatusValue = status;
+    label.textContent = labelize(status);
+  }
+}
+
+function confirmTicketStatusChange(ticket, status, stacked) {
+  const closing = status === "closed";
+  return confirmAction({
+    title: closing ? "Close this ticket?" : "Reopen this ticket?",
+    body: closing
+      ? "The ticket will move to Closed. A new public reply will reopen it."
+      : "The ticket will move back to Open.",
+    confirmLabel: closing ? "Close Ticket" : "Reopen Ticket",
+    details: [
+      ["Ticket", ticket.title || "Selected ticket"],
+      ["New status", closing ? "Closed" : "Open"]
+    ],
+    stacked
+  });
 }
 
 async function confirmTicketComment(ticket, composer) {
@@ -1136,10 +1173,6 @@ function ticketUpdatePatch(ticket, data) {
     const description = String(data.description || "").trim();
     if (description !== (ticket.description || "")) patch.description = description;
   }
-  if (hasFormValue(data, "status")) {
-    const status = String(data.status || "").trim();
-    if (status && status !== ticket.status) patch.status = status;
-  }
   if (hasFormValue(data, "priority")) {
     const priority = String(data.priority || "").trim();
     if (priority && priority !== ticket.priority) patch.priority = priority;
@@ -1167,17 +1200,17 @@ function ticketCommentPayload(ticket, data) {
 function bindTicketAutosave(form, ticket) {
   let currentTicket = ticket;
   let saveQueue = Promise.resolve();
-  const controls = Array.from(form.querySelectorAll("[name='title'], [name='status'], [name='priority'], [name='assignee_user_id']"));
-  const save = () => {
+  const controls = Array.from(form.querySelectorAll("[name='title'], [name='priority'], [name='assignee_user_id']"));
+  const enqueueSave = (patchForTicket, statusAction = null) => {
     saveQueue = saveQueue.then(async () => {
-      const data = Object.fromEntries(new FormData(form).entries());
-      const patch = ticketUpdatePatch(currentTicket, data);
+      const patch = patchForTicket(currentTicket);
       if (Object.keys(patch).length === 0) return;
       const statusChanged = hasFormValue(patch, "status");
       const assigneeChanged = hasFormValue(patch, "assignee_user_id");
       try {
         const updated = await saveTicketPatch(currentTicket, patch);
         currentTicket = updated;
+        if (statusAction) updateTicketStatusAction(statusAction, updated.status);
         if (assigneeChanged && state.filters.assigneeUserId && String(updated.assignee_user_id || "") !== state.filters.assigneeUserId) {
           state.filters.assigneeUserId = "";
           renderAssigneeFilter();
@@ -1189,10 +1222,16 @@ function bindTicketAutosave(form, ticket) {
         }
       } catch (error) {
         showError(error);
+      } finally {
+        if (statusAction) statusAction.disabled = false;
       }
     });
     saveQueue = saveQueue.catch(() => {});
   };
+  const save = () => enqueueSave((current) => {
+    const data = Object.fromEntries(new FormData(form).entries());
+    return ticketUpdatePatch(current, data);
+  });
   const debouncedSave = debounce(save, TICKET_AUTOSAVE_DELAY_MS);
   for (const control of controls) {
     if (control.tagName === "INPUT" || control.tagName === "TEXTAREA") {
@@ -1202,6 +1241,21 @@ function bindTicketAutosave(form, ticket) {
       control.addEventListener("change", () => save(control));
     }
   }
+  const statusAction = form.querySelector("[data-ticket-status-target]");
+  statusAction?.addEventListener("click", async () => {
+    const target = statusAction.dataset.ticketStatusTarget;
+    statusAction.disabled = true;
+    const confirmed = await confirmTicketStatusChange(
+      currentTicket,
+      target,
+      form.getRootNode() instanceof ShadowRoot
+    );
+    if (!confirmed) {
+      statusAction.disabled = false;
+      return;
+    }
+    enqueueSave(() => ({ status: target }), statusAction);
+  });
 }
 
 async function saveTicketPatch(ticket, patch) {
@@ -1219,7 +1273,14 @@ function replaceTicket(updated) {
     }
     return summary;
   });
-  if (state.selectedId === updated.id) state.selectedTicket = updated;
+  if (state.selectedId === updated.id) {
+    state.selectedTicket = updated;
+    for (const root of [els.ticketDetailPane, els.modalHost?.form]) {
+      for (const button of root?.querySelectorAll("[data-ticket-status-target]") || []) {
+        updateTicketStatusAction(button, updated.status);
+      }
+    }
+  }
 }
 
 function bindCommentComposer(form, ticket) {
@@ -1540,12 +1601,13 @@ function conversationMessages(ticket) {
 }
 
 function statusChangeRow(change) {
+  const action = change.currentStatus === "closed" ? "closed the ticket" : "reopened the ticket";
   return el("div", {
     className: "conversation-status-change",
     title: change.label
   }, el("span", {}, [
     el("strong", {}, change.actor),
-    ` changed status from ${labelize(change.previousStatus)} to ${labelize(change.currentStatus)}`
+    ` ${action}`
   ]));
 }
 

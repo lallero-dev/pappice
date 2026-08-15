@@ -120,18 +120,13 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 	if actorName != "" && event == "ticket.commented" {
 		intro = fmt.Sprintf("%s replied to your ticket.", actorName)
 	}
-	if event == "ticket.updated" && requesterTerminalStatus(ticket.Status) {
-		intro = fmt.Sprintf("Your ticket is now %s.", strings.ToLower(requesterStatusLabel(ticket.Status)))
+	if event == "ticket.updated" {
+		intro = fmt.Sprintf("Your ticket is now %s.", ticket.Status)
 	}
 
 	fields := []emailField{
 		{Label: "Ticket", Value: ticket.Key},
-		{Label: "Status", Value: ticket.Status},
-	}
-	if event != "ticket.created" {
-		if requesterTerminalStatus(ticket.Status) {
-			fields = append(fields, emailField{Label: "Current status", Value: requesterStatusLabel(ticket.Status)})
-		}
+		{Label: "Status", Value: requesterStatusLabel(ticket.Status)},
 	}
 
 	blocks := make([]emailBlock, 0, 1)
@@ -367,21 +362,11 @@ func latestPublicComment(ticket store.Ticket) (store.Comment, bool) {
 	return store.Comment{}, false
 }
 
-func requesterTerminalStatus(status string) bool {
-	status = strings.TrimSpace(strings.ToLower(status))
-	return status == "resolved" || status == "rejected"
-}
-
 func requesterStatusLabel(status string) string {
-	s := strings.TrimSpace(status)
-	switch strings.ToLower(s) {
-	case "resolved":
-		return "Resolved"
-	case "rejected":
-		return "Rejected"
-	default:
-		return s
+	if strings.EqualFold(strings.TrimSpace(status), "closed") {
+		return "Closed"
 	}
+	return "Open"
 }
 
 func ticketEventAction(event string) string {

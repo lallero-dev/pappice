@@ -190,7 +190,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	ticketID := decodeInt64(t, body, "id")
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status": "assigned",
+		"status": "closed",
 	}, bobCookie, bobCSRF, server.URL)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("customer patch status = %d body=%s, want 403", resp.StatusCode, body)
@@ -203,7 +203,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusCreated)
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status": "assigned",
+		"status": "closed",
 	}, bobCookie, bobCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 }
@@ -642,22 +642,22 @@ func TestTicketListPaginationAndSorting(t *testing.T) {
 		return page
 	}
 
-	first := getPage("/api/tickets?status=new&sort=title&direction=asc&limit=2")
+	first := getPage("/api/tickets?status=open&sort=title&direction=asc&limit=2")
 	if len(first.Tickets) != 2 || first.Tickets[0].Title != "Alpha" || first.Tickets[1].Title != "Mike" {
 		t.Fatalf("first ticket page = %#v", first.Tickets)
 	}
 	if !first.HasMore || first.Limit != 2 || first.Offset != 0 {
 		t.Fatalf("first ticket pagination = %#v", first)
 	}
-	if first.Counts["all"] != 3 || first.Counts["new"] != 3 {
+	if first.Counts["all"] != 3 || first.Counts["open"] != 3 {
 		t.Fatalf("ticket aggregates changed by pagination: %#v", first.Counts)
 	}
 
-	second := getPage("/api/tickets?status=new&sort=title&direction=asc&limit=2&offset=2")
+	second := getPage("/api/tickets?status=open&sort=title&direction=asc&limit=2&offset=2")
 	if len(second.Tickets) != 1 || second.Tickets[0].Title != "Zulu" || second.HasMore {
 		t.Fatalf("second ticket page = %#v", second)
 	}
-	byPriority := getPage("/api/tickets?status=new&sort=priority&direction=desc")
+	byPriority := getPage("/api/tickets?status=open&sort=priority&direction=desc")
 	if len(byPriority.Tickets) != 3 || byPriority.Tickets[0].Title != "Zulu" || byPriority.Tickets[2].Title != "Alpha" {
 		t.Fatalf("priority-sorted tickets = %#v", byPriority.Tickets)
 	}
@@ -1205,11 +1205,10 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusCreated)
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status":           "assigned",
 		"assignee_user_id": devID,
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?product_id="+itoa(productID)+"&status=new&status=assigned&assignee_user_id="+itoa(devID)+"&q=dashboard", nil, adminCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?product_id="+itoa(productID)+"&status=open&assignee_user_id="+itoa(devID)+"&q=dashboard", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Dashboard fails")) {
 		t.Fatalf("filtered tickets missing ticket: %s", body)
@@ -1222,7 +1221,7 @@ func TestAdminProductTicketCommentAndNotificationFlow(t *testing.T) {
 	waitForDomainEvents(t, tracker)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("ticket.updated")) ||
+	if !bytes.Contains(body, []byte("ticket.assigned")) ||
 		!bytes.Contains(body, []byte("Ticket update")) ||
 		!bytes.Contains(body, []byte("dev@example.test")) {
 		t.Fatalf("email outbox missing grouped update notification: %s", body)
@@ -1320,7 +1319,7 @@ func TestAdminHistoryPaginationAndFilters(t *testing.T) {
 	}
 }
 
-func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
+func TestTicketSaveGroupsPatchAndCommentEmail(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{EmailNotifications: true})
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
 
@@ -1344,7 +1343,7 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 	ticketID := decodeInt64(t, body, "id")
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status":           "assigned",
+		"status":           "closed",
 		"assignee_user_id": devID,
 		"comment": map[string]any{
 			"body":       "This should roll back",
@@ -1354,12 +1353,12 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusBadRequest)
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(ticketID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if bytes.Contains(body, []byte("This should roll back")) || bytes.Contains(body, []byte(`"status":"assigned"`)) {
+	if bytes.Contains(body, []byte("This should roll back")) || bytes.Contains(body, []byte(`"status":"closed"`)) {
 		t.Fatalf("failed grouped save was not rolled back: %s", body)
 	}
 
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]any{
-		"status":           "assigned",
+		"status":           "closed",
 		"assignee_user_id": devID,
 		"comment": map[string]any{
 			"body":       "Taking this now",
@@ -1367,7 +1366,7 @@ func TestTicketSaveGroupsWorkflowAndCommentEmail(t *testing.T) {
 		},
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Taking this now")) || !bytes.Contains(body, []byte(`"status":"assigned"`)) {
+	if !bytes.Contains(body, []byte("Taking this now")) || !bytes.Contains(body, []byte(`"status":"closed"`)) {
 		t.Fatalf("grouped ticket save response = %s", body)
 	}
 
@@ -1906,6 +1905,11 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 		PublicURL:          "https://tracker.example.test",
 	})
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
+	users, err := tracker.ListUsers()
+	if err != nil || len(users) != 1 {
+		t.Fatalf("list initial users = %#v err=%v", users, err)
+	}
+	adminID := users[0].ID
 
 	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/support/products", nil, nil, "", "")
 	requireStatus(t, resp, body, http.StatusNotFound)
@@ -2053,7 +2057,7 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	if err := json.Unmarshal(body, &ticketList); err != nil {
 		t.Fatalf("decode ticket list: %v", err)
 	}
-	if len(ticketList.Tickets) != 1 || ticketList.Counts["all"] != 1 || ticketList.Counts["new"] != 1 || ticketList.UnreadTotal != 1 {
+	if len(ticketList.Tickets) != 1 || ticketList.Counts["all"] != 1 || ticketList.Counts["open"] != 1 || ticketList.UnreadTotal != 1 {
 		t.Fatalf("ticket list aggregates = %#v", ticketList)
 	}
 	for _, field := range []string{"description", "comments", "attachments"} {
@@ -2088,30 +2092,53 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 		t.Fatalf("customer unread list should be empty after mark-read: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(created.ID), map[string]any{
-		"status": "resolved",
+		"priority":         "high",
+		"assignee_user_id": adminID,
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=new&status=assigned", nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(created.ID), nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if decodeBool(t, body, "has_unread") || bytes.Contains(body, []byte(`"assignee_user_id":`)) {
+		t.Fatalf("internal ticket change became customer-visible: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(created.ID), map[string]any{
+		"status": "closed",
+	}, adminCookie, adminCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusOK)
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=open", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if bytes.Contains(body, []byte("Need help")) {
-		t.Fatalf("explicit active status filter should hide read terminal ticket: %s", body)
+		t.Fatalf("explicit open filter should hide read closed ticket: %s", body)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=new&status=assigned&include_unread_outside_status=1", nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=open&include_unread_outside_status=1", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
-	if !bytes.Contains(body, []byte("Need help")) || !bytes.Contains(body, []byte(`"status":"resolved"`)) {
-		t.Fatalf("default active view should include unread resolved ticket: %s", body)
+	if !bytes.Contains(body, []byte("Need help")) || !bytes.Contains(body, []byte(`"status":"closed"`)) {
+		t.Fatalf("default open view should include unread closed ticket: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/read", nil, customerCookie, customerCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=new&status=assigned&include_unread_outside_status=1", nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=open&include_unread_outside_status=1", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if bytes.Contains(body, []byte("Need help")) {
-		t.Fatalf("default active view should hide read terminal ticket: %s", body)
+		t.Fatalf("default open view should hide read closed ticket: %s", body)
 	}
-	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=resolved", nil, customerCookie, "", "")
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=closed", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("Need help")) {
-		t.Fatalf("explicit resolved filter should show resolved ticket: %s", body)
+		t.Fatalf("explicit closed filter should show closed ticket: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets/"+itoa(created.ID)+"/comments", map[string]any{
+		"body":       "The problem returned",
+		"visibility": "public",
+	}, customerCookie, customerCSRF, server.URL)
+	requireStatus(t, resp, body, http.StatusCreated)
+	if !bytes.Contains(body, []byte(`"status":"open"`)) || !bytes.Contains(body, []byte(`"current_status":"open"`)) {
+		t.Fatalf("customer reply did not reopen ticket: %s", body)
+	}
+	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets?status=open", nil, customerCookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	if !bytes.Contains(body, []byte("Need help")) {
+		t.Fatalf("reopened ticket missing from open view: %s", body)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets", nil, customerCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
@@ -2205,7 +2232,7 @@ func TestStaffCreatesTicketForCustomer(t *testing.T) {
 		t.Fatalf("requester notification = %#v", notification)
 	}
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(created.ID), map[string]any{
-		"status": "assigned",
+		"status": "closed",
 	}, staffCookie, staffCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	resp, body = doJSON(t, client, http.MethodDelete, server.URL+"/api/users/"+itoa(customerID), nil, adminCookie, adminCSRF, server.URL)
@@ -2225,7 +2252,7 @@ func TestStaffCreatesTicketForCustomer(t *testing.T) {
 		t.Fatalf("customer cannot see staff-created ticket: %s", body)
 	}
 	if got := customerTicket.StatusChanges; len(got) != 1 || got[0].ActorUserID != staffID ||
-		got[0].ActorName != "Support" || got[0].PreviousStatus != "new" || got[0].CurrentStatus != "assigned" {
+		got[0].ActorName != "Support" || got[0].PreviousStatus != "open" || got[0].CurrentStatus != "closed" {
 		t.Fatalf("customer status history = %#v", got)
 	}
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
@@ -2355,13 +2382,13 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	requireStatus(t, resp, body, http.StatusOK)
 
 	for name, patch := range map[string]map[string]any{
-		"status":      {"status": "assigned"},
+		"status":      {"status": "closed"},
 		"priority":    {"priority": "low"},
 		"assignee":    {"assignee_user_id": supportID},
 		"title":       {"title": "Customer renamed ticket"},
 		"description": {"description": "Customer edited description"},
 		"mixed": {
-			"status": "assigned",
+			"status": "closed",
 			"comment": map[string]any{
 				"body":       "Should not persist",
 				"visibility": "public",
@@ -2370,18 +2397,18 @@ func TestCustomerPermissionBoundaries(t *testing.T) {
 	} {
 		resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(customerTicketID), patch, customerCookie, customerCSRF, server.URL)
 		requireStatus(t, resp, body, http.StatusForbidden)
-		t.Logf("blocked customer workflow patch %s", name)
+		t.Logf("blocked customer ticket patch %s", name)
 	}
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/tickets/"+itoa(customerTicketID), nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if bytes.Contains(body, []byte("Should not persist")) ||
 		bytes.Contains(body, []byte("Customer renamed ticket")) ||
 		bytes.Contains(body, []byte("Customer edited description")) ||
-		bytes.Contains(body, []byte(`"status":"assigned"`)) ||
+		bytes.Contains(body, []byte(`"status":"closed"`)) ||
 		bytes.Contains(body, []byte(`"priority":"low"`)) ||
 		bytes.Contains(body, []byte(`"assignee_email":`)) ||
 		bytes.Contains(body, []byte(`"assignee_user_id":`)) {
-		t.Fatalf("blocked customer workflow change persisted: %s", body)
+		t.Fatalf("blocked customer ticket change persisted: %s", body)
 	}
 }
 
@@ -2609,7 +2636,7 @@ func TestSanitizeAttachmentFilenamePreservesUnicodeAndExtension(t *testing.T) {
 	}
 }
 
-func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) {
+func TestMultipartTicketPatchUpdatesFieldsCommentAndAttachments(t *testing.T) {
 	uploadDir := t.TempDir()
 	tracker, server, client := newTestServer(t, Options{UploadDir: uploadDir})
 	adminCookie, adminCSRF := setupAdmin(t, client, server.URL, "admin", "admin@example.test")
@@ -2636,7 +2663,7 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 	resp, body = doMultipart(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(ticketID), map[string]string{
 		"title":            "Multipart patched ticket",
 		"description":      "Updated through a multipart save",
-		"status":           "assigned",
+		"status":           "closed",
 		"priority":         "high",
 		"assignee_user_id": itoa(devID),
 		"body":             "Patch evidence attached",
@@ -2653,10 +2680,10 @@ func TestMultipartTicketPatchUpdatesWorkflowCommentAndAttachments(t *testing.T) 
 	}
 	if patched.Title != "Multipart patched ticket" ||
 		patched.Description != "Updated through a multipart save" ||
-		patched.Status != "assigned" ||
+		patched.Status != "closed" ||
 		patched.Priority != "high" ||
 		patched.AssigneeUserID != devID || patched.AssigneeEmail != "patchdev@example.test" {
-		t.Fatalf("multipart patch did not update workflow fields: %#v", patched)
+		t.Fatalf("multipart patch did not update ticket fields: %#v", patched)
 	}
 
 	var attachmentID int64
@@ -2751,14 +2778,13 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 		return decodeInt64(t, body, "id")
 	}
 
-	workflowOnlyID := createTicket("Workflow-only change")
-	notification := requireNotificationForTicketEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	internalChangeID := createTicket("Internal-only change")
+	notification := requireNotificationForTicketEmail(t, tracker, internalChangeID, "customer@example.test")
 	if notification.Event != "ticket.created" {
 		t.Fatalf("initial requester notification = %#v", notification)
 	}
 
-	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(workflowOnlyID), map[string]any{
-		"status":           "assigned",
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(internalChangeID), map[string]any{
 		"priority":         "urgent",
 		"assignee_user_id": devID,
 		"comment": map[string]any{
@@ -2767,23 +2793,22 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 		},
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	notification = requireNotificationForTicketEmail(t, tracker, workflowOnlyID, "customer@example.test")
+	notification = requireNotificationForTicketEmail(t, tracker, internalChangeID, "customer@example.test")
 	if notification.Event != "ticket.created" || strings.Contains(notification.BodyText, "Internal triage details") {
-		t.Fatalf("workflow-only change should not notify requester: %#v", notification)
+		t.Fatalf("internal-only change should not notify requester: %#v", notification)
 	}
 
-	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(workflowOnlyID), map[string]any{
-		"status": "resolved",
+	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(internalChangeID), map[string]any{
+		"status": "closed",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
-	notification = requireNotificationForTicketEmail(t, tracker, workflowOnlyID, "customer@example.test")
-	if notification.Event != "ticket.updated" || !strings.Contains(notification.BodyText, "Current status: Resolved") {
-		t.Fatalf("resolved status should notify requester: %#v", notification)
+	notification = requireNotificationForTicketEmail(t, tracker, internalChangeID, "customer@example.test")
+	if notification.Event != "ticket.updated" || !strings.Contains(notification.BodyText, "Status: Closed") {
+		t.Fatalf("closed status should notify requester: %#v", notification)
 	}
 
 	publicReplyID := createTicket("Grouped public reply")
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(publicReplyID), map[string]any{
-		"status":           "assigned",
 		"assignee_user_id": devID,
 		"comment": map[string]any{
 			"body":       "Visible staff reply",
@@ -2794,7 +2819,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 	notification = requireNotificationForTicketEmail(t, tracker, publicReplyID, "customer@example.test")
 	if notification.Event != "ticket.commented" ||
 		!strings.Contains(notification.BodyText, "Visible staff reply") ||
-		strings.Contains(notification.BodyText, "Current status: Assigned") {
+		strings.Contains(notification.BodyText, "Status: Closed") {
 		t.Fatalf("public reply should be the requester-facing event: %#v", notification)
 	}
 
@@ -2803,7 +2828,7 @@ func TestRequesterNotificationPolicy(t *testing.T) {
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	resp, body = doJSON(t, client, http.MethodPatch, server.URL+"/api/tickets/"+itoa(publicReplyID), map[string]any{
-		"status": "resolved",
+		"status": "closed",
 	}, adminCookie, adminCSRF, server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	for _, notification := range mustEmailNotifications(t, tracker, 100) {

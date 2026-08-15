@@ -293,8 +293,8 @@ func (s *Server) ticketEventEmails(event string, ticket store.Ticket, actor stor
 		notifyRequester = true
 		requesterActorName = "Pappice Support"
 	case "ticket.updated":
-		notifyStaff = payload.HasPatch
-		notifyRequester = payload.PreviousStatus != payload.CurrentStatus && requesterTerminalStatus(payload.CurrentStatus) && actor.UserID != ticket.RequesterUserID
+		notifyStaff = payload.HasPatch && !payload.OnlyAssigneePatch
+		notifyRequester = payload.PreviousStatus != payload.CurrentStatus && actor.UserID != ticket.RequesterUserID
 	case "ticket.assigned":
 		notifyStaff = payload.AssignmentChanged && payload.OnlyAssigneePatch && !payload.PublicComment
 	case "ticket.commented":

@@ -195,10 +195,8 @@ func seedDemoStore(dbPath string) (demoSeed, error) {
 	if err != nil {
 		return demoSeed{}, err
 	}
-	assigned := "assigned"
 	if _, err := tracker.SaveTicket(store.SaveTicketInput{
 		TicketID: ticket.ID,
-		Patch:    store.UpdateTicket{Status: &assigned},
 		Comment: &store.AddComment{
 			Body:       "Thanks, I can reproduce it. I am checking the account setup now.",
 			Visibility: "public",

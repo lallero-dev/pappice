@@ -231,8 +231,11 @@ async function verifySinglePaneTicketFlow(cdp, ticketKey, viewport, label) {
         return root?.querySelector("dialog[open] h2")?.textContent.includes("Ticket Info") ? root : null;
       }, `${input.label} info sheet`);
       const sheet = infoRoot.querySelector(".ticket-info-sheet");
-      if (!sheet?.textContent.includes("Product") || !sheet.textContent.includes("Ticket") || !sheet.textContent.includes(input.title)) {
+      if (!sheet?.textContent.includes("Product") || !sheet.textContent.includes(input.title)) {
         throw new Error(`${input.label} info sheet should contain ticket title and facts`);
+      }
+      if ([...sheet.querySelectorAll(".section-title")].some((title) => title.textContent.trim() === "Ticket")) {
+        throw new Error(`${input.label} info sheet should not repeat a Ticket section heading`);
       }
       infoRoot.querySelector("[value='cancel']").click();
       await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), `${input.label} info sheet closed`);
@@ -276,7 +279,7 @@ async function verifySinglePaneTicketFlow(cdp, ticketKey, viewport, label) {
   }
 }
 
-async function staffReplyAndResolve(cdp) {
+async function staffReplyAndReopen(cdp) {
   await runInPage(cdp, async (input) => {
     const { isScrolledToBottom, openModalRoot, pasteFiles, setValue, submitModal, tinyGifFile, waitFor } = pageTools();
     await waitFor(() => {
@@ -303,7 +306,7 @@ async function staffReplyAndResolve(cdp) {
     row.click();
     const detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
-      return pane?.querySelector("form [name='status']") ? pane : null;
+      return pane?.querySelector("[data-ticket-status-target='closed']") ? pane : null;
     }, "ticket detail pane");
     await waitFor(() => {
       return !document.querySelector("#ticketList .ticket-row.active")?.classList.contains("unread");
@@ -353,19 +356,20 @@ async function staffReplyAndResolve(cdp) {
     if (detail.querySelector("[name='body']")?.value !== input.liveDraft) {
       throw new Error("live ticket refresh should preserve the local reply draft");
     }
-    setValue(detail.querySelector("[name='status']"), "resolved");
+    detail.querySelector("[data-ticket-status-target='closed']").click();
+    await submitModal("Close this ticket?");
     await waitFor(() => {
       return [...detail.querySelectorAll(".conversation-status-change")]
-        .some((change) => change.textContent.includes("changed status from New to Resolved"));
+        .some((change) => change.textContent.includes("closed the ticket"));
     }, "live status change in conversation");
     await waitFor(() => {
       return [...document.querySelectorAll("#ticketList .ticket-row")]
         .some((candidate) => candidate.classList.contains("active") &&
           candidate.querySelector(".ticket-row-title")?.textContent.trim() === input.title);
-    }, "open resolved ticket retained in default list");
+    }, "selected closed ticket retained in default list");
     const activeStatuses = [...document.querySelectorAll("[data-filter-status][aria-pressed='true']")]
       .map((button) => button.dataset.filterStatus);
-    if (activeStatuses.includes("resolved") || activeStatuses.includes("rejected")) {
+    if (activeStatuses.includes("closed")) {
       throw new Error("ticket status changes should not broaden the global status filter");
     }
     setValue(detail.querySelector("[name='body']"), input.reply);
@@ -431,6 +435,11 @@ async function staffReplyAndResolve(cdp) {
         .some((candidate) => candidate.textContent.includes(input.title));
       return detailText.includes(input.reply) || !stillListed;
     }, "saved ticket update", 12000);
+    await waitFor(() => {
+      const pane = document.querySelector("#ticketDetailPane");
+      return pane?.textContent.includes("reopened the ticket") &&
+        pane.querySelector("[data-ticket-status-target='closed']") ? pane : null;
+    }, "public reply reopens closed ticket");
     const staffReply = [...detail.querySelectorAll(".message-row")]
       .find((candidate) => candidate.textContent.includes(input.reply));
     if (staffReply && !staffReply.classList.contains("from-current")) {
@@ -488,9 +497,8 @@ async function staffReplyAndResolve(cdp) {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
       const listed = [...document.querySelectorAll("#ticketList .ticket-row")]
         .some((candidate) => candidate.querySelector(".ticket-row-title")?.textContent.trim() === input.title);
-      return !listed && detailText.includes("No ticket selected");
-    }, "ticket closed with local draft");
-    document.querySelector("[data-filter-status='resolved']")?.click();
+      return listed && detailText.includes("No ticket selected");
+    }, "ticket selection closed with local draft");
     const row = await waitFor(() => {
       return [...document.querySelectorAll("#ticketList .ticket-row")]
         .find((candidate) => candidate.querySelector(".ticket-row-title")?.textContent.trim() === input.title);
@@ -597,5 +605,5 @@ export {
   verifyTicketHashRoute,
   verifyFixedTicketLayout,
   verifySinglePaneTicketFlow,
-  staffReplyAndResolve
+  staffReplyAndReopen
 };

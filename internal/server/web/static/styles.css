@@ -980,24 +980,14 @@ button:focus-visible {
   text-transform: capitalize;
 }
 
-.status-new {
+.status-open {
   background: #edf6ff;
   color: var(--blue-dark);
 }
 
-.status-assigned {
-  background: #fff4db;
-  color: #7a4b00;
-}
-
-.status-resolved {
+.status-closed {
   background: #e8f6ee;
   color: var(--green);
-}
-
-.status-rejected {
-  background: #fff1f0;
-  color: var(--red);
 }
 
 .priority-urgent,
@@ -1083,9 +1073,6 @@ button:focus-visible {
 
 .ticket-main,
 .ticket-side {
-  align-content: start;
-  display: grid;
-  gap: 12px;
   min-width: 0;
 }
 
@@ -1095,6 +1082,7 @@ button:focus-visible {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  gap: 12px;
   height: auto;
   min-height: 0;
   overflow: hidden;
@@ -1141,6 +1129,8 @@ button:focus-visible {
   background: var(--panel-strong);
   border-left: 1px solid var(--border-soft);
   border-radius: 0;
+  display: flex;
+  flex-direction: column;
   gap: 0;
   min-height: 0;
   overflow: auto;
@@ -1191,6 +1181,29 @@ button:focus-visible {
   grid-template-columns: 1fr;
 }
 
+.ticket-status-control {
+  display: grid;
+  gap: 6px;
+}
+
+.ticket-control-label {
+  color: #3b4856;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.ticket-status-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ticket-status-action {
+  min-height: 30px;
+  padding: 4px 10px;
+}
+
 .description {
   background: var(--panel-strong);
   border: 1px solid var(--border-soft);
@@ -1201,14 +1214,13 @@ button:focus-visible {
 }
 
 .side-section {
-  border-bottom: 1px solid var(--border-soft);
   display: grid;
   gap: 6px;
   padding: 8px 10px;
 }
 
-.side-section:last-child {
-  border-bottom: 0;
+.ticket-danger-section {
+  margin-top: auto;
 }
 
 .section-title {
@@ -2639,7 +2651,8 @@ button:focus-visible {
   .ticket-info-sheet .ticket-side {
     background: #ffffff;
     border: 0;
-    display: grid;
+    display: flex;
+    flex-direction: column;
     max-height: none;
     overflow: visible;
   }

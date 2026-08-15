@@ -498,28 +498,20 @@ button:disabled {
 }
 
 .ticket-side {
-  align-content: start;
-  display: grid;
-  min-width: 0;
-}
-
-.ticket-side {
   background: #fff;
   border: 1px solid #dde4ec;
   border-radius: 8px;
+  display: flex;
+  flex-direction: column;
   gap: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
 .side-section {
-  border-bottom: 1px solid #dde4ec;
   display: grid;
   gap: 10px;
   padding: 12px;
-}
-
-.side-section:last-child {
-  border-bottom: 0;
 }
 
 .section-title {
@@ -535,9 +527,31 @@ button:disabled {
   gap: 9px;
 }
 
-.workflow-editor {
+.ticket-status-control {
   display: grid;
-  gap: 10px;
+  gap: 6px;
+}
+
+.ticket-control-label {
+  color: #3b4856;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.ticket-status-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ticket-status-action {
+  min-height: 30px;
+  padding: 4px 10px;
+}
+
+.ticket-danger-section {
+  margin-top: auto;
 }
 
 .description {
@@ -798,24 +812,14 @@ button:disabled {
   text-transform: capitalize;
 }
 
-.status-new {
+.status-open {
   background: #edf6ff;
   color: #194d7b;
 }
 
-.status-assigned {
-  background: #fff4db;
-  color: #7a4b00;
-}
-
-.status-resolved {
+.status-closed {
   background: #e8f6ee;
   color: #2f855a;
-}
-
-.status-rejected {
-  background: #fff1f0;
-  color: #b42318;
 }
 
 .priority-urgent,

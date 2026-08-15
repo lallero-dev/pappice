@@ -102,10 +102,10 @@ async function main() {
   await confirmReply(page, finalReply);
   await hold(page, 1.8);
 
-  await resolveTicket(staffTicket);
+  await closeTicket(staffTicket);
   await refreshTicket(page, ticketKey, [
     finalReply,
-    "changed status from New to Resolved"
+    "closed the ticket"
   ]);
   await hold(page, 4.0);
 
@@ -388,10 +388,10 @@ async function postStaffReply(ticket, body) {
   });
 }
 
-async function resolveTicket(ticket) {
+async function closeTicket(ticket) {
   await ticket.api(`/api/tickets/${ticket.id}`, {
     method: "PATCH",
-    body: { status: "resolved" }
+    body: { status: "closed" }
   });
 }
 

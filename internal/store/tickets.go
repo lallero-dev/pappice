@@ -20,7 +20,7 @@ func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []Cr
 		ProductID:      input.ProductID,
 		Title:          strings.TrimSpace(input.Title),
 		Description:    strings.TrimSpace(input.Description),
-		Status:         "new",
+		Status:         "open",
 		Priority:       defaultString(input.Priority, "normal"),
 		AssigneeUserID: input.AssigneeUserID,
 		CreatedAt:      now,
@@ -232,11 +232,25 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 	}
 
 	now := time.Now().UTC()
+	var comment AddComment
+	publicComment := false
+	if hasComment {
+		comment, publicComment, err = normalizeComment(*input.Comment, hasAttachments)
+		if err != nil {
+			return SaveTicketResult{}, err
+		}
+	}
+	if publicComment && previous.Status == "closed" {
+		status := "open"
+		input.Patch.Status = &status
+		hasPatch = true
+	}
 	current := previous
 	result := SaveTicketResult{
-		Previous:   previous,
-		HasPatch:   hasPatch,
-		HasComment: hasComment,
+		Previous:      previous,
+		HasPatch:      hasPatch,
+		HasComment:    hasComment,
+		PublicComment: publicComment,
 	}
 	if hasPatch {
 		if err := applyTicketPatch(&current, input.Patch, now); err != nil {
@@ -260,16 +274,11 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		}
 	}
 	if hasComment {
-		comment, publicComment, err := normalizeComment(*input.Comment, hasAttachments)
-		if err != nil {
-			return SaveTicketResult{}, err
-		}
 		commentID, err := addCommentTx(tx, input.TicketID, comment, actor, now)
 		if err != nil {
 			return SaveTicketResult{}, err
 		}
 		result.CommentID = commentID
-		result.PublicComment = publicComment
 	}
 	if hasAttachments {
 		var commentID *int64
@@ -410,7 +419,7 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 			return fmt.Errorf("%w: invalid status %q", ErrValidation, status)
 		}
 		current.Status = status
-		if status == "resolved" || status == "rejected" {
+		if status == "closed" {
 			closedAt := now
 			current.ClosedAt = &closedAt
 		} else {
@@ -872,8 +881,9 @@ func ticketSummarySelect(user User, ticketID int64, filter *TicketSummaryFilter)
 	requesterName := "COALESCE(NULLIF(requester.display_name, ''), requester.email)"
 	requesterEmail := "requester.email"
 	openedByUser := "i.created_by_user_id = ?"
+	statusByUser := "sc.actor_user_id = ?"
 	commentByUser := "c.author_user_id = ?"
-	args = append(args, user.ID, user.ID)
+	args = append(args, user.ID, user.ID, user.ID)
 
 	internalComments := "0 = 1"
 	if role == "admin" {
@@ -886,7 +896,10 @@ func ticketSummarySelect(user User, ticketID int64, filter *TicketSummaryFilter)
 	}
 	unreadCount := `(
 		CASE WHEN ` + afterRead("i.created_at") + ` AND NOT (` + openedByUser + `) THEN 1 ELSE 0 END +
-		CASE WHEN ` + afterRead("i.updated_at") + ` AND i.status IN ('resolved', 'rejected') THEN 1 ELSE 0 END +
+		(SELECT COUNT(*) FROM ticket_status_changes sc
+		 WHERE sc.ticket_id = i.id
+		   AND ` + afterRead("sc.created_at") + `
+		   AND NOT (` + statusByUser + `)) +
 		(SELECT COUNT(*) FROM comments c
 		 WHERE c.ticket_id = i.id
 		   AND ` + afterRead("c.created_at") + `

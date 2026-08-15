@@ -64,7 +64,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		Key:        "PME-1",
 		ProductKey: "PME",
 		Title:      "Need <help>",
-		Status:     "resolved",
+		Status:     "closed",
 		Comments: []store.Comment{{
 			Author:     "Alice",
 			Body:       "Please try the updated setup.\nIt should work now.",
@@ -80,7 +80,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 	for _, want := range []string{
 		"Alice replied to your ticket.",
 		"Ticket: PME-1",
-		"Current status: Resolved",
+		"Status: Closed",
 		"Latest public reply from Alice:",
 		"Open your ticket:\nhttps://tracker.example.test/",
 		"Replies to this email are not read.",
@@ -117,7 +117,7 @@ func TestTicketEmailContentUsesReadableLayout(t *testing.T) {
 		ProductName:   "Pappice",
 		Title:         "Cannot sign in",
 		Description:   "Login fails after password reset.",
-		Status:        "assigned",
+		Status:        "open",
 		Priority:      "urgent",
 		AssigneeEmail: "dev@example.test",
 		RequesterName: "Customer",

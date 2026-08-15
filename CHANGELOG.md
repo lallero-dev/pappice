@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Simplify tickets to open and closed states, with public replies reopening
+  closed conversations.
+
 ## v0.13.0 - 2026-07-24
 
 - Model ticket requesters and creators explicitly and preserve accounts that

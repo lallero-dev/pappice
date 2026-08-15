@@ -17,7 +17,7 @@ import {
 import {
   createCustomerTicket,
   createTicketForCustomer,
-  staffReplyAndResolve,
+  staffReplyAndReopen,
   verifyFixedTicketLayout,
   verifySinglePaneTicketFlow,
   verifyTicketHashRoute
@@ -70,7 +70,7 @@ async function main() {
   await logout(page);
   await loginAsAdmin(page);
   await createTicketForCustomer(page);
-  await staffReplyAndResolve(page);
+  await staffReplyAndReopen(page);
   await verifyEmailOutbox(page);
   await verifyAuditLog(page);
 

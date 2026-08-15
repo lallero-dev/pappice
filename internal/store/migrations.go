@@ -46,6 +46,7 @@ var orderedMigrations = []migration{
 	{Version: 4, Name: "require_ticket_participants", Up: migrateTicketParticipants},
 	{Version: 5, Name: "ticket_status_history", Up: migrateTicketStatusHistory},
 	{Version: 6, Name: "schedule_domain_event_retries", Up: migrateDomainEventRetries},
+	{Version: 7, Name: "simplify_ticket_statuses", Up: migrateTicketStatuses},
 }
 
 func CurrentSchemaVersion() int {
@@ -515,6 +516,56 @@ func migrateDomainEventRetries(tx *sql.Tx) error {
 		DROP INDEX IF EXISTS idx_domain_events_pending;
 		CREATE INDEX idx_domain_events_pending
 			ON domain_events(status, next_attempt_at, locked_until);
+	`)
+	return err
+}
+
+func migrateTicketStatuses(tx *sql.Tx) error {
+	hasTickets, err := tableExists(tx, "tickets")
+	if err != nil || !hasTickets {
+		return err
+	}
+	var invalid int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM tickets WHERE status NOT IN ('new', 'assigned', 'resolved', 'rejected', 'open', 'closed')`).Scan(&invalid); err != nil {
+		return err
+	}
+	if invalid != 0 {
+		return fmt.Errorf("%w: tickets with unknown statuses: %d", ErrMigrationRequired, invalid)
+	}
+	if _, err := tx.Exec(`
+		UPDATE tickets
+		SET closed_at = CASE
+				WHEN status IN ('resolved', 'rejected', 'closed') THEN COALESCE(closed_at, updated_at)
+				ELSE NULL
+			END,
+			status = CASE
+				WHEN status IN ('new', 'assigned', 'open') THEN 'open'
+				ELSE 'closed'
+			END
+	`); err != nil {
+		return err
+	}
+
+	hasHistory, err := tableExists(tx, "ticket_status_changes")
+	if err != nil || !hasHistory {
+		return err
+	}
+	if err := tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM ticket_status_changes
+		WHERE previous_status NOT IN ('new', 'assigned', 'resolved', 'rejected', 'open', 'closed')
+		   OR current_status NOT IN ('new', 'assigned', 'resolved', 'rejected', 'open', 'closed')
+	`).Scan(&invalid); err != nil {
+		return err
+	}
+	if invalid != 0 {
+		return fmt.Errorf("%w: ticket status changes with unknown statuses: %d", ErrMigrationRequired, invalid)
+	}
+	_, err = tx.Exec(`
+		UPDATE ticket_status_changes
+		SET previous_status = CASE WHEN previous_status IN ('new', 'assigned', 'open') THEN 'open' ELSE 'closed' END,
+		    current_status = CASE WHEN current_status IN ('new', 'assigned', 'open') THEN 'open' ELSE 'closed' END;
+		DELETE FROM ticket_status_changes WHERE previous_status = current_status;
 	`)
 	return err
 }

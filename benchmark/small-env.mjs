@@ -249,7 +249,7 @@ async function ensureProducts(admin, count) {
 async function warmup(sessions) {
   await Promise.all(sessions.map(async (session) => {
     await session.get("/api/session");
-    await session.get("/api/tickets?status=new&status=assigned&include_unread_outside_status=1");
+    await session.get("/api/tickets?status=open&include_unread_outside_status=1");
   }));
 }
 
@@ -288,7 +288,7 @@ async function userLoop(session, index, config, counters, state) {
   let cursor = index;
   while (!state.stop) {
     try {
-      const list = await session.get("/api/tickets?status=new&status=assigned&include_unread_outside_status=1");
+      const list = await session.get("/api/tickets?status=open&include_unread_outside_status=1");
       counters.ok++;
       const tickets = list.tickets || [];
       if (tickets.length > 0) {

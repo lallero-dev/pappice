@@ -1,7 +1,7 @@
 package store
 
 var (
-	ticketStatuses            = []string{"new", "assigned", "resolved", "rejected"}
+	ticketStatuses            = []string{"open", "closed"}
 	ticketPriorities          = []string{"low", "normal", "high", "urgent"}
 	globalRoles               = []string{"admin", "staff", "customer"}
 	productRoles              = []string{"manager", "staff", "customer", "viewer"}

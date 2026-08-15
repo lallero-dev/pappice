@@ -22,10 +22,9 @@ function emptyMessage(className, { title, body, actionLabel = "", onAction = nul
 }
 
 export function sideSection(title, content) {
-  return el("section", { className: "side-section" }, [
-    el("h4", { className: "section-title" }, title),
-    content
-  ]);
+  const children = title ? [el("h4", { className: "section-title" }, title)] : [];
+  children.push(content);
+  return el("section", { className: "side-section" }, children);
 }
 
 export function factBlock(label, value) {

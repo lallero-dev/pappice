@@ -85,7 +85,7 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 		t.Fatalf("read time = %v, want near %v", got, readAt)
 	}
 
-	status := "assigned"
+	status := "closed"
 	assigneeUserID := admin.ID
 	updatedResult, err := tracker.SaveTicket(SaveTicketInput{
 		TicketID: ticket.ID,
@@ -98,12 +98,12 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update ticket: %v", err)
 	}
-	if updated := updatedResult.Ticket; updated.Status != "assigned" || updated.AssigneeUserID != admin.ID || updated.AssigneeEmail != admin.Email {
+	if updated := updatedResult.Ticket; updated.Status != "closed" || updated.ClosedAt == nil || updated.AssigneeUserID != admin.ID || updated.AssigneeEmail != admin.Email {
 		t.Fatalf("updated ticket = %#v", updated)
 	}
 	if got := updatedResult.Ticket.StatusChanges; len(got) != 1 ||
 		got[0].ActorUserID != admin.ID || got[0].ActorName != "Alice Admin" ||
-		got[0].PreviousStatus != "new" || got[0].CurrentStatus != "assigned" {
+		got[0].PreviousStatus != "open" || got[0].CurrentStatus != "closed" {
 		t.Fatalf("status changes = %#v", got)
 	}
 	sameStatus, err := tracker.SaveTicket(SaveTicketInput{
@@ -167,9 +167,57 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get reloaded ticket: %v", err)
 	}
-	if len(reloadedTicket.Comments) != 1 || reloadedTicket.Comments[0].Author != "Alice Admin" ||
-		len(reloadedTicket.StatusChanges) != 1 || reloadedTicket.StatusChanges[0].ActorName != "Alice Admin" {
+	if reloadedTicket.Status != "open" || reloadedTicket.ClosedAt != nil ||
+		len(reloadedTicket.Comments) != 1 || reloadedTicket.Comments[0].Author != "Alice Admin" ||
+		len(reloadedTicket.StatusChanges) != 2 || reloadedTicket.StatusChanges[1].CurrentStatus != "open" ||
+		reloadedTicket.StatusChanges[1].ActorName != "Alice Admin" {
 		t.Fatalf("reloaded ticket history = %#v", reloadedTicket)
+	}
+}
+
+func TestClosedTicketReplyLifecycle(t *testing.T) {
+	tracker, err := Open(filepath.Join(t.TempDir(), "tracker.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	productID := mustListProducts(t, tracker, admin)[0].ID
+	ticket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Lifecycle", ActorUserID: admin.ID})
+	if err != nil {
+		t.Fatalf("create ticket: %v", err)
+	}
+	closed := "closed"
+	result, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID, ActorUserID: admin.ID, Patch: UpdateTicket{Status: &closed},
+	})
+	if err != nil {
+		t.Fatalf("close ticket: %v", err)
+	}
+	if result.Ticket.Status != "closed" || result.Ticket.ClosedAt == nil {
+		t.Fatalf("closed ticket = %#v", result.Ticket)
+	}
+	result, err = tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID, ActorUserID: admin.ID, Comment: &AddComment{Body: "Private", Visibility: "internal"},
+	})
+	if err != nil {
+		t.Fatalf("add internal note: %v", err)
+	}
+	if result.Ticket.Status != "closed" || len(result.Ticket.StatusChanges) != 1 {
+		t.Fatalf("internal note changed lifecycle: %#v", result.Ticket)
+	}
+	result, err = tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID, ActorUserID: admin.ID, Patch: UpdateTicket{Status: &closed},
+		Comment: &AddComment{Body: "One more thing", Visibility: "public"},
+	})
+	if err != nil {
+		t.Fatalf("add public reply: %v", err)
+	}
+	if !result.HasPatch || !result.PublicComment || result.Ticket.Status != "open" || result.Ticket.ClosedAt != nil ||
+		len(result.Ticket.StatusChanges) != 2 || result.Ticket.StatusChanges[1].CurrentStatus != "open" {
+		t.Fatalf("public reply did not reopen ticket: %#v", result)
 	}
 }
 
@@ -255,18 +303,18 @@ func TestStoreValidation(t *testing.T) {
 		t.Fatalf("bad status error = %v, want ErrValidation", err)
 	}
 
-	wantStatuses := []string{"new", "assigned", "resolved", "rejected"}
+	wantStatuses := []string{"open", "closed"}
 	if got := Statuses(); !slices.Equal(got, wantStatuses) {
 		t.Fatalf("statuses = %#v, want %#v", got, wantStatuses)
 	}
 
-	status = "rejected"
-	rejectedResult, err := tracker.SaveTicket(SaveTicketInput{TicketID: ticket.ID, Patch: UpdateTicket{Status: &status}, ActorUserID: actorUserID})
+	status = "closed"
+	closedResult, err := tracker.SaveTicket(SaveTicketInput{TicketID: ticket.ID, Patch: UpdateTicket{Status: &status}, ActorUserID: actorUserID})
 	if err != nil {
-		t.Fatalf("reject ticket: %v", err)
+		t.Fatalf("close ticket: %v", err)
 	}
-	if rejected := rejectedResult.Ticket; rejected.Status != "rejected" || rejected.ClosedAt == nil {
-		t.Fatalf("rejected ticket = %#v, want rejected with closed_at", rejected)
+	if closed := closedResult.Ticket; closed.Status != "closed" || closed.ClosedAt == nil {
+		t.Fatalf("closed ticket = %#v, want closed_at", closed)
 	}
 }
 
@@ -306,7 +354,7 @@ func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect migration: %v", err)
 	}
-	if got, want := migrationNames(status.Pending), []string{"baseline_schema", "rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; status.CurrentVersion != 0 || !slices.Equal(got, want) {
+	if got, want := migrationNames(status.Pending), []string{"baseline_schema", "rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; status.CurrentVersion != 0 || !slices.Equal(got, want) {
 		t.Fatalf("migration status = %#v", status)
 	}
 	if _, err := Migrate(path, MigrationOptions{DryRun: true}); !errors.Is(err, ErrMigrationRequired) {
@@ -388,14 +436,14 @@ func TestMigrateRenamesProductRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect before migration: %v", err)
 	}
-	if got, want := migrationNames(status.Pending), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; status.CurrentVersion != 1 || !slices.Equal(got, want) {
+	if got, want := migrationNames(status.Pending), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; status.CurrentVersion != 1 || !slices.Equal(got, want) {
 		t.Fatalf("before migration status = %#v", status)
 	}
 	result, err := Migrate(path, MigrationOptions{})
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if got, want := migrationNames(result.Applied), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; !slices.Equal(got, want) {
+	if got, want := migrationNames(result.Applied), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; !slices.Equal(got, want) {
 		t.Fatalf("applied migrations = %#v", result.Applied)
 	}
 
@@ -498,7 +546,7 @@ func TestMigrateRelationalData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if got, want := migrationNames(result.Applied), []string{"normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries"}; !slices.Equal(got, want) {
+	if got, want := migrationNames(result.Applied), []string{"normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; !slices.Equal(got, want) {
 		t.Fatalf("applied migrations = %#v", result.Applied)
 	}
 	db, err = sql.Open("sqlite", path)
@@ -581,7 +629,7 @@ func TestMigrateSchedulesFailedDomainEvents(t *testing.T) {
 		DROP INDEX idx_domain_events_pending;
 		ALTER TABLE domain_events DROP COLUMN next_attempt_at;
 		UPDATE domain_events SET status = 'failed', attempts = 7, last_error = 'old failure' WHERE id = ?;
-		DELETE FROM schema_migrations WHERE version = 6;
+		DELETE FROM schema_migrations WHERE version IN (6, 7);
 	`, event.ID)
 	if err != nil {
 		t.Fatalf("prepare version 5 database: %v", err)
@@ -594,7 +642,7 @@ func TestMigrateSchedulesFailedDomainEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if got, want := migrationNames(result.Applied), []string{"schedule_domain_event_retries"}; !slices.Equal(got, want) {
+	if got, want := migrationNames(result.Applied), []string{"schedule_domain_event_retries", "simplify_ticket_statuses"}; !slices.Equal(got, want) {
 		t.Fatalf("applied migrations = %#v, want %#v", got, want)
 	}
 	tracker, err = Open(path)
@@ -608,6 +656,87 @@ func TestMigrateSchedulesFailedDomainEvents(t *testing.T) {
 	}
 	if migrated.Status != "pending" || migrated.Attempts != 0 || migrated.NextAttemptAt.IsZero() {
 		t.Fatalf("migrated event = %#v", migrated)
+	}
+}
+
+func TestMigrateSimplifiesTicketStatuses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "statuses.db")
+	tracker, err := Open(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	admin, err := tracker.CreateFirstAdmin(CreateUser{Email: "admin@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	productID := mustListProducts(t, tracker, admin)[0].ID
+	openTicket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Reopened", ActorUserID: admin.ID})
+	if err != nil {
+		t.Fatalf("create open ticket: %v", err)
+	}
+	closedTicket, err := tracker.CreateTicket(CreateTicket{ProductID: productID, Title: "Closed", ActorUserID: admin.ID})
+	if err != nil {
+		t.Fatalf("create closed ticket: %v", err)
+	}
+	if err := tracker.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version = 7`); err != nil {
+		t.Fatalf("remove current migration: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE tickets SET status = 'assigned', closed_at = '2026-01-01T00:00:00Z' WHERE id = ?`, openTicket.ID); err != nil {
+		t.Fatalf("prepare open ticket: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE tickets SET status = 'resolved', closed_at = NULL WHERE id = ?`, closedTicket.ID); err != nil {
+		t.Fatalf("prepare closed ticket: %v", err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO ticket_status_changes (ticket_id, actor_user_id, previous_status, current_status, created_at) VALUES
+			(?, ?, 'new', 'assigned', '2026-01-01T00:00:00Z'),
+			(?, ?, 'assigned', 'resolved', '2026-01-02T00:00:00Z'),
+			(?, ?, 'resolved', 'rejected', '2026-01-03T00:00:00Z'),
+			(?, ?, 'rejected', 'assigned', '2026-01-04T00:00:00Z');
+	`, openTicket.ID, admin.ID, openTicket.ID, admin.ID,
+		openTicket.ID, admin.ID, openTicket.ID, admin.ID)
+	if err != nil {
+		t.Fatalf("prepare version 6 database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	result, err := Migrate(path, MigrationOptions{})
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if got, want := migrationNames(result.Applied), []string{"simplify_ticket_statuses"}; !slices.Equal(got, want) {
+		t.Fatalf("applied migrations = %#v, want %#v", got, want)
+	}
+	tracker, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer tracker.Close()
+	migratedOpen, err := tracker.GetTicket(openTicket.ID)
+	if err != nil {
+		t.Fatalf("get open ticket: %v", err)
+	}
+	if migratedOpen.Status != "open" || migratedOpen.ClosedAt != nil || len(migratedOpen.StatusChanges) != 2 ||
+		migratedOpen.StatusChanges[0].PreviousStatus != "open" || migratedOpen.StatusChanges[0].CurrentStatus != "closed" ||
+		migratedOpen.StatusChanges[1].PreviousStatus != "closed" || migratedOpen.StatusChanges[1].CurrentStatus != "open" {
+		t.Fatalf("migrated open ticket = %#v", migratedOpen)
+	}
+	migratedClosed, err := tracker.GetTicket(closedTicket.ID)
+	if err != nil {
+		t.Fatalf("get closed ticket: %v", err)
+	}
+	if migratedClosed.Status != "closed" || migratedClosed.ClosedAt == nil {
+		t.Fatalf("migrated closed ticket = %#v", migratedClosed)
 	}
 }
 
@@ -708,7 +837,7 @@ func TestMetadataAndPublicViews(t *testing.T) {
 	}
 	mutatedStatuses := Statuses()
 	mutatedStatuses[0] = "mutated"
-	if got := Statuses()[0]; got != "new" {
+	if got := Statuses()[0]; got != "open" {
 		t.Fatalf("statuses leaked mutable backing array, first status = %q", got)
 	}
 
@@ -742,7 +871,7 @@ func TestSaveTicketIsTransactional(t *testing.T) {
 	}
 
 	title := "Changed"
-	status := "assigned"
+	status := "closed"
 	_, err = tracker.SaveTicket(SaveTicketInput{
 		TicketID:    ticket.ID,
 		Patch:       UpdateTicket{Title: &title, Status: &status},
@@ -756,11 +885,11 @@ func TestSaveTicketIsTransactional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get ticket after failed save: %v", err)
 	}
-	if unchanged.Title != "Original" || unchanged.Status != "new" || len(unchanged.Comments) != 0 || len(unchanged.StatusChanges) != 0 {
+	if unchanged.Title != "Original" || unchanged.Status != "open" || len(unchanged.Comments) != 0 || len(unchanged.StatusChanges) != 0 {
 		t.Fatalf("failed save was not rolled back: %#v", unchanged)
 	}
 
-	comment := AddComment{Body: "Now assigned", Visibility: "public"}
+	comment := AddComment{Body: "Closing this ticket", Visibility: "public"}
 	assigneeUserID := admin.ID
 	saved, err := tracker.SaveTicket(SaveTicketInput{
 		TicketID:    ticket.ID,
@@ -774,7 +903,7 @@ func TestSaveTicketIsTransactional(t *testing.T) {
 	if !saved.HasPatch || !saved.HasComment || !saved.PublicComment || !saved.AssignmentChanged {
 		t.Fatalf("save metadata = %#v", saved)
 	}
-	if saved.Previous.Status != "new" || saved.Ticket.Status != "assigned" ||
+	if saved.Previous.Status != "open" || saved.Ticket.Status != "closed" ||
 		len(saved.Ticket.Comments) != 1 || len(saved.Ticket.StatusChanges) != 1 {
 		t.Fatalf("saved ticket = %#v", saved)
 	}
@@ -804,7 +933,7 @@ func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
 		t.Fatalf("created events = %#v", events)
 	}
 
-	status := "assigned"
+	status := "closed"
 	assigneeUserID := admin.ID
 	_, err = tracker.SaveTicket(SaveTicketInput{
 		TicketID:    ticket.ID,
@@ -844,7 +973,7 @@ func TestTicketMutationsWriteDomainEventsTransactionally(t *testing.T) {
 	if err := json.Unmarshal([]byte(claimed[1].PayloadJSON), &payload); err != nil {
 		t.Fatalf("decode event payload: %v", err)
 	}
-	if !payload.HasPatch || !payload.PublicComment || !payload.AssignmentChanged || payload.PreviousStatus != "new" || payload.CurrentStatus != "assigned" {
+	if !payload.HasPatch || !payload.PublicComment || !payload.AssignmentChanged || payload.PreviousStatus != "open" || payload.CurrentStatus != "closed" {
 		t.Fatalf("event payload = %#v", payload)
 	}
 	if err := tracker.ApplyDomainEventProjection(claimed[0].ID, DomainEventProjection{}); err != nil {
@@ -1869,11 +1998,11 @@ func TestDeleteUserPreservesTicketHistory(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("add staff comment: %v", err)
 	}
-	assigned := "assigned"
+	closed := "closed"
 	if _, err := tracker.SaveTicket(SaveTicketInput{
 		TicketID:    ticket.ID,
 		ActorUserID: statusActor.ID,
-		Patch:       UpdateTicket{Status: &assigned},
+		Patch:       UpdateTicket{Status: &closed},
 	}); err != nil {
 		t.Fatalf("change status: %v", err)
 	}
