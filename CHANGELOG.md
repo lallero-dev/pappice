@@ -2,9 +2,16 @@
 
 ## Unreleased
 
+## v0.14.0 - 2026-08-15
+
 - Simplify tickets to open and closed states, with public replies reopening
-  closed conversations.
-- Keep ticket update times tied to status changes and conversation activity.
+  closed conversations and selected closed tickets remaining visible.
+- Unify the ticket inspector, improve its mobile confirmation flow, and add a
+  vertically resizable reply composer with aligned actions.
+- Keep ticket update times tied to status changes and conversation activity,
+  excluding internal priority and assignee changes.
+- Make domain-event dispatch asynchronous and retry-safe, and improve the
+  portability of local quality checks.
 
 ## v0.13.0 - 2026-07-24
 
