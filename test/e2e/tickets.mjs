@@ -333,6 +333,11 @@ async function staffReplyAndResolve(cdp) {
       throw new Error("incoming message should be visually aligned to the left");
     }
     const liveComposer = detail.querySelector(".comment-form");
+    const composerControls = [".attachment-trigger", ".comment-visibility-control", ".comment-send-button"]
+      .map((selector) => liveComposer.querySelector(selector)?.getBoundingClientRect().bottom);
+    if (composerControls.some((bottom) => !bottom) || Math.max(...composerControls) - Math.min(...composerControls) > 2) {
+      throw new Error("reply composer actions should share one bottom-aligned row");
+    }
     setValue(detail.querySelector("[name='body']"), input.liveDraft);
     const { request } = await import("/static/api.js");
     const key = decodeURIComponent(window.location.hash.slice(1));

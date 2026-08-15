@@ -1547,11 +1547,18 @@ button:focus-visible {
   display: none;
 }
 
+.comment-form .attachment-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .comment-form .attachment-picker {
+  align-items: flex-end;
   background: transparent;
   border: 0;
   border-radius: 0;
-  min-height: 30px;
+  min-height: 38px;
   padding: 0 1px;
 }
 
@@ -1725,18 +1732,18 @@ button:focus-visible {
   color: var(--red);
 }
 
-.comment-entry {
-  align-items: stretch;
-  display: grid;
+.comment-footer {
+  align-items: flex-end;
+  display: flex;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 38px;
+  min-width: 0;
 }
 
-.comment-action-rail {
-  align-content: end;
-  display: grid;
+.comment-actions {
+  align-items: flex-end;
+  display: flex;
+  flex: 0 0 auto;
   gap: 6px;
-  justify-items: center;
 }
 
 .comment-visibility-control {

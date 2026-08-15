@@ -1613,9 +1613,9 @@ function commentComposer(ticket) {
   if (canEditTicket(ticket)) {
     actions.unshift(commentVisibilityControl(visibility));
   }
-  const entry = el("div", { className: "comment-entry" }, [
-    body,
-    el("div", { className: "comment-action-rail" }, actions)
+  const footer = el("div", { className: "comment-footer" }, [
+    attachments,
+    el("div", { className: "comment-actions" }, actions)
   ]);
   const resizeBar = el("div", {
     className: "comment-resize-bar",
@@ -1625,7 +1625,7 @@ function commentComposer(ticket) {
     "aria-orientation": "horizontal",
     "data-comment-resize": "true"
   });
-  wrap.append(resizeBar, entry, attachments);
+  wrap.append(resizeBar, body, footer);
   const attachmentInput = attachments.querySelector(".attachment-input");
   if (attachmentInput) {
     if (draft?.files?.length) setAttachmentFiles(attachmentInput, draft.files);
@@ -1669,8 +1669,8 @@ function visibilityIcon(type) {
     return svg;
   }
   svg.append(
-    svgPath("M5 6.8A3.8 3.8 0 0 1 8.8 3h6.4A3.8 3.8 0 0 1 19 6.8v4.4a3.8 3.8 0 0 1-3.8 3.8h-3.6L7 18v-3.2a3.8 3.8 0 0 1-2-3.4V6.8Z", { "stroke-linejoin": "round" }),
-    svgPath("M8.5 8h7M8.5 11.5H13", { "stroke-linecap": "round" })
+    svgPath("M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6S2.5 12 2.5 12Z"),
+    svgPath("M12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z")
   );
   return svg;
 }
