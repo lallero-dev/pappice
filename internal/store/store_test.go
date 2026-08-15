@@ -101,6 +101,9 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if updated := updatedResult.Ticket; updated.Status != "closed" || updated.ClosedAt == nil || updated.AssigneeUserID != admin.ID || updated.AssigneeEmail != admin.Email {
 		t.Fatalf("updated ticket = %#v", updated)
 	}
+	if !updatedResult.Ticket.UpdatedAt.After(ticket.UpdatedAt) {
+		t.Fatalf("status change updated_at = %v, want after %v", updatedResult.Ticket.UpdatedAt, ticket.UpdatedAt)
+	}
 	if got := updatedResult.Ticket.StatusChanges; len(got) != 1 ||
 		got[0].ActorUserID != admin.ID || got[0].ActorName != "Alice Admin" ||
 		got[0].PreviousStatus != "open" || got[0].CurrentStatus != "closed" {
@@ -117,21 +120,37 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if len(sameStatus.Ticket.StatusChanges) != 1 {
 		t.Fatalf("unchanged status changes = %#v, want one", sameStatus.Ticket.StatusChanges)
 	}
+	if !sameStatus.Ticket.UpdatedAt.Equal(updatedResult.Ticket.UpdatedAt) ||
+		sameStatus.Ticket.ClosedAt == nil || !sameStatus.Ticket.ClosedAt.Equal(*updatedResult.Ticket.ClosedAt) {
+		t.Fatalf("unchanged status changed activity timestamps: before=%#v after=%#v", updatedResult.Ticket, sameStatus.Ticket)
+	}
 	summary, err = tracker.TicketSummaryForUser(admin, ticket.ID)
 	if err != nil || summary.LastReadAt == nil || !summary.LastReadAt.After(readAt) {
 		t.Fatalf("read time after save = %v err=%v, want after %v", summary.LastReadAt, err, readAt)
 	}
+	title := "Cannot import updated invoice"
+	description := "Metadata only"
+	priority := "low"
 	unassignedUserID := int64(0)
-	unassigned, err := tracker.SaveTicket(SaveTicketInput{
-		TicketID:    ticket.ID,
-		Patch:       UpdateTicket{AssigneeUserID: &unassignedUserID},
+	metadataOnly, err := tracker.SaveTicket(SaveTicketInput{
+		TicketID: ticket.ID,
+		Patch: UpdateTicket{
+			Title:          &title,
+			Description:    &description,
+			Priority:       &priority,
+			AssigneeUserID: &unassignedUserID,
+		},
 		ActorUserID: admin.ID,
 	})
 	if err != nil {
-		t.Fatalf("unassign ticket: %v", err)
+		t.Fatalf("update ticket metadata: %v", err)
 	}
-	if !unassigned.AssignmentChanged || unassigned.Ticket.AssigneeUserID != 0 || unassigned.Ticket.AssigneeEmail != "" {
-		t.Fatalf("unassigned ticket = %#v", unassigned)
+	if !metadataOnly.AssignmentChanged || metadataOnly.Ticket.Title != title || metadataOnly.Ticket.Description != description ||
+		metadataOnly.Ticket.Priority != priority || metadataOnly.Ticket.AssigneeUserID != 0 || metadataOnly.Ticket.AssigneeEmail != "" {
+		t.Fatalf("metadata-only update = %#v", metadataOnly)
+	}
+	if !metadataOnly.Ticket.UpdatedAt.Equal(updatedResult.Ticket.UpdatedAt) {
+		t.Fatalf("metadata-only updated_at = %v, want %v", metadataOnly.Ticket.UpdatedAt, updatedResult.Ticket.UpdatedAt)
 	}
 
 	commented, err := tracker.SaveTicket(SaveTicketInput{
@@ -143,6 +162,9 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 		t.Fatalf("add comment: %v", err)
 	}
 	withComment := commented.Ticket
+	if !withComment.UpdatedAt.After(metadataOnly.Ticket.UpdatedAt) {
+		t.Fatalf("reply updated_at = %v, want after %v", withComment.UpdatedAt, metadataOnly.Ticket.UpdatedAt)
+	}
 	if got := len(withComment.Comments); got != 1 {
 		t.Fatalf("comments = %d, want 1", got)
 	}

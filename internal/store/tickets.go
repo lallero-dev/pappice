@@ -256,6 +256,10 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		if err := applyTicketPatch(&current, input.Patch, now); err != nil {
 			return SaveTicketResult{}, err
 		}
+		statusChanged := current.Status != previous.Status
+		if statusChanged || hasComment || hasAttachments {
+			current.UpdatedAt = now
+		}
 		if input.Patch.AssigneeUserID != nil {
 			current.AssigneeEmail, err = ticketAssigneeEmailTx(tx, current.ProductID, current.AssigneeUserID)
 			if err != nil {
@@ -267,7 +271,7 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		if err := updateTicketTx(tx, current); err != nil {
 			return SaveTicketResult{}, err
 		}
-		if current.Status != previous.Status {
+		if statusChanged {
 			if err := addTicketStatusChangeTx(tx, current.ID, actor.ID, previous.Status, current.Status, now); err != nil {
 				return SaveTicketResult{}, err
 			}
@@ -418,12 +422,14 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 		if !isValid(validStatuses, status) {
 			return fmt.Errorf("%w: invalid status %q", ErrValidation, status)
 		}
-		current.Status = status
-		if status == "closed" {
-			closedAt := now
-			current.ClosedAt = &closedAt
-		} else {
-			current.ClosedAt = nil
+		if status != current.Status {
+			current.Status = status
+			if status == "closed" {
+				closedAt := now
+				current.ClosedAt = &closedAt
+			} else {
+				current.ClosedAt = nil
+			}
 		}
 	}
 	if patch.Priority != nil {
@@ -436,7 +442,6 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 	if patch.AssigneeUserID != nil {
 		current.AssigneeUserID = *patch.AssigneeUserID
 	}
-	current.UpdatedAt = now
 	return nil
 }
 

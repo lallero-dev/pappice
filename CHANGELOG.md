@@ -4,6 +4,7 @@
 
 - Simplify tickets to open and closed states, with public replies reopening
   closed conversations.
+- Keep ticket update times tied to status changes and conversation activity.
 
 ## v0.13.0 - 2026-07-24
 
