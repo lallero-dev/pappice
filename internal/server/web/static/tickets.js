@@ -524,7 +524,7 @@ function renderTicketList() {
     }));
     return;
   }
-  const tickets = state.tickets;
+  const tickets = ticketsForList();
   if (tickets.length === 0) {
     if (hasActiveTicketFilters()) {
       els.ticketList.append(emptyState({
@@ -572,6 +572,12 @@ function renderTicketList() {
   if (state.ticketPage.offset > 0 || state.ticketPage.hasMore) {
     els.ticketList.append(ticketPagination());
   }
+}
+
+function ticketsForList() {
+  const selected = selectedTicket();
+  if (!selected || state.tickets.some((ticket) => ticket.id === selected.id)) return state.tickets;
+  return [selected, ...state.tickets];
 }
 
 function ticketPagination() {
@@ -1172,9 +1178,6 @@ function bindTicketAutosave(form, ticket) {
       try {
         const updated = await saveTicketPatch(currentTicket, patch);
         currentTicket = updated;
-        if (statusChanged && updated.status && !state.filters.statuses.includes(updated.status)) {
-          state.filters.statuses = [...state.filters.statuses, updated.status];
-        }
         if (assigneeChanged && state.filters.assigneeUserId && String(updated.assignee_user_id || "") !== state.filters.assigneeUserId) {
           state.filters.assigneeUserId = "";
           renderAssigneeFilter();

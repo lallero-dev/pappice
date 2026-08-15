@@ -358,6 +358,16 @@ async function staffReplyAndResolve(cdp) {
       return [...detail.querySelectorAll(".conversation-status-change")]
         .some((change) => change.textContent.includes("changed status from New to Resolved"));
     }, "live status change in conversation");
+    await waitFor(() => {
+      return [...document.querySelectorAll("#ticketList .ticket-row")]
+        .some((candidate) => candidate.classList.contains("active") &&
+          candidate.querySelector(".ticket-row-title")?.textContent.trim() === input.title);
+    }, "open resolved ticket retained in default list");
+    const activeStatuses = [...document.querySelectorAll("[data-filter-status][aria-pressed='true']")]
+      .map((button) => button.dataset.filterStatus);
+    if (activeStatuses.includes("resolved") || activeStatuses.includes("rejected")) {
+      throw new Error("ticket status changes should not broaden the global status filter");
+    }
     setValue(detail.querySelector("[name='body']"), input.reply);
     const composer = detail.querySelector(".comment-form");
     pasteFiles(detail.querySelector("[name='body']"), [
@@ -476,11 +486,14 @@ async function staffReplyAndResolve(cdp) {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => {
       const detailText = document.querySelector("#ticketDetailPane")?.textContent || "";
-      return !document.querySelector("#ticketList .ticket-row.active") && detailText.includes("No ticket selected");
+      const listed = [...document.querySelectorAll("#ticketList .ticket-row")]
+        .some((candidate) => candidate.querySelector(".ticket-row-title")?.textContent.trim() === input.title);
+      return !listed && detailText.includes("No ticket selected");
     }, "ticket closed with local draft");
+    document.querySelector("[data-filter-status='resolved']")?.click();
     const row = await waitFor(() => {
       return [...document.querySelectorAll("#ticketList .ticket-row")]
-        .find((candidate) => candidate.textContent.includes(input.title));
+        .find((candidate) => candidate.querySelector(".ticket-row-title")?.textContent.trim() === input.title);
     }, "ticket row for local draft restore");
     row.click();
     detail = await waitFor(() => {
