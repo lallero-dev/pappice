@@ -4,7 +4,7 @@ import { badge, debounce, el, labelize, relativeTime } from "./components.js";
 import { richTextNodes } from "./rich-text.js";
 import { DEFAULT_TICKET_STATUSES, TICKET_AUTOSAVE_DELAY_MS, TICKET_PAGE_SIZE, TICKET_REFRESH_INTERVAL_MS, TICKET_SORT_LABELS, els, fullDateFormatter, state } from "./state.js";
 import { accountLabel, accountName, canAccessProductsView, canCommentTicket, canCreateTicket, canEditTicket, canUseAssigneeFilter, currentProduct, isAdmin, isCustomer, productDisplayName } from "./access.js";
-import { confirmAction, emptyState, factBlock, selectOptions, showAppAlert, showError, sideSection } from "./ui.js";
+import { confirmAction, emptyState, selectOptions, showAppAlert, showError, sideSection } from "./ui.js";
 
 let app = {};
 let ticketLoadRequestID = 0;
@@ -809,28 +809,7 @@ function ticketSidePanel(ticket, editable) {
 }
 
 function ticketSideSections(ticket, editable) {
-  const sections = [];
-  const facts = [
-    factBlock("Title", ticket.title || "Untitled ticket"),
-    factBlock("Product", ticketProductLabel(ticket)),
-    factBlock("Created", relativeTime(ticket.created_at)),
-    factBlock("Updated", relativeTime(ticket.updated_at))
-  ];
-  if (!canEditTicket(ticket) && !isCustomer()) facts.splice(1, 0, factBlock("Assignee", ticket.assignee_email || "Unassigned"));
-  sections.push(sideSection("", el("div", { className: "fact-list" }, facts)));
-  const requester = requesterBlock(ticket);
-  if (requester) {
-    sections.push(sideSection("Requester", requester));
-  }
-  if (editable && !isCustomer()) {
-    sections.push(sideSection("", ticketControls(ticket)));
-  }
-  if (isAdmin()) {
-    const danger = sideSection("Danger zone", ticketDangerActions(ticket));
-    danger.classList.add("ticket-danger-section");
-    sections.push(danger);
-  }
-  return sections;
+  return [sideSection("", ticketProperties(ticket, editable))];
 }
 
 function openTicketInfoSheet(ticket) {
@@ -849,26 +828,42 @@ function openTicketInfoSheet(ticket) {
   if (editable) bindTicketAutosave(els.modalHost.form, current);
 }
 
-function ticketDangerActions(ticket) {
+function ticketDeleteAction(ticket) {
   const remove = el("button", {
     className: "danger ticket-delete-button",
     "data-delete-ticket": "true",
     type: "button"
-  }, "Delete Ticket");
+  }, [trashIcon(), el("span", {}, "Delete ticket")]);
   remove.addEventListener("click", () => deleteCurrentTicket(ticket, remove).catch(showError));
-  return el("div", { className: "ticket-danger-actions" }, [
-    el("p", {}, "Permanently remove this ticket and its conversation."),
-    remove
-  ]);
+  return ticketProperty("Danger", remove);
+}
+
+function trashIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "ticket-delete-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.append(
+    svgPath("M3 6h18", { "stroke-linecap": "round" }),
+    svgPath("M8 6V4h8v2"),
+    svgPath("m19 6-1 14H6L5 6"),
+    svgPath("M10 11v5", { "stroke-linecap": "round" }),
+    svgPath("M14 11v5", { "stroke-linecap": "round" })
+  );
+  return svg;
 }
 
 async function deleteCurrentTicket(ticket, button) {
   if (!ticket || !isAdmin()) return;
+  const stacked = button.getRootNode() instanceof ShadowRoot;
   const confirmed = await confirmAction({
     title: "Delete this ticket?",
     body: "This permanently removes the ticket, conversation, attachments, notifications, and delivery history.",
     confirmLabel: "Delete Ticket",
     danger: true,
+    stacked,
     details: [
       ["Ticket", `${ticket.key || `#${ticket.id}`} / ${ticket.title || "Untitled ticket"}`],
       ["Product", ticketProductLabel(ticket)]
@@ -885,6 +880,7 @@ async function deleteCurrentTicket(ticket, button) {
     setSelectedTicket(null, { updateRoute: false });
     await loadTickets();
     app.syncRoute({ replace: true });
+    if (stacked) els.modalHost.close();
     showAppAlert(`Ticket ${ticket.key || `#${ticket.id}`} deleted.`);
   } finally {
     button.disabled = false;
@@ -1062,45 +1058,49 @@ function applyTicketControlOptions(control, options) {
   if (options.ariaLabel) control.setAttribute("aria-label", options.ariaLabel);
 }
 
-function requesterBlock(ticket) {
-  if (!ticket.requester_user_id) return null;
-  const block = el("div", { className: "requester-block" });
-  block.append(
+function ticketProperties(ticket, editable) {
+  const properties = [
+    ticketProperty("Title", ticket.title || "Untitled ticket"),
+    ticketProperty("Product", ticketProductLabel(ticket)),
+    ticketProperty("Created", relativeTime(ticket.created_at)),
+    ticketProperty("Updated", relativeTime(ticket.updated_at))
+  ];
+  properties.push(ticketProperty("Requester", ticketRequester(ticket)));
+  if (editable) {
+    properties.push(
+      ticketSelectProperty("Priority", "priority", ticket.priority || "normal", selectOptions(state.meta.priorities), { required: true }),
+      ticketSelectProperty("Assignee", "assignee_user_id", String(ticket.assignee_user_id || ""), assigneeOptions(ticket.product_id, ticket.assignee_user_id)),
+      ticketSelectProperty("Status", "status", ticket.status, selectOptions(state.meta.statuses), { required: true })
+    );
+  } else {
+    properties.push(ticketProperty("Priority", labelize(ticket.priority)));
+    if (!isCustomer()) properties.push(ticketProperty("Assignee", ticket.assignee_email || "Unassigned"));
+    properties.push(ticketProperty("Status", labelize(ticket.status)));
+  }
+  if (isAdmin()) properties.push(ticketDeleteAction(ticket));
+  return el("div", { className: "ticket-properties" }, properties);
+}
+
+function ticketProperty(label, value) {
+  const content = value instanceof Node ? value : el("strong", {}, value);
+  return el("div", { className: "ticket-property" }, [
+    el("span", { className: "ticket-property-label" }, label),
+    content
+  ]);
+}
+
+function ticketSelectProperty(label, name, value, options, controlOptions = {}) {
+  return el("label", { className: "ticket-property" }, [
+    el("span", { className: "ticket-property-label" }, label),
+    ticketSelectControl(name, value, options, controlOptions)
+  ]);
+}
+
+function ticketRequester(ticket) {
+  return el("span", { className: "ticket-requester" }, [
     el("strong", {}, ticket.requester_name || "Unknown"),
     el("span", {}, ticket.requester_email || "")
-  );
-  return block;
-}
-
-function ticketControls(ticket) {
-  const controls = [
-    ticketSelectField("Priority", "priority", ticket.priority || "normal", selectOptions(state.meta.priorities), { required: true }),
-    ticketSelectField("Assignee", "assignee_user_id", String(ticket.assignee_user_id || ""), assigneeOptions(ticket.product_id, ticket.assignee_user_id))
-  ];
-  const statusAction = el("button", {
-    className: "ghost-button ticket-status-action",
-    type: "button"
-  });
-  const statusLabel = badge(ticket.status, `status-${ticket.status}`);
-  statusLabel.dataset.ticketStatusValue = ticket.status;
-  const statusControl = el("div", { className: "ticket-status-control" }, [
-    el("span", { className: "ticket-control-label" }, "Status"),
-    el("div", { className: "ticket-status-row" }, [statusLabel, statusAction])
   ]);
-  updateTicketStatusAction(statusAction, ticket.status);
-  return el("div", { className: "detail-controls" }, [...controls, statusControl]);
-}
-
-function updateTicketStatusAction(button, status) {
-  const closed = status === "closed";
-  button.dataset.ticketStatusTarget = closed ? "open" : "closed";
-  button.textContent = closed ? "Reopen" : "Close";
-  const label = button.closest(".ticket-status-row")?.querySelector("[data-ticket-status-value]");
-  if (label) {
-    label.className = `badge status-${status}`;
-    label.dataset.ticketStatusValue = status;
-    label.textContent = labelize(status);
-  }
 }
 
 function confirmTicketStatusChange(ticket, status, stacked) {
@@ -1201,8 +1201,10 @@ function bindTicketAutosave(form, ticket) {
   let currentTicket = ticket;
   let saveQueue = Promise.resolve();
   const controls = Array.from(form.querySelectorAll("[name='title'], [name='priority'], [name='assignee_user_id']"));
-  const enqueueSave = (patchForTicket, statusAction = null) => {
+  const enqueueSave = (patchForTicket, statusControl = null) => {
     saveQueue = saveQueue.then(async () => {
+      const latest = selectedTicket();
+      if (latest?.id === currentTicket.id) currentTicket = latest;
       const patch = patchForTicket(currentTicket);
       if (Object.keys(patch).length === 0) return;
       const statusChanged = hasFormValue(patch, "status");
@@ -1210,7 +1212,7 @@ function bindTicketAutosave(form, ticket) {
       try {
         const updated = await saveTicketPatch(currentTicket, patch);
         currentTicket = updated;
-        if (statusAction) updateTicketStatusAction(statusAction, updated.status);
+        if (statusControl) statusControl.value = updated.status;
         if (assigneeChanged && state.filters.assigneeUserId && String(updated.assignee_user_id || "") !== state.filters.assigneeUserId) {
           state.filters.assigneeUserId = "";
           renderAssigneeFilter();
@@ -1221,9 +1223,10 @@ function bindTicketAutosave(form, ticket) {
           renderTicketList();
         }
       } catch (error) {
+        if (statusControl) statusControl.value = currentTicket.status;
         showError(error);
       } finally {
-        if (statusAction) statusAction.disabled = false;
+        if (statusControl) statusControl.disabled = false;
       }
     });
     saveQueue = saveQueue.catch(() => {});
@@ -1241,20 +1244,24 @@ function bindTicketAutosave(form, ticket) {
       control.addEventListener("change", () => save(control));
     }
   }
-  const statusAction = form.querySelector("[data-ticket-status-target]");
-  statusAction?.addEventListener("click", async () => {
-    const target = statusAction.dataset.ticketStatusTarget;
-    statusAction.disabled = true;
+  const statusControl = form.querySelector("[name='status']");
+  statusControl?.addEventListener("change", async () => {
+    const latest = selectedTicket();
+    if (latest?.id === currentTicket.id) currentTicket = latest;
+    const target = statusControl.value;
+    if (target === currentTicket.status) return;
+    statusControl.disabled = true;
     const confirmed = await confirmTicketStatusChange(
       currentTicket,
       target,
       form.getRootNode() instanceof ShadowRoot
     );
     if (!confirmed) {
-      statusAction.disabled = false;
+      statusControl.value = currentTicket.status;
+      statusControl.disabled = false;
       return;
     }
-    enqueueSave(() => ({ status: target }), statusAction);
+    enqueueSave(() => ({ status: target }), statusControl);
   });
 }
 
@@ -1276,8 +1283,8 @@ function replaceTicket(updated) {
   if (state.selectedId === updated.id) {
     state.selectedTicket = updated;
     for (const root of [els.ticketDetailPane, els.modalHost?.form]) {
-      for (const button of root?.querySelectorAll("[data-ticket-status-target]") || []) {
-        updateTicketStatusAction(button, updated.status);
+      for (const control of root?.querySelectorAll("[name='status']") || []) {
+        control.value = updated.status;
       }
     }
   }

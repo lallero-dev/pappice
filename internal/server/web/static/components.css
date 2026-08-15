@@ -314,6 +314,15 @@ button:disabled {
     padding: 14px;
   }
 
+  .ticket-info-sheet .ticket-side {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .ticket-info-sheet .side-section {
+    padding: 0;
+  }
+
   .grid,
   .confirm-detail-list {
     grid-template-columns: 1fr;
@@ -527,33 +536,6 @@ button:disabled {
   gap: 9px;
 }
 
-.ticket-status-control {
-  display: grid;
-  gap: 6px;
-}
-
-.ticket-control-label {
-  color: #3b4856;
-  font-size: 12px;
-  font-weight: 750;
-  text-transform: uppercase;
-}
-
-.ticket-status-row {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-
-.ticket-status-action {
-  min-height: 30px;
-  padding: 4px 10px;
-}
-
-.ticket-danger-section {
-  margin-top: auto;
-}
-
 .description {
   background: #fff;
   border: 1px solid #dde4ec;
@@ -751,23 +733,66 @@ button:disabled {
   white-space: nowrap;
 }
 
-.requester-block {
-  background: #f8fafc;
-  border: 1px solid #dde4ec;
-  border-radius: 6px;
+.ticket-properties {
   display: grid;
-  gap: 4px;
-  padding: 9px 10px;
+  gap: 10px;
 }
 
-.requester-block span {
+.ticket-property {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.ticket-property-label {
   color: #667085;
+  font-size: 11px;
+  font-weight: 700;
+  padding-top: 7px;
+  text-transform: uppercase;
+}
+
+.ticket-property > strong {
+  overflow-wrap: anywhere;
+  padding-top: 6px;
+}
+
+.ticket-requester {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 5px;
+}
+
+.ticket-requester span {
+  color: #667085;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.requester-block .badge {
-  justify-self: start;
-  margin-top: 2px;
+.danger.ticket-delete-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid #e9a39d;
+  color: #b42318;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 5px 9px;
+  width: 100%;
+}
+
+.danger.ticket-delete-button:hover {
+  background: #fff2f0;
+  border-color: #b42318;
+}
+
+.ticket-delete-icon {
+  height: 15px;
+  width: 15px;
 }
 
 .fact-list {

@@ -306,7 +306,7 @@ async function staffReplyAndReopen(cdp) {
     row.click();
     const detail = await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
-      return pane?.querySelector("[data-ticket-status-target='closed']") ? pane : null;
+      return pane?.querySelector("[name='status']") ? pane : null;
     }, "ticket detail pane");
     await waitFor(() => {
       return !document.querySelector("#ticketList .ticket-row.active")?.classList.contains("unread");
@@ -356,7 +356,13 @@ async function staffReplyAndReopen(cdp) {
     if (detail.querySelector("[name='body']")?.value !== input.liveDraft) {
       throw new Error("live ticket refresh should preserve the local reply draft");
     }
-    detail.querySelector("[data-ticket-status-target='closed']").click();
+    const status = detail.querySelector("[name='status']");
+    setValue(status, "closed");
+    const cancelledClose = await waitFor(() => openModalRoot("Close this ticket?"), "close ticket confirmation");
+    cancelledClose.querySelector("[value='cancel']").click();
+    await waitFor(() => !openModalRoot("Close this ticket?"), "close ticket confirmation dismissed");
+    await waitFor(() => status.value === "open", "previous status restored after cancellation");
+    setValue(status, "closed");
     await submitModal("Close this ticket?");
     await waitFor(() => {
       return [...detail.querySelectorAll(".conversation-status-change")]
@@ -438,7 +444,7 @@ async function staffReplyAndReopen(cdp) {
     await waitFor(() => {
       const pane = document.querySelector("#ticketDetailPane");
       return pane?.textContent.includes("reopened the ticket") &&
-        pane.querySelector("[data-ticket-status-target='closed']") ? pane : null;
+        pane.querySelector("[name='status']")?.value === "open" ? pane : null;
     }, "public reply reopens closed ticket");
     const staffReply = [...detail.querySelectorAll(".message-row")]
       .find((candidate) => candidate.textContent.includes(input.reply));
@@ -479,6 +485,31 @@ async function staffReplyAndReopen(cdp) {
   });
 
   await pressKey(cdp, "Escape");
+
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    deviceScaleFactor: 2,
+    height: 844,
+    mobile: true,
+    width: 390
+  });
+  await runInPage(cdp, async () => {
+    const { modalRoot, openModalRoot, waitFor } = pageTools();
+    await waitFor(() => !document.querySelector(".image-preview-modal[open]"), "image preview closed before mobile info");
+    document.querySelector(".mobile-ticket-info").click();
+    const infoRoot = await waitFor(() => {
+      const root = modalRoot();
+      return root?.querySelector("dialog[open] h2")?.textContent.includes("Ticket Info") ? root : null;
+    }, "admin mobile ticket info");
+    infoRoot.querySelector("[data-delete-ticket]").click();
+    const deleteRoot = await waitFor(() => openModalRoot("Delete this ticket?"), "stacked delete confirmation");
+    deleteRoot.querySelector("[value='cancel']").click();
+    await waitFor(() => !openModalRoot("Delete this ticket?"), "stacked delete confirmation dismissed");
+    await waitFor(() => modalRoot()?.querySelector("dialog[open] h2")?.textContent.includes("Ticket Info"), "ticket info preserved after delete cancellation");
+    infoRoot.querySelector("[value='cancel']").click();
+    await waitFor(() => !modalRoot()?.querySelector("dialog[open]"), "admin mobile ticket info closed");
+    return true;
+  });
+  await cdp.send("Emulation.clearDeviceMetricsOverride");
 
   await runInPage(cdp, async (input) => {
     const { openModalRoot, pasteFiles, setValue, waitFor } = pageTools();

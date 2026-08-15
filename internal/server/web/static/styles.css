@@ -1181,29 +1181,6 @@ button:focus-visible {
   grid-template-columns: 1fr;
 }
 
-.ticket-status-control {
-  display: grid;
-  gap: 6px;
-}
-
-.ticket-control-label {
-  color: #3b4856;
-  font-size: 12px;
-  font-weight: 750;
-  text-transform: uppercase;
-}
-
-.ticket-status-row {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-
-.ticket-status-action {
-  min-height: 30px;
-  padding: 4px 10px;
-}
-
 .description {
   background: var(--panel-strong);
   border: 1px solid var(--border-soft);
@@ -1219,10 +1196,6 @@ button:focus-visible {
   padding: 8px 10px;
 }
 
-.ticket-danger-section {
-  margin-top: auto;
-}
-
 .section-title {
   color: #3b4856;
   font-size: 12px;
@@ -1232,43 +1205,66 @@ button:focus-visible {
   text-transform: uppercase;
 }
 
-.requester-block {
-  background: #f8fbff;
-  border: 1px solid #c4d9ec;
-  border-radius: 6px;
+.ticket-properties {
   display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 7px 9px;
+  gap: 10px;
 }
 
-.requester-block strong,
-.requester-block span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.requester-block .badge {
-  justify-self: start;
-  min-width: 0;
-  padding-block: 3px;
-}
-
-.ticket-danger-actions {
+.ticket-property {
+  align-items: start;
   display: grid;
   gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  min-width: 0;
 }
 
-.ticket-danger-actions p {
+.ticket-property-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding-top: 7px;
+  text-transform: uppercase;
+}
+
+.ticket-property > strong {
+  overflow-wrap: anywhere;
+  padding-top: 6px;
+}
+
+.ticket-requester {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 5px;
+}
+
+.ticket-requester span {
   color: var(--muted);
   font-size: 12px;
-  margin: 0;
+  overflow-wrap: anywhere;
 }
 
-.ticket-delete-button {
-  justify-self: stretch;
+.danger.ticket-delete-button {
+  align-items: center;
+  background: transparent;
+  border-color: #e9a39d;
+  color: #b42318;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 5px 9px;
+  width: 100%;
+}
+
+.danger.ticket-delete-button:hover {
+  background: #fff2f0;
+  border-color: #b42318;
+}
+
+.ticket-delete-icon {
+  height: 15px;
+  width: 15px;
 }
 
 .comment-list,
