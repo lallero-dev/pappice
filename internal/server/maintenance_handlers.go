@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,11 +23,23 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 		respondStoreError(w, err)
 		return
 	}
+	databaseSize, err := s.store.DatabaseSizeBytes()
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	attachmentSize, err := directorySize(s.options.UploadDir)
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"version":                        s.options.Version,
 		"started_at":                     s.started,
 		"database_path":                  s.store.Path(),
+		"database_size_bytes":            databaseSize,
 		"upload_path":                    s.options.UploadDir,
+		"attachment_storage_bytes":       attachmentSize,
 		"domain_event_retention_seconds": int(s.options.DomainEventRetention.Seconds()),
 		"backup":                         backupStatus(s.options.BackupDir),
 		"uploads":                        s.publicUploadConfig(),
@@ -36,6 +50,33 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 			"stats":                      emailStats,
 		},
 	})
+}
+
+func directorySize(path string) (int64, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var size int64
+	err := filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size, err
 }
 
 func backupStatus(dir string) map[string]any {

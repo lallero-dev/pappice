@@ -250,8 +250,10 @@ function renderMaintenance() {
   els.maintenanceOverview.replaceChildren(
     maintenanceItem("Version", info.version || "dev"),
     maintenanceItem("Started", info.started_at ? relativeTime(info.started_at) : "-"),
-    maintenanceItem("Database", info.database_path || "-"),
-    maintenanceItem("Uploads", info.upload_path || "-"),
+    maintenanceItem("Database path", info.database_path || "-"),
+    maintenanceItem("Database size", formatBytes(info.database_size_bytes || 0)),
+    maintenanceItem("Upload path", info.upload_path || "-"),
+    maintenanceItem("Attachment storage", formatBytes(info.attachment_storage_bytes || 0)),
     maintenanceItem("Backups", backup.path || "-"),
     maintenanceItem("Last backup", backup.latest_at ? `${relativeTime(backup.latest_at)} / ${backup.latest_name || "latest"}` : "No backups found"),
     maintenanceItem("Event retention", Number(info.domain_event_retention_seconds || 0) > 0 ? formatSeconds(Number(info.domain_event_retention_seconds || 0)) : "Disabled"),

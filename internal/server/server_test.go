@@ -841,6 +841,7 @@ func TestHealthExposesBranding(t *testing.T) {
 
 func TestAdminMaintenanceEndpoint(t *testing.T) {
 	backupDir := filepath.Join(t.TempDir(), "backups")
+	uploadDir := filepath.Join(t.TempDir(), "uploads")
 	latestBackup := filepath.Join(backupDir, "20260101T120000Z")
 	if err := os.MkdirAll(latestBackup, 0o755); err != nil {
 		t.Fatalf("create backup dir: %v", err)
@@ -848,10 +849,16 @@ func TestAdminMaintenanceEndpoint(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(latestBackup, "pappice.db"), []byte("backup"), 0o600); err != nil {
 		t.Fatalf("write backup db marker: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(uploadDir, "aa"), 0o755); err != nil {
+		t.Fatalf("create upload dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "aa", "attachment"), []byte("eleven bytes"), 0o600); err != nil {
+		t.Fatalf("write attachment marker: %v", err)
+	}
 	_, server, client := newTestServer(t, Options{
 		EmailNotifications:   true,
 		PublicURL:            "https://tracker.example.test",
-		UploadDir:            filepath.Join(t.TempDir(), "uploads"),
+		UploadDir:            uploadDir,
 		BackupDir:            backupDir,
 		DomainEventRetention: 48 * time.Hour,
 		Version:              "test-version",
@@ -869,6 +876,12 @@ func TestAdminMaintenanceEndpoint(t *testing.T) {
 		!bytes.Contains(body, []byte(`"enabled":true`)) ||
 		!bytes.Contains(body, []byte(`"public_url":"https://tracker.example.test"`)) {
 		t.Fatalf("maintenance response = %s", body)
+	}
+	if got := decodeInt64(t, body, "database_size_bytes"); got <= 0 {
+		t.Fatalf("database_size_bytes = %d", got)
+	}
+	if got := decodeInt64(t, body, "attachment_storage_bytes"); got != 12 {
+		t.Fatalf("attachment_storage_bytes = %d, want 12", got)
 	}
 
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/admin/maintenance", nil, nil, "", "")

@@ -567,6 +567,12 @@ func (s *Store) Path() string {
 	return s.path
 }
 
+func (s *Store) DatabaseSizeBytes() (int64, error) {
+	var size int64
+	err := s.db.QueryRow(`SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&size)
+	return size, err
+}
+
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil

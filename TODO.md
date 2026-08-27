@@ -2,7 +2,6 @@
 
 ## Maintenance Visibility
 
-- Report database size and total attachment storage usage.
 - Consider reporting process memory and CPU usage
 
 ## Issue Tracker Integration
