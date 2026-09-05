@@ -376,7 +376,7 @@ func TestBaselineMigrationRejectsUnsupportedUsernameSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect migration: %v", err)
 	}
-	if got, want := migrationNames(status.Pending), []string{"baseline_schema", "rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; status.CurrentVersion != 0 || !slices.Equal(got, want) {
+	if got, want := migrationNames(status.Pending), []string{"baseline_schema", "rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses", "deduplicate_integration_requests"}; status.CurrentVersion != 0 || !slices.Equal(got, want) {
 		t.Fatalf("migration status = %#v", status)
 	}
 	if _, err := Migrate(path, MigrationOptions{DryRun: true}); !errors.Is(err, ErrMigrationRequired) {
@@ -458,14 +458,14 @@ func TestMigrateRenamesProductRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect before migration: %v", err)
 	}
-	if got, want := migrationNames(status.Pending), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; status.CurrentVersion != 1 || !slices.Equal(got, want) {
+	if got, want := migrationNames(status.Pending), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses", "deduplicate_integration_requests"}; status.CurrentVersion != 1 || !slices.Equal(got, want) {
 		t.Fatalf("before migration status = %#v", status)
 	}
 	result, err := Migrate(path, MigrationOptions{})
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if got, want := migrationNames(result.Applied), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; !slices.Equal(got, want) {
+	if got, want := migrationNames(result.Applied), []string{"rename_product_roles", "normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses", "deduplicate_integration_requests"}; !slices.Equal(got, want) {
 		t.Fatalf("applied migrations = %#v", result.Applied)
 	}
 
@@ -568,7 +568,7 @@ func TestMigrateRelationalData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if got, want := migrationNames(result.Applied), []string{"normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses"}; !slices.Equal(got, want) {
+	if got, want := migrationNames(result.Applied), []string{"normalize_relational_data", "require_ticket_participants", "ticket_status_history", "schedule_domain_event_retries", "simplify_ticket_statuses", "deduplicate_integration_requests"}; !slices.Equal(got, want) {
 		t.Fatalf("applied migrations = %#v", result.Applied)
 	}
 	db, err = sql.Open("sqlite", path)

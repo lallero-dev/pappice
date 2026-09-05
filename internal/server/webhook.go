@@ -66,13 +66,25 @@ func (s *Server) ticketWebhookNotifications(event string, ticket store.Ticket, a
 	return inputs, nil
 }
 
-func (s *Server) deliverWebhook(ctx context.Context, hook store.Webhook, event string, ticketID int64, body []byte) (store.WebhookDelivery, error) {
+func (s *Server) deliverWebhook(ctx context.Context, hook store.Webhook, notification store.WebhookNotification) (store.WebhookDelivery, error) {
 	started := time.Now()
 	delivery := store.WebhookDelivery{
 		WebhookID: hook.ID,
 		ProductID: hook.ProductID,
-		Event:     event,
-		TicketID:  ticketID,
+		Event:     notification.Event,
+		TicketID:  notification.TicketID,
+	}
+	// Include the ID in the signed body as well as the request header.
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(notification.PayloadJSON), &payload); err != nil || payload == nil || notification.DeliveryID == "" {
+		delivery.Error = "invalid webhook notification payload or delivery ID"
+		return s.recordWebhookDelivery(delivery)
+	}
+	payload["delivery_id"], _ = json.Marshal(notification.DeliveryID)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		delivery.Error = err.Error()
+		return s.recordWebhookDelivery(delivery)
 	}
 	if err := s.validateWebhookTarget(ctx, hook.URL); err != nil {
 		delivery.Error = err.Error()
@@ -87,7 +99,8 @@ func (s *Server) deliverWebhook(ctx context.Context, hook store.Webhook, event s
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "pappice-webhook")
-	req.Header.Set("X-Pappice-Event", event)
+	req.Header.Set("X-Pappice-Event", notification.Event)
+	req.Header.Set("X-Pappice-Delivery-ID", notification.DeliveryID)
 	if hook.Secret != "" {
 		req.Header.Set("X-Pappice-Signature", "sha256="+security.HMACSHA256(hook.Secret, body))
 	}

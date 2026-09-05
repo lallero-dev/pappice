@@ -145,14 +145,16 @@ type AddComment struct {
 }
 
 type SaveTicketInput struct {
-	TicketID    int64
-	Patch       UpdateTicket
-	Comment     *AddComment
-	Attachments []CreateAttachment
-	ActorUserID int64
+	TicketID       int64
+	Patch          UpdateTicket
+	Comment        *AddComment
+	Attachments    []CreateAttachment
+	ActorUserID    int64
+	IdempotencyKey string
 }
 
 type SaveTicketResult struct {
+	Replayed          bool
 	Previous          Ticket
 	Ticket            Ticket
 	HasPatch          bool
@@ -424,6 +426,7 @@ type WebhookDelivery struct {
 
 type WebhookNotification struct {
 	ID            int64      `json:"id"`
+	DeliveryID    string     `json:"delivery_id"`
 	WebhookID     int64      `json:"webhook_id"`
 	ProductID     *int64     `json:"product_id,omitempty"`
 	TicketID      int64      `json:"ticket_id,omitempty"`
@@ -960,6 +963,14 @@ CREATE TABLE IF NOT EXISTS comments (
 	created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ticket_requests (
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	actor_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	idempotency_key TEXT NOT NULL,
+	request_hash TEXT NOT NULL,
+	PRIMARY KEY (ticket_id, actor_user_id, idempotency_key)
+);
+
 CREATE TABLE IF NOT EXISTS ticket_status_changes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -1018,6 +1029,7 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 
 CREATE TABLE IF NOT EXISTS webhook_notifications (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	delivery_id TEXT NOT NULL,
 	webhook_id INTEGER REFERENCES webhooks(id) ON DELETE CASCADE,
 	product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
 	ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,

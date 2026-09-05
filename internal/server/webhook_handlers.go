@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"pappice/internal/security"
 	"pappice/internal/store"
 )
 
@@ -158,7 +159,16 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request, auth 
 		respondError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	delivery, err := s.deliverWebhook(r.Context(), hook, "webhook.test", 0, body)
+	deliveryID, err := security.RandomToken()
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	delivery, err := s.deliverWebhook(r.Context(), hook, store.WebhookNotification{
+		DeliveryID:  deliveryID,
+		Event:       "webhook.test",
+		PayloadJSON: string(body),
+	})
 	if err != nil {
 		respondStoreError(w, err)
 		return

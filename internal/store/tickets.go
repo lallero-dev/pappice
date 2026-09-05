@@ -240,6 +240,18 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		if err != nil {
 			return SaveTicketResult{}, err
 		}
+		input.Comment = &comment
+	}
+	replayed, err := recordTicketRequestTx(tx, input)
+	if err != nil {
+		return SaveTicketResult{}, err
+	}
+	if replayed {
+		current, err := getTicketTx(tx, input.TicketID)
+		if err != nil {
+			return SaveTicketResult{}, err
+		}
+		return SaveTicketResult{Ticket: current, Replayed: true}, tx.Commit()
 	}
 	if publicComment && previous.Status == "closed" {
 		status := "open"

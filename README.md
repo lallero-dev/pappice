@@ -69,6 +69,8 @@ archives include the `pappice` binary and the referenced deployment templates.
 
 The complete configuration reference is [.env.example](./.env.example).
 
+For automation, see [API replies and webhook retries](./docs/integrations.md).
+
 ## Build From Source
 
 Requires Go 1.26+.

@@ -252,7 +252,7 @@ func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth
 				return
 			}
 		}
-		updated, ok := s.applyTicketPatch(w, auth, ticket, access, input, attachmentInputs(uploads))
+		updated, ok := s.applyTicketPatch(w, r, auth, ticket, access, input, uploads)
 		if !ok {
 			cleanupStoredUploads(uploads)
 			return
@@ -276,7 +276,13 @@ func (s *Server) handleSingleTicket(w http.ResponseWriter, r *http.Request, auth
 	}
 }
 
-func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticket store.Ticket, access ticketAccess, input ticketPatchInput, attachments []store.CreateAttachment) (store.Ticket, bool) {
+func (s *Server) applyTicketPatch(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket, access ticketAccess, input ticketPatchInput, uploads []storedUpload) (store.Ticket, bool) {
+	keys := r.Header.Values("Idempotency-Key")
+	if len(keys) > 1 || (len(keys) == 1 && keys[0] == "") {
+		respondError(w, http.StatusBadRequest, "one nonempty Idempotency-Key header is required")
+		return store.Ticket{}, false
+	}
+	attachments := attachmentInputs(uploads)
 	hasPatch := input.hasTicketPatch()
 	hasAttachments := len(attachments) > 0
 	if hasAttachments && input.Comment == nil {
@@ -308,19 +314,24 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, auth authContext, ticke
 	}
 
 	result, err := s.store.SaveTicket(store.SaveTicketInput{
-		TicketID:    ticket.ID,
-		Patch:       input.updateTicket(),
-		Comment:     comment,
-		Attachments: attachments,
-		ActorUserID: auth.User.ID,
+		TicketID:       ticket.ID,
+		Patch:          input.updateTicket(),
+		Comment:        comment,
+		Attachments:    attachments,
+		ActorUserID:    auth.User.ID,
+		IdempotencyKey: r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
 		respondStoreError(w, err)
 		return store.Ticket{}, false
 	}
-	updated := result.Ticket
-	s.dispatchEventsSoon()
-	return updated, true
+	if result.Replayed {
+		cleanupStoredUploads(uploads)
+		w.Header().Set("Idempotency-Replayed", "true")
+	} else {
+		s.dispatchEventsSoon()
+	}
+	return result.Ticket, true
 }
 
 func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth authContext, ticket store.Ticket, access ticketAccess) {
@@ -356,7 +367,7 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		cleanupStoredUploads(uploads)
 		return
 	}
-	updated, ok := s.applyTicketPatch(w, auth, ticket, access, ticketPatchInput{Comment: &input}, attachmentInputs(uploads))
+	updated, ok := s.applyTicketPatch(w, r, auth, ticket, access, ticketPatchInput{Comment: &input}, uploads)
 	if !ok {
 		cleanupStoredUploads(uploads)
 		return

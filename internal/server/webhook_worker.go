@@ -56,7 +56,7 @@ func (s *Server) dispatchPendingWebhookNotifications(ctx context.Context, limit 
 			setFirstError(&firstErr, s.store.MarkWebhookNotificationFailed(notification.ID, err, maxDispatchAttempts))
 			continue
 		}
-		delivery, recordErr := s.deliverWebhook(ctx, hook, notification.Event, notification.TicketID, []byte(notification.PayloadJSON))
+		delivery, recordErr := s.deliverWebhook(ctx, hook, notification)
 		if strings.TrimSpace(delivery.Error) != "" {
 			deliveryErr := errors.New(delivery.Error)
 			setFirstError(&firstErr, deliveryErr)

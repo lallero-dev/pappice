@@ -47,6 +47,7 @@ var orderedMigrations = []migration{
 	{Version: 5, Name: "ticket_status_history", Up: migrateTicketStatusHistory},
 	{Version: 6, Name: "schedule_domain_event_retries", Up: migrateDomainEventRetries},
 	{Version: 7, Name: "simplify_ticket_statuses", Up: migrateTicketStatuses},
+	{Version: 8, Name: "deduplicate_integration_requests", Up: migrateWebhookDeliveryIDs},
 }
 
 func CurrentSchemaVersion() int {
@@ -516,6 +517,22 @@ func migrateDomainEventRetries(tx *sql.Tx) error {
 		DROP INDEX IF EXISTS idx_domain_events_pending;
 		CREATE INDEX idx_domain_events_pending
 			ON domain_events(status, next_attempt_at, locked_until);
+	`)
+	return err
+}
+
+func migrateWebhookDeliveryIDs(tx *sql.Tx) error {
+	hasNotifications, err := tableExists(tx, "webhook_notifications")
+	if err != nil || !hasNotifications {
+		return err
+	}
+	hasDeliveryID, err := tableHasColumn(tx, "webhook_notifications", "delivery_id")
+	if err != nil || hasDeliveryID {
+		return err
+	}
+	_, err = tx.Exec(`
+		ALTER TABLE webhook_notifications ADD COLUMN delivery_id TEXT NOT NULL DEFAULT '';
+		UPDATE webhook_notifications SET delivery_id = lower(hex(randomblob(16)));
 	`)
 	return err
 }

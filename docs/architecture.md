@@ -119,6 +119,17 @@ webhook worker. A slow receiver cannot hold up new audit entries or email work.
 The webhook worker also polls for delayed notifications and retries, and drains
 full batches without waiting for the next poll.
 
+Each webhook notification has a durable delivery ID. Retries reuse that ID and
+payload; only notifications with no delivery attempts can be coalesced. The ID
+is included in the signed JSON body and in `X-Pappice-Delivery-ID`. Receivers
+must still deduplicate incoming work because an acknowledgment can be lost.
+
+Ticket mutations optionally accept `Idempotency-Key`. The store reserves the key
+with a request hash in `ticket_requests`, in the same transaction as the ticket
+change and its domain events. A matching retry returns the current ticket without
+writing another change; different content conflicts. Keys belong to a user and
+ticket and are retained until either is deleted. See [the integration contract](./integrations.md).
+
 Webhook DNS lookups and HTTP requests inherit the worker context, or the request
 context for a manual test delivery. Shutdown cancels and waits for all workers
 before closing SQLite.

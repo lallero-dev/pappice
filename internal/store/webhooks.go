@@ -338,6 +338,7 @@ func enqueueWebhookNotificationsTx(tx *sql.Tx, inputs []CreateWebhookNotificatio
 			NextAttemptAt: nextAttemptAt,
 			CreatedAt:     now,
 		}
+		// Once attempted, a notification's payload and identity must stay fixed.
 		if input.Coalesce {
 			existingID, ok, err := pendingWebhookNotificationIDTx(tx, notification)
 			if err != nil {
@@ -346,8 +347,7 @@ func enqueueWebhookNotificationsTx(tx *sql.Tx, inputs []CreateWebhookNotificatio
 			if ok {
 				_, err := tx.Exec(`
 					UPDATE webhook_notifications
-					SET product_id = ?, event = ?, payload_json = ?, status = 'pending',
-					    attempts = 0, next_attempt_at = ?, locked_until = NULL, last_error = ''
+					SET product_id = ?, event = ?, payload_json = ?, next_attempt_at = ?
 					WHERE id = ?`,
 					nullableInt64(notification.ProductID), notification.Event, notification.PayloadJSON,
 					formatTime(notification.NextAttemptAt), existingID,
@@ -363,12 +363,17 @@ func enqueueWebhookNotificationsTx(tx *sql.Tx, inputs []CreateWebhookNotificatio
 				continue
 			}
 		}
+		deliveryID, err := security.RandomToken()
+		if err != nil {
+			return nil, err
+		}
+		notification.DeliveryID = deliveryID
 		result, err := tx.Exec(`
 			INSERT INTO webhook_notifications (
-				webhook_id, product_id, ticket_id, event, payload_json, status, attempts, next_attempt_at, created_at
+				delivery_id, webhook_id, product_id, ticket_id, event, payload_json, status, attempts, next_attempt_at, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-			notification.WebhookID, nullableInt64(notification.ProductID), nullZero(notification.TicketID), notification.Event, notification.PayloadJSON,
+			VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+			notification.DeliveryID, notification.WebhookID, nullableInt64(notification.ProductID), nullZero(notification.TicketID), notification.Event, notification.PayloadJSON,
 			formatTime(nextAttemptAt), formatTime(now),
 		)
 		if err != nil {
@@ -391,6 +396,7 @@ func pendingWebhookNotificationIDTx(tx *sql.Tx, notification WebhookNotification
 			SELECT id
 			FROM webhook_notifications
 			WHERE status = 'pending'
+			  AND attempts = 0
 			  AND webhook_id = ?
 			  AND ticket_id = ?
 			ORDER BY created_at DESC
@@ -400,6 +406,7 @@ func pendingWebhookNotificationIDTx(tx *sql.Tx, notification WebhookNotification
 			SELECT id
 			FROM webhook_notifications
 			WHERE status = 'pending'
+			  AND attempts = 0
 			  AND webhook_id = ?
 			  AND ticket_id IS NULL
 			  AND event = ?
@@ -595,7 +602,7 @@ func (s *Store) ListDeliveries(productID *int64, limit int) ([]WebhookDelivery, 
 
 func getWebhookNotificationTx(tx *sql.Tx, id int64) (WebhookNotification, error) {
 	row := tx.QueryRow(`
-		SELECT id, webhook_id, product_id, ticket_id, event, payload_json, status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
+		SELECT id, delivery_id, webhook_id, product_id, ticket_id, event, payload_json, status, attempts, next_attempt_at, locked_until, last_error, created_at, sent_at
 		FROM webhook_notifications
 		WHERE id = ?`, id)
 	notification, err := scanWebhookNotification(row)
@@ -611,7 +618,7 @@ func scanWebhookNotification(rows scanner) (WebhookNotification, error) {
 	var nextAttemptAt, createdAt dbTime
 	var lockedUntil, sentAt nullDBTime
 	if err := rows.Scan(
-		&notification.ID, &notification.WebhookID, &productID, &ticketID, &notification.Event, &notification.PayloadJSON,
+		&notification.ID, &notification.DeliveryID, &notification.WebhookID, &productID, &ticketID, &notification.Event, &notification.PayloadJSON,
 		&notification.Status, &notification.Attempts, &nextAttemptAt, &lockedUntil, &notification.LastError, &createdAt, &sentAt,
 	); err != nil {
 		return WebhookNotification{}, err
