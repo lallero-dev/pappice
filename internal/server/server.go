@@ -74,6 +74,7 @@ type Server struct {
 	handler            http.Handler
 	client             *http.Client
 	eventWake          chan struct{}
+	webhookWake        chan struct{}
 	options            Options
 	loginLimiter       *requestLimiter
 	accountLinkLimiter *requestLimiter
@@ -103,6 +104,7 @@ func NewServer(tracker *store.Store, opts ...Options) *Server {
 		store:              tracker,
 		started:            time.Now().UTC(),
 		eventWake:          make(chan struct{}, 1),
+		webhookWake:        make(chan struct{}, 1),
 		options:            options,
 		loginLimiter:       newRequestLimiter(options.LoginRateLimit),
 		accountLinkLimiter: newRequestLimiter(options.AccountLinkRateLimit),

@@ -26,7 +26,7 @@ exists in the product.
 - `doctor` diagnostics
 - binary-native backup and restore commands
 - HTTP server startup and graceful shutdown
-- SMTP worker startup when email is enabled
+- independent event, webhook, and optional SMTP workers
 
 `internal/server` owns HTTP concerns:
 
@@ -112,6 +112,16 @@ Email and webhook notifications are durable SQLite outboxes. Workers claim due
 rows with leases, mark success or failure, and retry according to the store
 rules. This keeps side effects recoverable after process restarts without adding
 an external queue.
+
+Event projection and webhook delivery run in separate workers. Projection only
+writes audit entries and queues notifications; committed webhook work wakes the
+webhook worker. A slow receiver cannot hold up new audit entries or email work.
+The webhook worker also polls for delayed notifications and retries, and drains
+full batches without waiting for the next poll.
+
+Webhook DNS lookups and HTTP requests inherit the worker context, or the request
+context for a manual test delivery. Shutdown cancels and waits for all workers
+before closing SQLite.
 
 SMTP sends have one timeout covering the connection, TLS negotiation, and the
 whole SMTP exchange. Context cancellation closes the connection immediately so

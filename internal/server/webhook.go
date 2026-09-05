@@ -66,7 +66,7 @@ func (s *Server) ticketWebhookNotifications(event string, ticket store.Ticket, a
 	return inputs, nil
 }
 
-func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64, body []byte) (store.WebhookDelivery, error) {
+func (s *Server) deliverWebhook(ctx context.Context, hook store.Webhook, event string, ticketID int64, body []byte) (store.WebhookDelivery, error) {
 	started := time.Now()
 	delivery := store.WebhookDelivery{
 		WebhookID: hook.ID,
@@ -74,12 +74,12 @@ func (s *Server) deliverWebhook(hook store.Webhook, event string, ticketID int64
 		Event:     event,
 		TicketID:  ticketID,
 	}
-	if err := s.validateWebhookTarget(hook.URL); err != nil {
+	if err := s.validateWebhookTarget(ctx, hook.URL); err != nil {
 		delivery.Error = err.Error()
 		delivery.DurationMS = time.Since(started).Milliseconds()
 		return s.recordWebhookDelivery(delivery)
 	}
-	req, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook.URL, bytes.NewReader(body))
 	if err != nil {
 		delivery.Error = err.Error()
 		delivery.DurationMS = time.Since(started).Milliseconds()
@@ -114,7 +114,7 @@ func (s *Server) recordWebhookDelivery(delivery store.WebhookDelivery) (store.We
 	return delivery, nil
 }
 
-func (s *Server) validateWebhookTarget(raw string) error {
+func (s *Server) validateWebhookTarget(ctx context.Context, raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Hostname() == "" {
 		return fmt.Errorf("invalid webhook URL")
@@ -128,7 +128,7 @@ func (s *Server) validateWebhookTarget(raw string) error {
 	if !publicWebhookHost(parsed.Hostname()) {
 		return fmt.Errorf("webhook private targets are blocked")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", parsed.Hostname())
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -122,7 +123,11 @@ func serve(cfg appConfig, stderr io.Writer) error {
 	defer tracker.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	var workers sync.WaitGroup
+	defer func() {
+		stop()
+		workers.Wait()
+	}()
 
 	logger := log.New(stderr, "", log.LstdFlags)
 	smtpConfig := cfg.smtpConfig()
@@ -142,14 +147,15 @@ func serve(cfg appConfig, stderr io.Writer) error {
 			MaxAttempts: 5,
 			Logger:      logger,
 		}
-		go worker.Run(ctx)
+		workers.Go(func() { worker.Run(ctx) })
 		logger.Printf("email notifications enabled via SMTP host %s", smtpConfig.Host)
 	}
 
 	serverOptions := cfg.serverOptions(emailEnabled)
 	serverOptions.Logger = logger
 	app := server.NewServer(tracker, serverOptions)
-	go app.RunEventDispatcher(ctx, 5*time.Second)
+	workers.Go(func() { app.RunEventDispatcher(ctx, 5*time.Second) })
+	workers.Go(func() { app.RunWebhookDispatcher(ctx, 5*time.Second) })
 	useTLS, err := cfg.tlsEnabled()
 	if err != nil {
 		return err
@@ -192,13 +198,13 @@ func serve(cfg appConfig, stderr io.Writer) error {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	if debugSrv != nil {
-		if err := debugSrv.Shutdown(ctx); err != nil {
+		if err := debugSrv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown debug: %w", err)
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1499,7 +1500,7 @@ func TestWebhookValidationBlocksPrivateHTTP(t *testing.T) {
 		"http://localhost:8080/hook",
 		"http://127.0.0.1:8080/hook",
 	} {
-		if err := server.validateWebhookTarget(target); err == nil {
+		if err := server.validateWebhookTarget(context.Background(), target); err == nil {
 			t.Fatalf("validateWebhookTarget(%q) succeeded, want private target error", target)
 		}
 	}
@@ -1571,7 +1572,7 @@ func TestMutationQueuesWebhookDelivery(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		app.RunEventDispatcher(ctx, time.Hour)
+		app.RunWebhookDispatcher(ctx, time.Hour)
 	}()
 	t.Cleanup(func() {
 		if !released {
@@ -1825,7 +1826,7 @@ func TestWebhookNotificationsCoalescePendingTicketUpdates(t *testing.T) {
 		t.Fatalf("project coalesced webhook events: %v", err)
 	}
 	makePendingWebhookNotificationsDue(t, tracker)
-	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
+	if err := app.dispatchPendingWebhookNotifications(context.Background(), 10); err != nil {
 		t.Fatalf("dispatch coalesced webhook: %v", err)
 	}
 	select {
@@ -1900,12 +1901,18 @@ func TestDomainEventProjectionDoesNotDuplicateWebhookNotifications(t *testing.T)
 	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
 		t.Fatalf("dispatch pending events: %v", err)
 	}
+	if err := app.dispatchPendingWebhookNotifications(context.Background(), 10); err != nil {
+		t.Fatalf("dispatch pending webhooks: %v", err)
+	}
 	if webhookHits.Load() != 1 {
 		t.Fatalf("webhook deliveries = %d, want 1", webhookHits.Load())
 	}
 
 	if err := app.dispatchPendingEvents(context.Background(), 10); err != nil {
 		t.Fatalf("dispatch pending events again: %v", err)
+	}
+	if err := app.dispatchPendingWebhookNotifications(context.Background(), 10); err != nil {
+		t.Fatalf("dispatch pending webhooks: %v", err)
 	}
 	if webhookHits.Load() != 1 {
 		t.Fatalf("duplicate webhook deliveries = %d", webhookHits.Load())
@@ -2859,16 +2866,14 @@ func newTestServer(t *testing.T, opts ...Options) (*store.Store, *httptest.Serve
 	}
 	app := NewServer(tracker, opts...)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		app.RunEventDispatcher(ctx, time.Hour)
-	}()
+	var workers sync.WaitGroup
+	workers.Go(func() { app.RunEventDispatcher(ctx, time.Hour) })
+	workers.Go(func() { app.RunWebhookDispatcher(ctx, time.Hour) })
 	server := httptest.NewTLSServer(app)
 	t.Cleanup(func() {
 		server.Close()
 		cancel()
-		<-done
+		workers.Wait()
 		_ = tracker.Close()
 	})
 	client := server.Client()

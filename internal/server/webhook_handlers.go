@@ -158,7 +158,7 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request, auth 
 		respondError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	delivery, err := s.deliverWebhook(hook, "webhook.test", 0, body)
+	delivery, err := s.deliverWebhook(r.Context(), hook, "webhook.test", 0, body)
 	if err != nil {
 		respondStoreError(w, err)
 		return
