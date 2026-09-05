@@ -38,6 +38,12 @@ exists in the product.
 - webhook delivery
 - embedded frontend assets
 
+`server.go` assembles the server and its options; `routes.go` registers routes
+and serves the app shell. Authentication and session checks live in `auth.go`.
+The feature handlers live in `account_handlers.go`, `product_handlers.go`,
+`ticket_handlers.go`, `webhook_handlers.go`, `email_handlers.go`, and
+`maintenance_handlers.go`, all in the same package.
+
 `internal/store` owns persistence and domain invariants:
 
 - SQLite connection setup

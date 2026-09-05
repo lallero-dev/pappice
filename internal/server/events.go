@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -332,5 +333,23 @@ func isTicketNotificationEvent(event string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *Server) eventContext(r *http.Request, actor store.User) store.EventContext {
+	ctx := store.EventContext{
+		Enabled: true,
+		Actor:   store.EventActorFromUser(actor),
+	}
+	if r != nil {
+		ctx.IP = s.clientIP(r)
+	}
+	return ctx
+}
+
+func (s *Server) dispatchEventsSoon() {
+	select {
+	case s.eventWake <- struct{}{}:
+	default:
 	}
 }

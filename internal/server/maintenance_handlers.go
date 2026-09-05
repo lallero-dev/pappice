@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"pappice/internal/store"
 )
 
 func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) {
@@ -80,13 +82,9 @@ func directorySize(path string) (int64, error) {
 }
 
 func backupStatus(dir string) map[string]any {
-	status := map[string]any{
-		"path": strings.TrimSpace(dir),
-	}
-	if status["path"] == "" {
-		status["path"] = defaultBackupDir
-	}
-	entries, err := os.ReadDir(status["path"].(string))
+	dir = defaultString(dir, defaultBackupDir)
+	status := map[string]any{"path": dir}
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			status["latest_name"] = ""
@@ -107,7 +105,7 @@ func backupStatus(dir string) map[string]any {
 		if err != nil {
 			continue
 		}
-		candidatePath := filepath.Join(status["path"].(string), entry.Name())
+		candidatePath := filepath.Join(dir, entry.Name())
 		if _, err := os.Stat(filepath.Join(candidatePath, "pappice.db")); err != nil {
 			continue
 		}
@@ -123,4 +121,31 @@ func backupStatus(dir string) map[string]any {
 		status["latest_at"] = newestTime.UTC()
 	}
 	return status
+}
+
+func (s *Server) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
+	_, ok := s.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	limit, offset := paginationParams(r, 25, 100)
+	page, err := s.store.ListAuditEventsPage(store.AuditEventFilter{
+		Query:  r.URL.Query().Get("q"),
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		respondStoreError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"events": page.Events,
+		"total":  page.Total,
+		"limit":  page.Limit,
+		"offset": page.Offset,
+	})
 }
