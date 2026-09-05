@@ -1,5 +1,5 @@
 import { request } from "./api.js";
-import { badge, el, formObject, labelize, relativeTime, splitList } from "./components.js";
+import { badge, el, labelize, relativeTime, splitList } from "./components.js";
 import { DEFAULT_PRODUCT_SECTION, PRODUCT_SECTIONS, els, state } from "./state.js";
 import { accountLabel, accountName, canManageProduct, currentProductDetail, isAdmin, manageableProducts } from "./access.js";
 import { confirmAction, copyText, emptyInline, formField, selectOptions, showAppAlert, showError, showInlineConfirm } from "./ui.js";
@@ -30,7 +30,7 @@ function bindProductEvents() {
     els.saveProductButton.disabled = true;
     els.saveProductButton.setAttribute("aria-busy", "true");
     try {
-      await updateCurrentProduct(formObject(new FormData(els.productGeneralForm)));
+      await updateCurrentProduct(Object.fromEntries(new FormData(els.productGeneralForm)));
     } catch (error) {
       showError(error);
     } finally {

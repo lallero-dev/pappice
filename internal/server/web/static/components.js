@@ -165,10 +165,6 @@ export function debounce(fn, wait) {
   };
 }
 
-export function formObject(form) {
-  return Object.fromEntries(form.entries());
-}
-
 export function splitList(value) {
   return String(value || "").split(/[,\s]+/).map((item) => item.trim()).filter(Boolean);
 }

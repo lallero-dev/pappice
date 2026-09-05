@@ -1,7 +1,6 @@
 import {
   defineComponents,
   el,
-  formObject,
   labelize
 } from "./components.js";
 import {
@@ -420,7 +419,7 @@ function bindEvents() {
     event.preventDefault();
     await submitAuthForm(els.setupForm, async () => {
       const form = new FormData(els.setupForm);
-      const payload = await request("/api/setup", { method: "POST", body: JSON.stringify(formObject(form)) });
+      const payload = await request("/api/setup", { method: "POST", body: JSON.stringify(Object.fromEntries(form)) });
       state.csrf = payload.csrf_token || "";
       els.setupForm.reset();
       await loadSession();
@@ -431,7 +430,7 @@ function bindEvents() {
     event.preventDefault();
     await submitAuthForm(els.loginForm, async () => {
       const form = new FormData(els.loginForm);
-      const payload = await request("/api/login", { method: "POST", body: JSON.stringify(formObject(form)) });
+      const payload = await request("/api/login", { method: "POST", body: JSON.stringify(Object.fromEntries(form)) });
       state.csrf = payload.csrf_token || "";
       els.loginForm.reset();
       await loadSession();
@@ -445,7 +444,7 @@ function bindEvents() {
       const form = new FormData(els.accountLinkForm);
       const payload = await request(`/api/account-links/${encodeURIComponent(state.accountLink.token)}`, {
         method: "POST",
-        body: JSON.stringify(formObject(form))
+        body: JSON.stringify(Object.fromEntries(form))
       });
       state.csrf = payload.csrf_token || "";
       state.user = payload.user || null;

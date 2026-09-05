@@ -47,12 +47,6 @@ export function confirmAction({ title, body, confirmLabel, details = [], danger 
   if (!host) return Promise.resolve(window.confirm(body));
   if (stacked) document.body.append(host);
   return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
     const detailList = details.length > 0
       ? el("dl", { className: "confirm-detail-list" }, details.flatMap(([label, value]) => [
         el("dt", {}, label),
@@ -64,10 +58,10 @@ export function confirmAction({ title, body, confirmLabel, details = [], danger 
       submitText: confirmLabel,
       submitClass: danger ? "danger" : "primary",
       content: el("div", { className: "send-confirm" }, [el("p", {}, body), detailList]),
-      onSubmit: async () => finish(true)
+      onSubmit: async () => resolve(true)
     });
     host.shadowRoot?.querySelector("dialog")?.addEventListener("close", () => {
-      finish(false);
+      resolve(false);
       if (stacked) host.remove();
     }, { once: true });
   });
@@ -130,10 +124,7 @@ export function userMessage(error) {
   const raw = String(error?.message || "Request failed").trim();
   if (!raw || raw === "Failed to fetch") return "Pappice could not be reached. Check the connection and try again.";
   if (raw.startsWith("validation failed: ")) return raw.replace("validation failed: ", "");
-  if (error?.status === 403) return raw || "You do not have permission to do that.";
-  if (error?.status === 404) return raw && raw !== "not found" ? raw : "The requested item was not found. Refresh the page and try again.";
-  if (error?.status === 409) return raw || "This action conflicts with the current state.";
-  if (error?.status === 429) return raw || "Too many attempts. Try again later.";
+  if (error?.status === 404) return raw !== "not found" ? raw : "The requested item was not found. Refresh the page and try again.";
   if (error?.status >= 500) return "Pappice hit an internal error. Try again, then check the server logs if it persists.";
   return raw;
 }

@@ -450,14 +450,7 @@ function emptyTicketCounts() {
 }
 
 function hasActiveTicketFilters() {
-  return Boolean(
-    state.filters.q ||
-    state.ticketProductId ||
-    (canUseAssigneeFilter() && state.filters.assigneeUserId) ||
-    state.filters.unread ||
-    state.filters.statusCustomized ||
-    !sameStatuses(state.filters.statuses, defaultStatusFilters())
-  );
+  return Boolean(state.filters.q) || activeTicketFilterCount() > 0;
 }
 
 function activeTicketFilterCount() {
@@ -465,7 +458,7 @@ function activeTicketFilterCount() {
   if (state.ticketProductId) count += 1;
   if (canUseAssigneeFilter() && state.filters.assigneeUserId) count += 1;
   if (state.filters.unread) count += 1;
-  if (state.filters.statusCustomized || !sameStatuses(state.filters.statuses, defaultStatusFilters())) count += 1;
+  if (!usesDefaultStatusView()) count += 1;
   return count;
 }
 
@@ -1165,27 +1158,23 @@ function ticketCreateRequestBody(payload, form) {
 
 function ticketUpdatePatch(ticket, data) {
   const patch = {};
-  if (hasFormValue(data, "title")) {
+  if (Object.hasOwn(data, "title")) {
     const title = String(data.title || "").trim();
     if (title && title !== (ticket.title || "")) patch.title = title;
   }
-  if (hasFormValue(data, "description")) {
+  if (Object.hasOwn(data, "description")) {
     const description = String(data.description || "").trim();
     if (description !== (ticket.description || "")) patch.description = description;
   }
-  if (hasFormValue(data, "priority")) {
+  if (Object.hasOwn(data, "priority")) {
     const priority = String(data.priority || "").trim();
     if (priority && priority !== ticket.priority) patch.priority = priority;
   }
-  if (hasFormValue(data, "assignee_user_id")) {
+  if (Object.hasOwn(data, "assignee_user_id")) {
     const assigneeUserId = Number(data.assignee_user_id || 0);
     if (assigneeUserId !== Number(ticket.assignee_user_id || 0)) patch.assignee_user_id = assigneeUserId;
   }
   return patch;
-}
-
-function hasFormValue(data, name) {
-  return Object.prototype.hasOwnProperty.call(data, name);
 }
 
 function ticketCommentPayload(ticket, data) {
@@ -1207,8 +1196,8 @@ function bindTicketAutosave(form, ticket) {
       if (latest?.id === currentTicket.id) currentTicket = latest;
       const patch = patchForTicket(currentTicket);
       if (Object.keys(patch).length === 0) return;
-      const statusChanged = hasFormValue(patch, "status");
-      const assigneeChanged = hasFormValue(patch, "assignee_user_id");
+      const statusChanged = Object.hasOwn(patch, "status");
+      const assigneeChanged = Object.hasOwn(patch, "assignee_user_id");
       try {
         const updated = await saveTicketPatch(currentTicket, patch);
         currentTicket = updated;
