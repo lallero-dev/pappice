@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -316,7 +317,7 @@ func enqueueWebhookNotificationsTx(tx *sql.Tx, inputs []CreateWebhookNotificatio
 	created := make([]WebhookNotification, 0, len(inputs))
 	for _, input := range inputs {
 		event := strings.TrimSpace(input.Event)
-		if event == "" || event == "*" || !isValid(validEvents, event) {
+		if !slices.Contains(webhookEvents, event) {
 			return nil, fmt.Errorf("%w: invalid webhook notification event %q", ErrValidation, event)
 		}
 		payload := strings.TrimSpace(input.PayloadJSON)

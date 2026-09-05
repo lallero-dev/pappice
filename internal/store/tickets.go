@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ func (s *Store) CreateTicketWithAttachments(input CreateTicket, attachments []Cr
 	if ticket.Title == "" {
 		return Ticket{}, fmt.Errorf("%w: title is required", ErrValidation)
 	}
-	if !isValid(validPriorities, ticket.Priority) {
+	if !slices.Contains(ticketPriorities, ticket.Priority) {
 		return Ticket{}, fmt.Errorf("%w: invalid priority %q", ErrValidation, ticket.Priority)
 	}
 
@@ -419,7 +420,7 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 	}
 	if patch.Status != nil {
 		status := strings.TrimSpace(*patch.Status)
-		if !isValid(validStatuses, status) {
+		if !slices.Contains(ticketStatuses, status) {
 			return fmt.Errorf("%w: invalid status %q", ErrValidation, status)
 		}
 		if status != current.Status {
@@ -434,7 +435,7 @@ func applyTicketPatch(current *Ticket, patch UpdateTicket, now time.Time) error 
 	}
 	if patch.Priority != nil {
 		priority := defaultString(*patch.Priority, "normal")
-		if !isValid(validPriorities, priority) {
+		if !slices.Contains(ticketPriorities, priority) {
 			return fmt.Errorf("%w: invalid priority %q", ErrValidation, priority)
 		}
 		current.Priority = priority
@@ -526,7 +527,7 @@ func normalizeComment(input AddComment, allowEmptyBody bool) (AddComment, bool, 
 		return AddComment{}, false, fmt.Errorf("%w: comment body is required", ErrValidation)
 	}
 	visibility := defaultString(input.Visibility, "public")
-	if !isValid(validCommentVisibility, visibility) {
+	if !slices.Contains(commentVisibilities, visibility) {
 		return AddComment{}, false, fmt.Errorf("%w: invalid comment visibility %q", ErrValidation, visibility)
 	}
 	return AddComment{Body: body, Visibility: visibility}, visibility == "public", nil

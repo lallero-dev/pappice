@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -160,7 +161,7 @@ func (s *Store) UpdateUser(id int64, patch UpdateUser) (User, error) {
 	}
 	if patch.Role != nil {
 		role := normalizeGlobalRole(*patch.Role)
-		if !isValid(validGlobalRoles, role) {
+		if !slices.Contains(globalRoles, role) {
 			return User{}, fmt.Errorf("%w: invalid role %q", ErrValidation, role)
 		}
 		user.Role = role
@@ -699,7 +700,7 @@ func normalizeCreateUserInput(input CreateUser) (string, string, string, error) 
 		return "", "", "", err
 	}
 	role := normalizeGlobalRole(defaultString(input.Role, "staff"))
-	if !isValid(validGlobalRoles, role) {
+	if !slices.Contains(globalRoles, role) {
 		return "", "", "", fmt.Errorf("%w: invalid role %q", ErrValidation, role)
 	}
 	displayName := defaultString(input.DisplayName, email)
@@ -762,7 +763,7 @@ func userPatchEventDetails(before, after User, patch UpdateUser) map[string]any 
 
 func createAccountLinkTx(tx *sql.Tx, userID int64, purpose string, expiresFor time.Duration) (AccountLink, string, error) {
 	purpose = strings.TrimSpace(purpose)
-	if !isValid(validAccountLinkPurposes, purpose) {
+	if !slices.Contains(accountLinkPurposes, purpose) {
 		return AccountLink{}, "", fmt.Errorf("%w: invalid account link purpose %q", ErrValidation, purpose)
 	}
 	if expiresFor <= 0 {

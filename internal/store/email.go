@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -156,7 +157,7 @@ func enqueueEmailNotificationsTx(tx *sql.Tx, inputs []CreateEmailNotification, n
 		if notification.Event == "" {
 			return nil, fmt.Errorf("%w: event is required", ErrValidation)
 		}
-		if !isValid(validEmailEvents, notification.Event) {
+		if !slices.Contains(emailEvents, notification.Event) {
 			return nil, fmt.Errorf("%w: invalid notification event %q", ErrValidation, notification.Event)
 		}
 		if !input.SendAfter.IsZero() {
@@ -392,7 +393,7 @@ func emailNotificationWhere(filter EmailNotificationFilter) (string, []any) {
 	clauses := make([]string, 0, 2)
 	args := make([]any, 0, 6)
 	status := strings.ToLower(strings.TrimSpace(filter.Status))
-	if status != "" && isValid(validEmailNotificationStatuses, status) {
+	if status != "" && slices.Contains(emailNotificationStatuses, status) {
 		clauses = append(clauses, "status = ?")
 		args = append(args, status)
 	}

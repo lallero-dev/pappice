@@ -1,5 +1,7 @@
 package store
 
+import "slices"
+
 var (
 	ticketStatuses            = []string{"open", "closed"}
 	ticketPriorities          = []string{"low", "normal", "high", "urgent"}
@@ -9,57 +11,30 @@ var (
 	webhookEvents             = []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}
 	defaultWebhookEvents      = []string{"ticket.created", "ticket.updated", "ticket.commented"}
 	auditEvents               = []string{"password.changed", "setup.completed", "product.created", "product.updated", "product.deleted", "product_member.upserted", "product_member.removed", "ticket.deleted", "user.created", "user.updated", "user.deleted", "user.password_reset_requested", "api_token.created", "api_token.deleted", "webhook.created", "webhook.updated", "webhook.deleted", "webhook.secret_rotated", "email_notification.retried", "email_notification.test_queued"}
-	emailEvents               = appendStrings(webhookEvents, "account.setup", "account.reset", "email.test")
+	emailEvents               = append(slices.Clone(webhookEvents), "account.setup", "account.reset", "email.test")
 	emailNotificationStatuses = []string{"pending", "sending", "sent", "failed"}
 	accountLinkPurposes       = []string{"setup", "reset"}
-
-	validStatuses                  = stringSet(ticketStatuses)
-	validPriorities                = stringSet(ticketPriorities)
-	validGlobalRoles               = stringSet(globalRoles)
-	validProductRoles              = stringSet(productRoles)
-	validCommentVisibility         = stringSet(commentVisibilities)
-	validEvents                    = stringSet(appendStrings(webhookEvents, "*"))
-	validDomainEvents              = stringSet(appendStrings(webhookEvents, auditEvents...))
-	validEmailEvents               = stringSet(emailEvents)
-	validEmailNotificationStatuses = stringSet(emailNotificationStatuses)
-	validAccountLinkPurposes       = stringSet(accountLinkPurposes)
+	domainEvents              = append(slices.Clone(webhookEvents), auditEvents...)
 )
 
 func Statuses() []string {
-	return cloneStrings(ticketStatuses)
+	return slices.Clone(ticketStatuses)
 }
 
 func Priorities() []string {
-	return cloneStrings(ticketPriorities)
+	return slices.Clone(ticketPriorities)
 }
 
 func Roles() []string {
-	return cloneStrings(globalRoles)
+	return slices.Clone(globalRoles)
 }
 
 func ProductRoles() []string {
-	return cloneStrings(productRoles)
+	return slices.Clone(productRoles)
 }
 
 func Events() []string {
-	return cloneStrings(webhookEvents)
-}
-
-func cloneStrings(values []string) []string {
-	return append([]string(nil), values...)
-}
-
-func appendStrings(values []string, extras ...string) []string {
-	result := cloneStrings(values)
-	return append(result, extras...)
-}
-
-func stringSet(values []string) map[string]struct{} {
-	result := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		result[value] = struct{}{}
-	}
-	return result
+	return slices.Clone(webhookEvents)
 }
 
 func ToPublicUser(user User) PublicUser {

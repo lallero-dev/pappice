@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -316,7 +317,7 @@ func (s *Store) PruneProcessedDomainEvents(olderThan time.Time, limit int) (int6
 
 func insertDomainEventTx(tx *sql.Tx, input CreateDomainEvent, now time.Time) (int64, error) {
 	eventType := strings.TrimSpace(input.Type)
-	if !isValid(validDomainEvents, eventType) {
+	if !slices.Contains(domainEvents, eventType) {
 		return 0, fmt.Errorf("%w: invalid domain event %q", ErrValidation, eventType)
 	}
 	payload := strings.TrimSpace(input.PayloadJSON)

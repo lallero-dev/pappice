@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -238,7 +239,7 @@ func scanProductMembers(rows *sql.Rows) ([]ProductMember, error) {
 
 func (s *Store) UpsertProductMember(productID int64, input UpsertProductMember) (ProductMember, error) {
 	role := normalizeProductRole(input.Role)
-	if !isValid(validProductRoles, role) {
+	if !slices.Contains(productRoles, role) {
 		return ProductMember{}, fmt.Errorf("%w: invalid product role %q", ErrValidation, role)
 	}
 	tx, err := s.db.Begin()

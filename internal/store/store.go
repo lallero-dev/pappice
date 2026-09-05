@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -775,11 +776,6 @@ func normalizeRequiredEmail(value string) (string, error) {
 	return email, nil
 }
 
-func isValid(allowed map[string]struct{}, value string) bool {
-	_, ok := allowed[value]
-	return ok
-}
-
 func placeholders(count int) string {
 	if count <= 0 {
 		return ""
@@ -789,26 +785,24 @@ func placeholders(count int) string {
 
 func normalizeEvents(events []string) ([]string, error) {
 	if len(events) == 0 {
-		return cloneStrings(defaultWebhookEvents), nil
+		return slices.Clone(defaultWebhookEvents), nil
 	}
-	seen := make(map[string]struct{}, len(events))
 	result := make([]string, 0, len(events))
 	for _, event := range events {
 		event = strings.TrimSpace(event)
 		if event == "" {
 			continue
 		}
-		if !isValid(validEvents, event) {
+		if event != "*" && !slices.Contains(webhookEvents, event) {
 			return nil, fmt.Errorf("%w: invalid webhook event %q", ErrValidation, event)
 		}
-		if _, ok := seen[event]; ok {
+		if slices.Contains(result, event) {
 			continue
 		}
-		seen[event] = struct{}{}
 		result = append(result, event)
 	}
 	if len(result) == 0 {
-		return cloneStrings(defaultWebhookEvents), nil
+		return slices.Clone(defaultWebhookEvents), nil
 	}
 	return result, nil
 }
