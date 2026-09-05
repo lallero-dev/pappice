@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"pappice/internal/security"
 	"pappice/internal/store"
 )
 
@@ -41,7 +42,6 @@ type uploadConfig struct {
 type storedUpload struct {
 	Attachment store.CreateAttachment
 	Path       string
-	Created    bool
 }
 
 func normalizeUploadOptions(options Options) Options {
@@ -258,19 +258,25 @@ func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHea
 	if filename == "" {
 		return storedUpload{}, fmt.Errorf("%w: attachment filename is required", store.ErrValidation)
 	}
-	if err := os.MkdirAll(s.options.UploadDir, 0o755); err != nil {
-		return storedUpload{}, err
-	}
-	temp, err := os.CreateTemp(s.options.UploadDir, ".upload-*")
+	// Each upload owns its file, including while its database write is pending.
+	key, err := security.RandomToken()
 	if err != nil {
 		return storedUpload{}, err
 	}
-	tempPath := temp.Name()
-	keepTemp := false
+	storageKey := filepath.ToSlash(filepath.Join(key[:2], key[2:4], key))
+	path := filepath.Join(s.options.UploadDir, filepath.FromSlash(storageKey))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return storedUpload{}, err
+	}
+	destination, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return storedUpload{}, err
+	}
+	keepFile := false
 	defer func() {
-		_ = temp.Close()
-		if !keepTemp {
-			_ = os.Remove(tempPath)
+		_ = destination.Close()
+		if !keepFile {
+			_ = os.Remove(path)
 		}
 	}()
 
@@ -290,7 +296,7 @@ func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHea
 				sniff = append(sniff, buffer[:remaining]...)
 			}
 			hash.Write(buffer[:n])
-			if _, err := temp.Write(buffer[:n]); err != nil {
+			if _, err := destination.Write(buffer[:n]); err != nil {
 				return storedUpload{}, err
 			}
 		}
@@ -308,44 +314,20 @@ func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHea
 	if !s.uploadContentTypeAllowed(contentType) {
 		return storedUpload{}, fmt.Errorf("%w: attachment type %q is not allowed", store.ErrValidation, contentType)
 	}
-	if err := temp.Close(); err != nil {
+	if err := destination.Close(); err != nil {
 		return storedUpload{}, err
 	}
-
-	sum := hex.EncodeToString(hash.Sum(nil))
-	storageKey := filepath.ToSlash(filepath.Join(sum[:2], sum[2:4], sum))
-	finalPath := filepath.Join(s.options.UploadDir, filepath.FromSlash(storageKey))
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
-		return storedUpload{}, err
-	}
-	created := true
-	if _, err := os.Stat(finalPath); err == nil {
-		created = false
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return storedUpload{}, err
-	}
-	if created {
-		if err := os.Rename(tempPath, finalPath); err != nil {
-			if _, statErr := os.Stat(finalPath); statErr == nil {
-				created = false
-			} else {
-				return storedUpload{}, err
-			}
-		} else {
-			keepTemp = true
-		}
-	}
+	keepFile = true
 
 	return storedUpload{
 		Attachment: store.CreateAttachment{
 			Filename:    filename,
 			ContentType: contentType,
 			SizeBytes:   size,
-			SHA256:      sum,
+			SHA256:      hex.EncodeToString(hash.Sum(nil)),
 			StorageKey:  storageKey,
 		},
-		Path:    finalPath,
-		Created: created,
+		Path: path,
 	}, nil
 }
 
@@ -400,7 +382,7 @@ func (s *Server) removeOrphanedAttachmentFiles(storageKeys []string) {
 
 func cleanupStoredUploads(uploads []storedUpload) {
 	for _, upload := range uploads {
-		if upload.Created && upload.Path != "" {
+		if upload.Path != "" {
 			_ = os.Remove(upload.Path)
 		}
 	}

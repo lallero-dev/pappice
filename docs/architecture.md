@@ -132,6 +132,11 @@ Uploads are split between:
 - metadata in SQLite
 - content files under `PAPPICE_UPLOAD_DIR`
 
+Each new upload owns a separate file, even when its content matches an existing
+attachment. This keeps failed-request cleanup independent of concurrent uploads
+and deletions. SHA-256 remains content metadata. Existing attachments with shared
+storage keys remain readable and are removed only after their last reference.
+
 The database and upload directory must be backed up and restored together.
 Restore moves the current database files and upload directory into a safety
 folder before replacing them.
