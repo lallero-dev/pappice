@@ -114,6 +114,9 @@ to become due.
 ## Auth Model
 
 Browser auth uses secure session cookies plus a CSRF token returned by the API.
+Requests that create a session (initial setup, login, and account-link completion)
+must use HTTPS, `Content-Type: application/json`, and a matching `Origin` or
+`Referer` header.
 API automation uses bearer tokens. Browser-only operations, such as password
 change, must reject API-token auth.
 

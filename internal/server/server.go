@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -275,7 +276,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if !s.requireHTTPS(w, r) {
+	if !s.requireSessionRequest(w, r) {
 		return
 	}
 	var input store.CreateUser
@@ -304,7 +305,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if !s.requireHTTPS(w, r) {
+	if !s.requireSessionRequest(w, r) {
 		return
 	}
 	var input struct {
@@ -395,7 +396,7 @@ func (s *Server) handleAccountLinkByToken(w http.ResponseWriter, r *http.Request
 			"user":       store.ToPublicUser(user),
 		})
 	case http.MethodPost:
-		if !s.requireHTTPS(w, r) {
+		if !s.requireSessionRequest(w, r) {
 			return
 		}
 		if !s.accountLinkLimiter.Allow(limitKey, time.Now().UTC()) {
@@ -1606,12 +1607,21 @@ func (s *Server) requireBrowserSession(w http.ResponseWriter, auth authContext) 
 	return true
 }
 
-func (s *Server) requireHTTPS(w http.ResponseWriter, r *http.Request) bool {
-	if s.requestIsSecure(r) {
-		return true
+func (s *Server) requireSessionRequest(w http.ResponseWriter, r *http.Request) bool {
+	if !s.requestIsSecure(r) {
+		respondError(w, http.StatusBadRequest, "HTTPS is required for browser sessions")
+		return false
 	}
-	respondError(w, http.StatusBadRequest, "HTTPS is required for browser sessions")
-	return false
+	if !s.sameOrigin(r) {
+		respondError(w, http.StatusForbidden, "same-origin request is required")
+		return false
+	}
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || contentType != "application/json" {
+		respondError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+		return false
+	}
+	return true
 }
 
 func (s *Server) verifyCSRF(w http.ResponseWriter, r *http.Request, expected string) bool {

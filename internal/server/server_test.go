@@ -38,7 +38,7 @@ func TestSetupRequiresHTTPS(t *testing.T) {
 	resp, body := doJSON(t, server.Client(), http.MethodPost, server.URL+"/api/setup", map[string]any{
 		"email":    "admin@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s, want 400", resp.StatusCode, body)
 	}
@@ -63,6 +63,7 @@ func TestTrustedProxyHeadersAllowBrowserSession(t *testing.T) {
 	defer server.Close()
 	client := server.Client()
 	headers := map[string]string{
+		"Origin":            "https://support.example.test",
 		"X-Forwarded-Proto": "https",
 		"X-Forwarded-Host":  "support.example.test",
 		"X-Forwarded-For":   "198.51.100.99",
@@ -80,7 +81,6 @@ func TestTrustedProxyHeadersAllowBrowserSession(t *testing.T) {
 	adminCookie := resp.Cookies()[0]
 	adminCSRF := decodeString(t, body, "csrf_token")
 
-	headers["Origin"] = "https://support.example.test"
 	resp, body = doJSONWithHeaders(t, client, http.MethodPost, server.URL+"/api/products", map[string]any{
 		"key":  "OPS",
 		"name": "Operations",
@@ -141,7 +141,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	setupResp, setupBody := doJSON(t, client, http.MethodPost, server.URL+"/api/setup", map[string]any{
 		"email":    "admin@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, setupResp, setupBody, http.StatusCreated)
 	adminCookie := setupResp.Cookies()[0]
 	adminCSRF := decodeString(t, setupBody, "csrf_token")
@@ -165,7 +165,7 @@ func TestProductRBACAndCSRF(t *testing.T) {
 	loginResp, loginBody := doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 		"email":    "bob@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, loginResp, loginBody, http.StatusOK)
 	bobCookie := loginResp.Cookies()[0]
 	bobCSRF := decodeString(t, loginBody, "csrf_token")
@@ -280,7 +280,7 @@ func TestSessionAssetsTokensAndLogoutFlow(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 		"email":    "admin@example.test",
 		"password": "wrong password",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusUnauthorized)
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/tokens", map[string]any{"name": "cli"}, adminCookie, adminCSRF, server.URL)
@@ -913,7 +913,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 		"email":    "pending@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusUnauthorized)
 	if !bytes.Contains(body, []byte("password setup or reset is required")) {
 		t.Fatalf("pending login error = %s", body)
@@ -932,7 +932,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+setupToken, map[string]any{
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	if len(resp.Cookies()) == 0 {
 		t.Fatalf("setup link did not create session: %s", body)
@@ -940,7 +940,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	userCookie := resp.Cookies()[0]
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+setupToken, map[string]any{
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusGone)
 	if !bytes.Contains(body, []byte("already been used")) || !bytes.Contains(body, []byte(`"reason":"used"`)) {
 		t.Fatalf("used setup link response = %s", body)
@@ -965,7 +965,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 		"email":    "pending@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusUnauthorized)
 	if !bytes.Contains(body, []byte("password setup or reset is required")) {
 		t.Fatalf("old password reset-required error = %s", body)
@@ -973,7 +973,7 @@ func TestAccountSetupAndResetLinks(t *testing.T) {
 
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+resetToken, map[string]any{
 		"password": "new correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusOK)
 	loginUser(t, client, server.URL, "pending", "new correct horse")
 
@@ -1089,13 +1089,13 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 			"email":    "missing@example.test",
 			"password": "wrong password",
-		}, nil, "", "")
+		}, nil, "", server.URL)
 		requireStatus(t, resp, body, http.StatusUnauthorized)
 	}
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 		"email":    "missing@example.test",
 		"password": "wrong password",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusTooManyRequests)
 	if retry := resp.Header.Get("Retry-After"); retry == "" {
 		t.Fatalf("rate-limited response missing Retry-After: %s", body)
@@ -1110,12 +1110,12 @@ func TestSecurityHardeningRateLimitsAuditAndSessionTTL(t *testing.T) {
 	for range 2 {
 		resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+token, map[string]any{
 			"password": "short",
-		}, nil, "", "")
+		}, nil, "", server.URL)
 		requireStatus(t, resp, body, http.StatusBadRequest)
 	}
 	resp, body = doJSON(t, client, http.MethodPost, server.URL+"/api/account-links/"+token, map[string]any{
 		"password": "short",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, resp, body, http.StatusTooManyRequests)
 
 	waitForDomainEvents(t, tracker)
@@ -1416,7 +1416,7 @@ func TestWebhookGuardrails(t *testing.T) {
 	setupResp, setupBody := doJSON(t, client, http.MethodPost, blocking.URL+"/api/setup", map[string]any{
 		"email":    "admin@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", blocking.URL)
 	requireStatus(t, setupResp, setupBody, http.StatusCreated)
 	adminCookie := setupResp.Cookies()[0]
 	adminCSRF := decodeString(t, setupBody, "csrf_token")
@@ -1450,7 +1450,7 @@ func TestWebhookGuardrails(t *testing.T) {
 	setupResp, setupBody = doJSON(t, permissiveClient, http.MethodPost, permissive.URL+"/api/setup", map[string]any{
 		"email":    "admin@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", permissive.URL)
 	requireStatus(t, setupResp, setupBody, http.StatusCreated)
 	adminCookie = setupResp.Cookies()[0]
 	adminCSRF = decodeString(t, setupBody, "csrf_token")
@@ -1955,7 +1955,7 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	loginResp, loginBody := doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
 		"email":    "customer@example.test",
 		"password": "correct horse",
-	}, nil, "", "")
+	}, nil, "", server.URL)
 	requireStatus(t, loginResp, loginBody, http.StatusOK)
 	customerCookie := loginResp.Cookies()[0]
 	customerCSRF := decodeString(t, loginBody, "csrf_token")
@@ -2905,7 +2905,7 @@ func setupAdmin(t *testing.T, client *http.Client, baseURL string) (*http.Cookie
 		"email":    fixtureEmail("admin"),
 		"password": "correct horse",
 	}
-	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/setup", payload, nil, "", "")
+	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/setup", payload, nil, "", baseURL)
 	requireStatus(t, resp, body, http.StatusCreated)
 	if len(resp.Cookies()) == 0 {
 		t.Fatalf("setup response did not set cookie: %s", body)
@@ -2918,7 +2918,7 @@ func loginUser(t *testing.T, client *http.Client, baseURL, email, password strin
 	resp, body := doJSON(t, client, http.MethodPost, baseURL+"/api/login", map[string]any{
 		"email":    fixtureEmail(email),
 		"password": password,
-	}, nil, "", "")
+	}, nil, "", baseURL)
 	requireStatus(t, resp, body, http.StatusOK)
 	if len(resp.Cookies()) == 0 {
 		t.Fatalf("login response did not set cookie: %s", body)
@@ -2941,7 +2941,7 @@ func createUser(t *testing.T, client *http.Client, baseURL string, cookie *http.
 		token := accountLinkTokenFromURL(t, link)
 		resp, body = doJSON(t, client, http.MethodPost, baseURL+"/api/account-links/"+token, map[string]any{
 			"password": password,
-		}, nil, "", "")
+		}, nil, "", baseURL)
 		requireStatus(t, resp, body, http.StatusOK)
 	}
 	return id
