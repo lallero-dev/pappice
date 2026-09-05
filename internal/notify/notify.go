@@ -79,7 +79,7 @@ func NewSMTPMailer(config SMTPConfig) (*SMTPMailer, error) {
 	return &SMTPMailer{config: config}, nil
 }
 
-func (m *SMTPMailer) Send(ctx context.Context, message Message) error {
+func (m *SMTPMailer) Send(ctx context.Context, message Message) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -91,11 +91,29 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) error {
 	if err != nil {
 		return fmt.Errorf("invalid sender address: %w", err)
 	}
-	client, err := m.connect()
+	ctx, cancel := context.WithTimeout(ctx, m.config.Timeout)
+	defer cancel()
+	defer func() {
+		if err != nil && ctx.Err() != nil {
+			err = ctx.Err()
+		}
+	}()
+	address := net.JoinHostPort(m.config.Host, strconv.Itoa(m.config.Port))
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+	client, err := m.newClient(conn)
+	if err != nil {
+		return err
+	}
 
 	if m.config.Username != "" {
 		auth := smtp.PlainAuth("", m.config.Username, m.config.Password, m.config.Host)
@@ -120,33 +138,23 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) error {
 	return client.Quit()
 }
 
-func (m *SMTPMailer) connect() (*smtp.Client, error) {
-	address := net.JoinHostPort(m.config.Host, strconv.Itoa(m.config.Port))
-	dialer := net.Dialer{Timeout: m.config.Timeout}
+// Send owns conn and bounds all SMTP operations, including the initial greeting
+// and TLS handshakes, with its deadline and cancellation handler.
+func (m *SMTPMailer) newClient(conn net.Conn) (*smtp.Client, error) {
+	tlsConfig := &tls.Config{ServerName: m.config.Host, MinVersion: tls.VersionTLS12}
 	if m.config.TLSMode == "tls" {
-		conn, err := tls.DialWithDialer(&dialer, "tcp", address, &tls.Config{ServerName: m.config.Host, MinVersion: tls.VersionTLS12})
-		if err != nil {
-			return nil, err
-		}
-		return smtp.NewClient(conn, m.config.Host)
-	}
-	conn, err := dialer.Dial("tcp", address)
-	if err != nil {
-		return nil, err
+		conn = tls.Client(conn, tlsConfig)
 	}
 	client, err := smtp.NewClient(conn, m.config.Host)
 	if err != nil {
-		_ = conn.Close()
 		return nil, err
 	}
 	if m.config.TLSMode == "starttls" {
 		ok, _ := client.Extension("STARTTLS")
 		if !ok {
-			_ = client.Close()
 			return nil, errors.New("smtp server does not advertise STARTTLS")
 		}
-		if err := client.StartTLS(&tls.Config{ServerName: m.config.Host, MinVersion: tls.VersionTLS12}); err != nil {
-			_ = client.Close()
+		if err := client.StartTLS(tlsConfig); err != nil {
 			return nil, err
 		}
 	}

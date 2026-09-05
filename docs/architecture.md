@@ -113,6 +113,10 @@ rows with leases, mark success or failure, and retry according to the store
 rules. This keeps side effects recoverable after process restarts without adding
 an external queue.
 
+SMTP sends have one timeout covering the connection, TLS negotiation, and the
+whole SMTP exchange. Context cancellation closes the connection immediately so
+a stalled server cannot hold the email worker indefinitely.
+
 In tests, prefer direct dispatch or explicit database timestamps over wall-clock
 sleeping. A test should force a notification to be due rather than wait for it
 to become due.
