@@ -130,15 +130,38 @@ func createUniqueDir(parent, name string) (string, error) {
 	return "", fmt.Errorf("could not create unique directory for %s", name)
 }
 
-func moveIfExists(source, destination string) error {
-	_, err := os.Lstat(source)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+type restoreMove struct {
+	from, to string
+	optional bool
+}
+
+// moveRestoreFiles keeps the completed renames so a failed restore can undo
+// them in reverse order. The caller stages files on their target filesystems.
+func moveRestoreFiles(moves []restoreMove, rename func(string, string) error) error {
+	completed := make([]restoreMove, 0, len(moves))
+	rollback := func(cause error) error {
+		for i := len(completed) - 1; i >= 0; i-- {
+			move := completed[i]
+			if err := rename(move.to, move.from); err != nil {
+				cause = errors.Join(cause, fmt.Errorf("rollback %s to %s: %w", move.to, move.from, err))
+			}
+		}
+		return cause
 	}
-	if err != nil {
-		return err
+	for _, move := range moves {
+		if move.optional {
+			if _, err := os.Lstat(move.from); errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return rollback(err)
+			}
+		}
+		if err := rename(move.from, move.to); err != nil {
+			return rollback(fmt.Errorf("restore %s to %s: %w", move.from, move.to, err))
+		}
+		completed = append(completed, move)
 	}
-	return os.Rename(source, destination)
+	return nil
 }
 
 func copyFile(source, destination string, mode fs.FileMode) error {

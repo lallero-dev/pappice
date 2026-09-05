@@ -34,8 +34,9 @@ type RestoreConfig struct {
 }
 
 type RestoreResult struct {
-	BackupPath string
-	SafetyDir  string
+	BackupPath        string
+	DatabaseSafetyDir string
+	UploadSafetyDir   string
 }
 
 func Create(cfg Config) (Result, error) {
@@ -100,6 +101,8 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	if err := validateRestoreConfig(cfg); err != nil {
 		return RestoreResult{}, err
 	}
+	cfg.DBPath = filepath.Clean(cfg.DBPath)
+	cfg.UploadDir = filepath.Clean(cfg.UploadDir)
 	backupPath, err := ResolvePath(cfg.BackupDir, cfg.BackupPath)
 	if err != nil {
 		return RestoreResult{}, err
@@ -109,65 +112,56 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 		return RestoreResult{}, fmt.Errorf("backup database: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o750); err != nil {
+	dbParent := filepath.Dir(cfg.DBPath)
+	if err := os.MkdirAll(dbParent, 0o750); err != nil {
 		return RestoreResult{}, err
 	}
-	tempDBPath, err := availablePath(filepath.Dir(cfg.DBPath), "."+filepath.Base(cfg.DBPath)+".restore-tmp")
+	tempDBDir, err := os.MkdirTemp(dbParent, "."+filepath.Base(cfg.DBPath)+".restore-tmp-")
 	if err != nil {
 		return RestoreResult{}, err
 	}
-	tempDBInstalled := false
+	defer os.RemoveAll(tempDBDir)
+	tempDBPath := filepath.Join(tempDBDir, filepath.Base(cfg.DBPath))
 	if err := copyFile(backupDBPath, tempDBPath, 0o600); err != nil {
 		return RestoreResult{}, err
 	}
-	defer func() {
-		if !tempDBInstalled {
-			_ = os.Remove(tempDBPath)
-		}
-	}()
 
 	tempUploadDir, err := prepareRestoreUploads(backupPath, cfg.UploadDir)
 	if err != nil {
 		return RestoreResult{}, err
 	}
-	tempUploadsInstalled := false
-	defer func() {
-		if !tempUploadsInstalled {
-			_ = os.RemoveAll(tempUploadDir)
-		}
-	}()
+	defer os.RemoveAll(tempUploadDir)
 
-	if err := os.MkdirAll(cfg.BackupDir, 0o750); err != nil {
-		return RestoreResult{}, err
-	}
-	safetyDir, err := createUniqueDir(cfg.BackupDir, "restore-pre-"+cfg.now().Format(timestampFormat))
+	stamp := cfg.now().Format(timestampFormat)
+	dbSafetyDir, err := createUniqueDir(dbParent, "."+filepath.Base(cfg.DBPath)+".restore-pre-"+stamp)
 	if err != nil {
 		return RestoreResult{}, err
 	}
+	uploadSafetyDir, err := createUniqueDir(filepath.Dir(cfg.UploadDir), "."+filepath.Base(cfg.UploadDir)+".restore-pre-"+stamp)
+	if err != nil {
+		_ = os.Remove(dbSafetyDir)
+		return RestoreResult{}, err
+	}
 
-	if err := moveIfExists(cfg.DBPath, filepath.Join(safetyDir, filepath.Base(cfg.DBPath))); err != nil {
+	moves := []restoreMove{
+		{cfg.DBPath, filepath.Join(dbSafetyDir, filepath.Base(cfg.DBPath)), true},
+		{cfg.DBPath + "-wal", filepath.Join(dbSafetyDir, filepath.Base(cfg.DBPath)+"-wal"), true},
+		{cfg.DBPath + "-shm", filepath.Join(dbSafetyDir, filepath.Base(cfg.DBPath)+"-shm"), true},
+		{cfg.UploadDir, filepath.Join(uploadSafetyDir, "uploads"), true},
+		{tempDBPath, cfg.DBPath, false},
+		{tempUploadDir, cfg.UploadDir, false},
+	}
+	if err := moveRestoreFiles(moves, os.Rename); err != nil {
+		// Remove empty directories after rollback, but never saved originals.
+		_ = os.Remove(dbSafetyDir)
+		_ = os.Remove(uploadSafetyDir)
 		return RestoreResult{}, err
 	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		path := cfg.DBPath + suffix
-		if err := moveIfExists(path, filepath.Join(safetyDir, filepath.Base(path))); err != nil {
-			return RestoreResult{}, err
-		}
-	}
-	if err := os.Rename(tempDBPath, cfg.DBPath); err != nil {
-		return RestoreResult{}, err
-	}
-	tempDBInstalled = true
-
-	if err := moveIfExists(cfg.UploadDir, filepath.Join(safetyDir, "uploads")); err != nil {
-		return RestoreResult{}, err
-	}
-	if err := os.Rename(tempUploadDir, cfg.UploadDir); err != nil {
-		return RestoreResult{}, err
-	}
-	tempUploadsInstalled = true
-
-	return RestoreResult{BackupPath: backupPath, SafetyDir: safetyDir}, nil
+	return RestoreResult{
+		BackupPath:        backupPath,
+		DatabaseSafetyDir: dbSafetyDir,
+		UploadSafetyDir:   uploadSafetyDir,
+	}, nil
 }
 
 func ResolvePath(backupDir, target string) (string, error) {

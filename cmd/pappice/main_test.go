@@ -298,7 +298,8 @@ func TestBackupAndRestoreCommands(t *testing.T) {
 		t.Fatalf("restore exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "Restore complete from:") ||
-		!strings.Contains(stdout.String(), "Previous files saved in:") {
+		!strings.Contains(stdout.String(), "Previous database files saved in:") ||
+		!strings.Contains(stdout.String(), "Previous uploads saved in:") {
 		t.Fatalf("restore output = %s", stdout.String())
 	}
 	if got := queryCommandDB(t, dbPath); got != "before" {

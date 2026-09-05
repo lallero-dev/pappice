@@ -61,7 +61,8 @@ func runRestore(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "Restore complete from: %s\n", result.BackupPath)
-	fmt.Fprintf(stdout, "Previous files saved in: %s\n", result.SafetyDir)
+	fmt.Fprintf(stdout, "Previous database files saved in: %s\n", result.DatabaseSafetyDir)
+	fmt.Fprintf(stdout, "Previous uploads saved in: %s\n", result.UploadSafetyDir)
 	return 0
 }
 

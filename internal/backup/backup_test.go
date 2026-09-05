@@ -64,8 +64,11 @@ func TestCreateAndRestoreBackup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(uploadDir, "stale.txt")); !os.IsNotExist(err) {
 		t.Fatalf("stale upload remained in restored upload dir: %v", err)
 	}
-	if got := readFile(t, filepath.Join(restore.SafetyDir, "uploads", "stale.txt")); got != "stale upload" {
+	if got := readFile(t, filepath.Join(restore.UploadSafetyDir, "uploads", "stale.txt")); got != "stale upload" {
 		t.Fatalf("safety upload = %q", got)
+	}
+	if got := queryTestDB(t, filepath.Join(restore.DatabaseSafetyDir, "pappice.db")); got != "after" {
+		t.Fatalf("safety database = %q", got)
 	}
 	latest, err := ResolvePath(backupDir, "latest")
 	if err != nil {
@@ -118,7 +121,7 @@ func TestRestoreBackupWithoutUploadsReplacesStaleUploads(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("db-only restore left uploads behind: %#v", entries)
 	}
-	if got := readFile(t, filepath.Join(restore.SafetyDir, "uploads", "stale.txt")); got != "stale" {
+	if got := readFile(t, filepath.Join(restore.UploadSafetyDir, "uploads", "stale.txt")); got != "stale" {
 		t.Fatalf("safety stale upload = %q", got)
 	}
 }

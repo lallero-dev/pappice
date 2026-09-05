@@ -116,3 +116,7 @@ docker compose -f deploy/docker/compose.yaml stop pappice
 docker compose -f deploy/docker/compose.yaml run --rm pappice restore -yes latest
 docker compose -f deploy/docker/compose.yaml up -d
 ```
+
+Restore prints the recovery directories containing the previous database files
+and uploads. With this Compose configuration, they remain in `pappice-data`
+beside the database and upload directory.

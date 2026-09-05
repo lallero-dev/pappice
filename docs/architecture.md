@@ -147,8 +147,15 @@ and deletions. SHA-256 remains content metadata. Existing attachments with share
 storage keys remain readable and are removed only after their last reference.
 
 The database and upload directory must be backed up and restored together.
-Restore moves the current database files and upload directory into a safety
-folder before replacing them.
+Stop Pappice before restoring. Restore stages replacements beside each target
+and saves the original database files and uploads in separate sibling directories
+named `.<name>.restore-pre-<timestamp>`. The CLI prints both recovery locations.
+This avoids moving live files to the backup filesystem.
+
+If a filesystem operation fails, restore reverses completed renames. If rollback
+also fails, it preserves the saved originals and reports their paths in the
+error. This handles reported errors; the sequence is not atomic across a process
+crash or power loss.
 
 ## Frontend
 

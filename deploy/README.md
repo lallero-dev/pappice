@@ -177,6 +177,10 @@ sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/
 sudo systemctl start pappice.service
 ```
 
+Restore prints the recovery directories containing the previous database files
+and uploads. These directories sit beside their respective destinations, so
+restoring also works when the backup directory is on another filesystem.
+
 ## Build From Source
 
 Maintainers can create a release archive from a source checkout with:
