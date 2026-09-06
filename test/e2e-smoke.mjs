@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { waitForDocumentReady } from "./tools/browser-page.mjs";
+import { verifyInternalContributor } from "./e2e/internal-contributor.mjs";
 import { startLocalPappice } from "./tools/local-pappice.mjs";
 import {
   completeCustomerSetup,
@@ -73,6 +74,7 @@ async function main() {
   await staffReplyAndReopen(page);
   await verifyEmailOutbox(page);
   await verifyAuditLog(page);
+  await verifyInternalContributor(page, selectedProductID);
 
   await cleanup();
   console.log("E2E smoke test passed.");

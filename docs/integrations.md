@@ -4,11 +4,15 @@
 
 Authenticate with `Authorization: Bearer <token>`. Tokens inherit their owner's
 permissions, and replies show that user's name. Use a separate account when an
-integration should appear as a bot.
+integration should appear as a bot. For an integration that should only add
+internal notes, use a Staff account with the **Internal contributor** product
+role. See [account types and product roles](./access.md).
 
 `POST /api/tickets/{id}/comments` accepts a JSON object with `body` and
-`visibility`. Visibility defaults to `public`; `internal` requires staff access
-to the product. A public reply reopens a closed ticket.
+`visibility`. Visibility defaults to `public`; `internal` requires a Staff or
+Admin account with internal-note access to the product. A public reply reopens a
+closed ticket. Internal contributors must explicitly send `"visibility":"internal"`;
+public replies and omitted visibility are rejected with `403 Forbidden`.
 
 Use `Idempotency-Key` when a request might be retried:
 

@@ -394,28 +394,47 @@ function openMemberModal(member = null) {
     });
     return;
   }
-  const users = state.users
-    .filter((user) => !user.disabled)
-    .map((user) => ({ value: String(user.id), label: accountLabel(user) }));
+  const account = el("select", { name: "user_id" });
+  for (const user of state.users.filter((user) => !user.disabled)) {
+    account.append(new Option(accountLabel(user), String(user.id)));
+  }
   els.modalHost.open({
     title: "Add Product Member",
     submitText: "Save",
-    fields: [
-      { name: "user_id", label: "Account", type: "select", options: users },
-      { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.productRoles), value: "viewer" }
-    ],
+    content: el("div", { className: "grid" }, [
+      formField("Account", account),
+      productRoleField("viewer")
+    ]),
     onSubmit: async (data) => {
       await upsertMember({ user_id: Number(data.user_id), role: data.role });
     }
   });
 }
 
-function memberEditContent(member) {
+function productRoleField(value) {
   const role = el("select", { name: "role" });
   for (const option of selectOptions(state.meta.productRoles)) {
     role.append(new Option(option.label, option.value));
   }
-  role.value = member.role || "viewer";
+  role.value = value || "viewer";
+  const descriptions = {
+    manager: "Manage product settings, members, and tickets.",
+    staff: "Edit tickets, send public replies, and add internal notes.",
+    internal_contributor: "Read tickets and add internal notes. Cannot send public replies, create tickets, or edit ticket details.",
+    viewer: "Read public ticket content without making changes.",
+    customer: "Create and reply to your own tickets."
+  };
+  const help = el("small", { className: "field-help", id: "productRoleHelp" });
+  role.setAttribute("aria-describedby", "productRoleHelp");
+  const update = () => { help.textContent = descriptions[role.value] || ""; };
+  role.addEventListener("change", update);
+  update();
+  const field = formField("Product role", role);
+  field.append(help);
+  return field;
+}
+
+function memberEditContent(member) {
   const remove = el("button", {
     className: "danger",
     type: "button",
@@ -428,7 +447,7 @@ function memberEditContent(member) {
         disabled: "disabled",
         value: accountLabel(member)
       })),
-      formField("Role", role)
+      productRoleField(member.role)
     ]),
     el("section", { className: "account-manage" }, [
       el("div", { className: "account-manage-head" }, [

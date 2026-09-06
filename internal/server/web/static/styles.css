@@ -1834,6 +1834,19 @@ button:focus-visible {
   opacity: 0.45;
 }
 
+.comment-note-button {
+  padding: 0 12px;
+  width: auto;
+}
+
+.comment-audience {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+}
+
 .send-icon {
   display: inline-block;
   height: 14px;

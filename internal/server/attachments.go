@@ -162,7 +162,7 @@ func canReadAttachment(ticket store.Ticket, attachment store.Attachment, access 
 		if comment.ID != *attachment.CommentID {
 			continue
 		}
-		return comment.Visibility == "" || comment.Visibility == "public" || access.edit
+		return comment.Visibility == "" || comment.Visibility == "public" || access.internalNotes
 	}
 	return false
 }

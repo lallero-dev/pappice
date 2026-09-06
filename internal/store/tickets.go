@@ -907,7 +907,7 @@ func ticketSummarySelect(user User, ticketID int64, filter *TicketSummaryFilter)
 	if role == "admin" {
 		internalComments = "1 = 1"
 	} else if role == "staff" {
-		internalComments = "pm.role IN ('manager', 'staff')"
+		internalComments = "pm.role IN ('manager', 'staff', 'internal_contributor')"
 	}
 	afterRead := func(column string) string {
 		return "(tr.last_read_at IS NULL OR " + timestampKeySQL(column) + " > " + timestampKeySQL("tr.last_read_at") + ")"

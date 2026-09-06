@@ -6,7 +6,7 @@ var (
 	ticketStatuses            = []string{"open", "closed"}
 	ticketPriorities          = []string{"low", "normal", "high", "urgent"}
 	globalRoles               = []string{"admin", "staff", "customer"}
-	productRoles              = []string{"manager", "staff", "customer", "viewer"}
+	productRoles              = []string{"manager", "staff", "internal_contributor", "viewer", "customer"}
 	commentVisibilities       = []string{"public", "internal"}
 	webhookEvents             = []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}
 	defaultWebhookEvents      = []string{"ticket.created", "ticket.updated", "ticket.commented"}

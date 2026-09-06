@@ -59,7 +59,7 @@ func (s *Server) handleProductTickets(w http.ResponseWriter, r *http.Request, au
 		})
 	case http.MethodPost:
 		if !access.createTicket {
-			respondError(w, http.StatusForbidden, "product write access is required")
+			respondError(w, http.StatusForbidden, "ticket creation access is required")
 			return
 		}
 		ticket, ok := s.createTicketFromRequest(w, r, auth, productID)
@@ -131,7 +131,7 @@ func (s *Server) createTicketFromRequest(w http.ResponseWriter, r *http.Request,
 			return store.Ticket{}, false
 		}
 		if !access.createTicket {
-			respondError(w, http.StatusForbidden, "product write access is required")
+			respondError(w, http.StatusForbidden, "ticket creation access is required")
 			return store.Ticket{}, false
 		}
 	}
@@ -294,10 +294,10 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, r *http.Request, auth a
 		return store.Ticket{}, false
 	}
 	if hasPatch && !access.edit {
-		respondError(w, http.StatusForbidden, "staff access is required")
+		respondError(w, http.StatusForbidden, "ticket edit access is required")
 		return store.Ticket{}, false
 	}
-	if hasComment && !access.comment {
+	if hasComment && !access.reply && !access.internalNotes {
 		respondError(w, http.StatusForbidden, "product comment access is required")
 		return store.Ticket{}, false
 	}
@@ -306,8 +306,12 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, r *http.Request, auth a
 	if hasComment {
 		next := *input.Comment
 		next.Visibility = defaultString(next.Visibility, "public")
-		if next.Visibility == "internal" && !access.edit {
-			respondError(w, http.StatusForbidden, "staff access is required for internal notes")
+		if next.Visibility == "internal" && !access.internalNotes {
+			respondError(w, http.StatusForbidden, "internal note access is required")
+			return store.Ticket{}, false
+		}
+		if next.Visibility == "public" && !access.reply {
+			respondError(w, http.StatusForbidden, "public reply access is required")
 			return store.Ticket{}, false
 		}
 		comment = &next
@@ -339,7 +343,7 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if !access.comment {
+	if !access.reply && !access.internalNotes {
 		respondError(w, http.StatusForbidden, "product comment access is required")
 		return
 	}
@@ -360,12 +364,6 @@ func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, auth aut
 		if !decodeJSON(w, r, &input) {
 			return
 		}
-	}
-	input.Visibility = defaultString(input.Visibility, "public")
-	if input.Visibility == "internal" && !access.edit {
-		respondError(w, http.StatusForbidden, "staff access is required for internal notes")
-		cleanupStoredUploads(uploads)
-		return
 	}
 	updated, ok := s.applyTicketPatch(w, r, auth, ticket, access, ticketPatchInput{Comment: &input}, uploads)
 	if !ok {
@@ -397,10 +395,11 @@ func (s *Server) isSupportTicketRequester(user store.User, ticket store.Ticket) 
 }
 
 type ticketAccess struct {
-	read         bool
-	comment      bool
-	edit         bool
-	viewAssignee bool
+	read          bool
+	reply         bool
+	internalNotes bool
+	edit          bool
+	viewAssignee  bool
 }
 
 func (s *Server) ticketAccess(user store.User, ticket store.Ticket) (ticketAccess, error) {
@@ -410,16 +409,18 @@ func (s *Server) ticketAccess(user store.User, ticket store.Ticket) (ticketAcces
 	}
 	role := product.role
 	requesterOnly := isCustomer(user) || role == "customer"
+	editable := !isCustomer(user) && (role == "manager" || role == "staff")
 	return ticketAccess{
-		read:         !requesterOnly || s.isSupportTicketRequester(user, ticket),
-		comment:      product.createTicket,
-		edit:         !isCustomer(user) && (role == "manager" || role == "staff"),
-		viewAssignee: !isCustomer(user) && role != "customer",
+		read:          !requesterOnly || s.isSupportTicketRequester(user, ticket),
+		reply:         product.createTicket,
+		internalNotes: editable || (!isCustomer(user) && role == "internal_contributor"),
+		edit:          editable,
+		viewAssignee:  !isCustomer(user) && role != "customer",
 	}, nil
 }
 
 func (s *Server) ticketForUser(user store.User, ticket store.Ticket, access ticketAccess) (store.Ticket, error) {
-	if !access.edit {
+	if !access.internalNotes {
 		ticket.Comments = publicComments(ticket.Comments)
 	}
 	if !access.viewAssignee {

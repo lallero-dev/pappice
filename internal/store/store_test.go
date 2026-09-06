@@ -851,7 +851,7 @@ func TestMetadataAndPublicViews(t *testing.T) {
 	if got, want := Roles(), []string{"admin", "staff", "customer"}; !slices.Equal(got, want) {
 		t.Fatalf("roles = %#v, want %#v", got, want)
 	}
-	if got, want := ProductRoles(), []string{"manager", "staff", "customer", "viewer"}; !slices.Equal(got, want) {
+	if got, want := ProductRoles(), []string{"manager", "staff", "internal_contributor", "viewer", "customer"}; !slices.Equal(got, want) {
 		t.Fatalf("product roles = %#v, want %#v", got, want)
 	}
 	if got, want := Events(), []string{"ticket.created", "ticket.updated", "ticket.commented", "ticket.assigned"}; !slices.Equal(got, want) {

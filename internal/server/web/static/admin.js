@@ -440,7 +440,7 @@ function openUserModal(user = null) {
       { name: "email", label: "Email", type: "email", required: true, autocomplete: "email" },
       { name: "display_name", label: "Display name", autocomplete: "off" }
     ] },
-    { name: "role", label: "Role", type: "select", options: selectOptions(state.meta.roles), value: "staff" },
+    { name: "role", label: "Account type", type: "select", options: selectOptions(state.meta.roles), value: "staff" },
     { group: [
       { name: "password", label: "Manual password (optional)", type: "password", minlength: 8, autocomplete: "new-password" },
       { name: "password_confirm", label: "Confirm manual password", type: "password", minlength: 8, autocomplete: "new-password" }
@@ -513,7 +513,7 @@ function accountEditContent(user) {
     el("div", { className: "account-edit-grid" }, [
       formField("Display name", displayName),
       formField("Email", email),
-      formField("Role", role),
+      formField("Account type", role),
       el("label", { className: "check" }, [disabled, "Disabled"])
     ]),
     el("section", { className: "account-manage" }, [

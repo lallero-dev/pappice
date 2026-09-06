@@ -27,6 +27,7 @@ Pappice is intentionally minimal and self-contained:
 
 - Products group tickets by service, customer, or team.
 - Customers and staff use the same UI with role-based actions.
+- An Internal contributor product role allows internal notes without public replies or ticket edits.
 - Open/closed ticket workflow; a public reply reopens a closed conversation.
 - Chat-style conversations with public replies, internal notes, unread state,
   assignees, priorities, filtering, and sorting.
@@ -70,6 +71,7 @@ archives include the `pappice` binary and the referenced deployment templates.
 The complete configuration reference is [.env.example](./.env.example).
 
 For automation, see [API replies and webhook retries](./docs/integrations.md).
+For account types and product roles, see [access permissions](./docs/access.md).
 
 ## Build From Source
 

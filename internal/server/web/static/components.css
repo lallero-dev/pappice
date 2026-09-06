@@ -148,6 +148,12 @@ button:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.field-help {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .check {
   align-items: center;
   color: #1f2933;

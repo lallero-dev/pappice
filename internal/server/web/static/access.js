@@ -57,7 +57,16 @@ export function canCreateTicket(productId = state.ticketProductId) {
 }
 
 export function canCommentTicket(ticket = null) {
+  return canReplyToTicket(ticket) || canAddInternalNote(ticket);
+}
+
+export function canReplyToTicket(ticket = null) {
   return Boolean(ticket?.product_id) && canCreateTicket(ticket.product_id);
+}
+
+export function canAddInternalNote(ticket = null) {
+  return Boolean(ticket?.product_id) && !isCustomer() &&
+    (isAdmin() || ["manager", "staff", "internal_contributor"].includes(productRole(ticket.product_id)));
 }
 
 export function canEditTicket(ticket = null) {

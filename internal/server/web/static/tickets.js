@@ -3,7 +3,7 @@ import { attachmentList, bindAttachmentDropZone, bindAttachmentPasteZone, select
 import { badge, debounce, el, labelize, relativeTime } from "./components.js";
 import { richTextNodes } from "./rich-text.js";
 import { DEFAULT_TICKET_STATUSES, TICKET_AUTOSAVE_DELAY_MS, TICKET_PAGE_SIZE, TICKET_REFRESH_INTERVAL_MS, TICKET_SORT_LABELS, els, fullDateFormatter, state } from "./state.js";
-import { accountLabel, accountName, canAccessProductsView, canCommentTicket, canCreateTicket, canEditTicket, canUseAssigneeFilter, currentProduct, isAdmin, isCustomer, productDisplayName } from "./access.js";
+import { accountLabel, accountName, canAccessProductsView, canAddInternalNote, canCommentTicket, canCreateTicket, canEditTicket, canReplyToTicket, canUseAssigneeFilter, currentProduct, isAdmin, isCustomer, productDisplayName } from "./access.js";
 import { confirmAction, emptyState, selectOptions, showAppAlert, showError, sideSection } from "./ui.js";
 
 let app = {};
@@ -1113,14 +1113,10 @@ function confirmTicketStatusChange(ticket, status, stacked) {
 }
 
 async function confirmTicketComment(ticket, composer) {
-  const data = {
-    body: composer.querySelector("[name='body']")?.value || "",
-    visibility: composer.querySelector("[name='visibility']")?.value || "public"
-  };
-  const comment = ticketCommentPayload(ticket, data);
+  const comment = commentInput(composer);
   const files = selectedFiles(composer);
-  if (!comment && files.length === 0) return false;
-  const internal = String(data.visibility || "public") === "internal";
+  if (!comment.body && files.length === 0) return false;
+  const internal = comment.visibility === "internal";
   return confirmAction({
     title: internal ? "Save this internal note?" : "Send this reply?",
     body: internal
@@ -1177,12 +1173,10 @@ function ticketUpdatePatch(ticket, data) {
   return patch;
 }
 
-function ticketCommentPayload(ticket, data) {
-  const body = String(data.body || "").trim();
-  if (!body) return null;
+function commentInput(composer) {
   return {
-    body,
-    visibility: canEditTicket(ticket) ? String(data.visibility || "public") : "public"
+    body: (composer.querySelector("[name='body']")?.value || "").trim(),
+    visibility: composer.querySelector("[name='visibility']")?.value || "public"
   };
 }
 
@@ -1380,17 +1374,13 @@ function bindCommentResize(composer, body) {
 }
 
 async function sendTicketComment(ticket, composer) {
-  const data = {
-    body: composer.querySelector("[name='body']")?.value || "",
-    visibility: composer.querySelector("[name='visibility']")?.value || "public"
-  };
-  const comment = ticketCommentPayload(ticket, data);
+  const comment = commentInput(composer);
   const files = selectedFiles(composer);
-  if (!comment && files.length === 0) return;
+  if (!comment.body && files.length === 0) return;
   if (files.length > 0) {
     const body = new FormData();
-    body.append("body", comment?.body || "");
-    body.append("visibility", comment?.visibility || String(data.visibility || "public"));
+    body.append("body", comment.body);
+    body.append("visibility", comment.visibility);
     for (const file of files) body.append("attachments", file);
     await request(`/api/tickets/${ticket.id}/comments`, { method: "POST", body });
   } else {
@@ -1650,29 +1640,36 @@ function isCurrentUserMessage(ticket, entry) {
 function commentComposer(ticket) {
   const wrap = el("div", { className: "comment-form" });
   const draft = commentDraft(ticket);
+  const canReply = canReplyToTicket(ticket);
+  const canNote = canAddInternalNote(ticket);
+  const internalOnly = canNote && !canReply;
   const body = document.createElement("textarea");
   body.name = "body";
   body.rows = 4;
   body.className = "comment-input";
   body.dataset.ticketControl = "true";
-  body.placeholder = "Write a reply";
+  body.placeholder = internalOnly ? "Write an internal note" : "Write a reply";
   body.value = draft?.body || "";
   const send = el("button", {
-    className: "comment-send-button",
+    className: internalOnly ? "comment-send-button comment-note-button" : "comment-send-button",
     type: "submit",
-    "aria-label": "Send reply",
+    "aria-label": internalOnly ? "Add note" : "Send reply",
     "data-comment-send": "true"
-  }, el("span", { className: "send-icon", "aria-hidden": "true" }));
-  const visibility = document.createElement("select");
+  }, internalOnly ? "Add note" : el("span", { className: "send-icon", "aria-hidden": "true" }));
+  const visibility = document.createElement(canReply && canNote ? "select" : "input");
   visibility.name = "visibility";
   visibility.dataset.ticketControl = "true";
   visibility.setAttribute("aria-label", "Reply visibility");
-  visibility.append(new Option("Public reply", "public"), new Option("Internal note", "internal"));
-  visibility.value = draft?.visibility || "public";
   const attachments = ticketAttachmentField("Attachments", "attachments");
   const actions = [send];
-  if (canEditTicket(ticket)) {
+  if (canReply && canNote) {
+    visibility.append(new Option("Public reply", "public"), new Option("Internal note", "internal"));
+    visibility.value = draft?.visibility || "public";
     actions.unshift(commentVisibilityControl(visibility));
+  } else {
+    visibility.type = "hidden";
+    visibility.value = internalOnly ? "internal" : "public";
+    wrap.append(visibility);
   }
   const footer = el("div", { className: "comment-footer" }, [
     attachments,
@@ -1686,7 +1683,14 @@ function commentComposer(ticket) {
     "aria-orientation": "horizontal",
     "data-comment-resize": "true"
   });
-  wrap.append(resizeBar, body, footer);
+  wrap.append(resizeBar);
+  if (internalOnly) {
+    wrap.append(el("div", { className: "comment-audience" }, [
+      el("span", { className: "message-flag internal-flag" }, "Internal note"),
+      el("span", {}, "Only staff can see this")
+    ]));
+  }
+  wrap.append(body, footer);
   const attachmentInput = attachments.querySelector(".attachment-input");
   if (attachmentInput) {
     if (draft?.files?.length) setAttachmentFiles(attachmentInput, draft.files);

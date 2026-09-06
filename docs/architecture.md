@@ -151,6 +151,14 @@ must use HTTPS, `Content-Type: application/json`, and a matching `Origin` or
 API automation uses bearer tokens. Browser-only operations, such as password
 change, must reject API-token auth.
 
+Account types set global privileges; product roles apply within memberships.
+Admin accounts have full product access, while Customer accounts retain their
+own-ticket and public-conversation restrictions. The `internal_contributor`
+product role lets Staff accounts read and add internal notes without public
+replies or ticket edits. Ticket access checks keep internal-note access separate
+from editing, including attachment downloads and unread counts. Browser and API
+requests use the same server checks. See [access permissions](./access.md).
+
 Passwords are stored as encoded PBKDF2-SHA256 hashes. New hashes use the current
 work factor from `internal/security`; older valid hashes may be accepted and
 opportunistically upgraded after successful login.
