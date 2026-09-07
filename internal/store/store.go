@@ -756,7 +756,9 @@ func normalizeProductRole(role string) string {
 	return strings.TrimSpace(role)
 }
 
-func normalizeEmail(value string) (string, error) {
+// NormalizeEmail returns the lowercase mailbox address used for account lookup.
+// An empty value is allowed; display names and comments are discarded.
+func NormalizeEmail(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
@@ -769,7 +771,7 @@ func normalizeEmail(value string) (string, error) {
 }
 
 func normalizeRequiredEmail(value string) (string, error) {
-	email, err := normalizeEmail(value)
+	email, err := NormalizeEmail(value)
 	if err != nil {
 		return "", err
 	}

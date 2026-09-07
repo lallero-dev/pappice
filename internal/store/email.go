@@ -125,7 +125,7 @@ func enqueueEmailNotificationsTx(tx *sql.Tx, inputs []CreateEmailNotification, n
 			recipientEmail = recipient.Email
 			recipientName = recipient.DisplayName
 		}
-		email, err := normalizeEmail(recipientEmail)
+		email, err := NormalizeEmail(recipientEmail)
 		if err != nil {
 			return nil, err
 		}

@@ -86,7 +86,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	limitKey := "login|" + s.clientIP(r) + "|" + strings.ToLower(strings.TrimSpace(input.Email))
+	email, err := store.NormalizeEmail(input.Email)
+	if err != nil {
+		// Invalid addresses still count toward the attempt limit.
+		email = strings.ToLower(strings.TrimSpace(input.Email))
+	}
+	limitKey := "login|" + s.clientIP(r) + "|" + email
 	if !s.loginLimiter.Allow(limitKey, time.Now().UTC()) {
 		respondRateLimited(w)
 		return

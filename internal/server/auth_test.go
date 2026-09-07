@@ -8,6 +8,52 @@ import (
 	"pappice/internal/store"
 )
 
+func TestLoginRateLimitSharesEmailVariants(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		email string
+	}{
+		{"case and whitespace", "  ADMIN@EXAMPLE.TEST  "},
+		{"display name", "Alias <admin@example.test>"},
+		{"quoted display name", `"Another Alias" <admin@example.test>`},
+		{"angle brackets", "<admin@example.test>"},
+		{"quoted local part", `"admin"@example.test`},
+		{"comment", "admin@example.test (Alias)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tracker, server, client := newTestServer(t, Options{
+				LoginRateLimit: RateLimit{Limit: 2, Window: time.Minute},
+			})
+			user, err := tracker.CreateFirstAdmin(store.CreateUser{
+				Email: "admin@example.test", Password: "correct horse",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			login := func(email, password string, status int) {
+				t.Helper()
+				resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/login", map[string]any{
+					"email": email, "password": password,
+				}, nil, "", server.URL)
+				requireStatus(t, resp, body, status)
+				if status == http.StatusOK && decodeNestedInt64(t, body, "user", "id") != user.ID {
+					t.Fatalf("email variant authenticated a different user: %s", body)
+				}
+			}
+
+			// A successful login through an equivalent address clears the shared bucket.
+			login(user.Email, "wrong password", http.StatusUnauthorized)
+			login(test.email, "correct horse", http.StatusOK)
+
+			// Alternating representations still consumes one account's attempt limit.
+			login(test.email, "wrong password", http.StatusUnauthorized)
+			login(user.Email, "wrong password", http.StatusUnauthorized)
+			login(test.email, "wrong password", http.StatusTooManyRequests)
+			login(user.Email, "correct horse", http.StatusTooManyRequests)
+		})
+	}
+}
+
 func TestSessionRequestsRequireSameOriginJSON(t *testing.T) {
 	for _, endpoint := range []string{"setup", "login", "account link"} {
 		t.Run(endpoint, func(t *testing.T) {
