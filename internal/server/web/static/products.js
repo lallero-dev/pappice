@@ -209,9 +209,7 @@ function renderMembers() {
   if (state.members.length === 0) {
     els.memberList.append(emptyInline({
       title: "No product members",
-      body: "Add staff and customers who should access this product.",
-      actionLabel: "Add Member",
-      onAction: openMemberModal
+      body: "Add staff and customers who should access this product."
     }));
     return;
   }
