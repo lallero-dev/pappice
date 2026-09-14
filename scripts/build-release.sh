@@ -47,10 +47,10 @@ CGO_ENABLED="${CGO_ENABLED:-0}" GOOS="$target_os" GOARCH="$target_arch" go build
   ./cmd/pappice
 
 install -m 0755 "$binary" "$package_dir/$package_binary"
-install -m 0644 VERSION LICENSE README.md CHANGELOG.md "$package_dir/"
+install -m 0644 VERSION LICENSE README.md CHANGELOG.md SECURITY.md "$package_dir/"
 install -m 0644 .env.example "$package_dir/.env.example"
 mkdir -p "$package_dir/deploy/env" "$package_dir/deploy/nginx" "$package_dir/deploy/systemd" "$package_dir/docs"
-install -m 0644 docs/architecture.md "$package_dir/docs/architecture.md"
+install -m 0644 docs/*.md "$package_dir/docs/"
 install -m 0644 deploy/README.md "$package_dir/deploy/README.md"
 install -m 0644 deploy/env/pappice.env.example "$package_dir/deploy/env/pappice.env.example"
 install -m 0644 deploy/nginx/pappice.conf.example "$package_dir/deploy/nginx/pappice.conf.example"

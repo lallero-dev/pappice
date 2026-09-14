@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.15.0 - 2026-09-14
+
+- Add the Internal contributor product role for staff who can read and add
+  internal notes without sending public replies or editing tickets.
+- Support idempotency keys for ticket updates and comments, and stable webhook
+  delivery IDs so integrations can safely deduplicate retries.
+- Run webhook delivery independently of event projection, and bound SMTP sends
+  with timeouts and context cancellation.
+- Reject cross-site session creation requests and apply login rate limits
+  consistently across equivalent email address formats.
+- Keep concurrent attachment uploads independent during cleanup, and roll back
+  failed restores while preserving originals beside their destinations.
+- Show storage usage in maintenance, fix mobile settings scrolling, and remove
+  the duplicate Add Member action from an empty product member list.
+- Include access permissions, integration guidance, and the security policy in
+  release archives.
+
+Upgrading from v0.14.0 requires schema migration 8. Back up the database and
+uploads, stop Pappice, then use the updated binary with the existing storage
+configuration to run `pappice db migrate --dry-run` and `pappice db migrate`
+before restarting. The migration adds webhook delivery IDs and the ticket
+idempotency-key table; it preserves queued notifications and their states.
+
 ## v0.14.0 - 2026-08-15
 
 - Simplify tickets to open and closed states, with public replies reopening
