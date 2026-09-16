@@ -56,8 +56,6 @@ install -m 0644 deploy/systemd/pappice.env.example "$package_dir/deploy/systemd/
 install -m 0644 deploy/docker/compose.yaml deploy/docker/pappice.env.example "$package_dir/deploy/docker/"
 install -m 0644 deploy/nginx/pappice.conf.example "$package_dir/deploy/nginx/"
 install -m 0644 deploy/systemd/pappice.service "$package_dir/deploy/systemd/pappice.service"
-install -m 0644 deploy/systemd/pappice-backup.service "$package_dir/deploy/systemd/pappice-backup.service"
-install -m 0644 deploy/systemd/pappice-backup.timer "$package_dir/deploy/systemd/pappice-backup.timer"
 
 tar -C "$dist_dir" -czf "$archive" "$archive_root"
 (cd "$dist_dir" && sha256_file "$(basename "$archive")" > "$(basename "$checksum")")

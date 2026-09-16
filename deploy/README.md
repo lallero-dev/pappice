@@ -78,16 +78,13 @@ sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice
 sudo install -o root -g pappice -m 0640 deploy/systemd/pappice.env.example /etc/pappice/pappice.env
 sudo sed -i "s/support.example.com/$PAPPICE_DOMAIN/g" /etc/pappice/pappice.env
 sudo install -o root -g root -m 0644 deploy/systemd/pappice.service /etc/systemd/system/pappice.service
-sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.service /etc/systemd/system/pappice-backup.service
-sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.timer /etc/systemd/system/pappice-backup.timer
 ```
 
-Complete [HTTPS](#https), then start Pappice and daily backups:
+Complete [HTTPS](#https), then start Pappice:
 
 ```sh
 sudo systemctl daemon-reload
 sudo systemctl enable --now pappice.service
-sudo systemctl enable --now pappice-backup.timer
 ```
 
 Open `https://$PAPPICE_DOMAIN` and create the first admin account.
@@ -138,7 +135,8 @@ the service address. Keep Pappice's port private when trusting proxy headers.
 
 ## Operations
 
-Back up SQLite and uploads together; copy backups off-host.
+Back up SQLite and uploads together; manage scheduling, retention, and off-host
+copies with your own tooling.
 After env changes, run `doctor`, then restart/recreate as shown below.
 
 ### Docker operations
@@ -154,8 +152,7 @@ docker compose -f deploy/docker/compose.yaml run --rm pappice db status
 docker compose -f deploy/docker/compose.yaml run --rm pappice backup
 ```
 
-Schedule the backup command; Compose does not schedule it. Backups are in
-`pappice-backups`; host snapshots must include both volumes.
+Backups are in `pappice-backups`; host snapshots must include both volumes.
 Apply env changes with `docker compose -f deploy/docker/compose.yaml up -d`.
 
 ### systemd operations
@@ -167,11 +164,10 @@ sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /v
 sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice healthcheck'
 systemctl status pappice.service
 journalctl -u pappice.service -f
-sudo systemctl start pappice-backup.service
-sudo journalctl -u pappice-backup.service -n 50
+sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice backup'
 ```
 
-The timer backs up to `/var/backups/pappice` around 03:15 daily.
+Backups are in `/var/backups/pappice`.
 Apply env changes by restarting `pappice.service`.
 
 ## Upgrade
@@ -207,10 +203,13 @@ allow enough free disk space.
 
 ### systemd upgrade
 
+If previously installed, retire the bundled schedule with
+`sudo systemctl disable --now pappice-backup.timer`; use your own scheduler.
+
 Repeat [Download a release](#download-a-release). From the newly extracted directory:
 
 ```sh
-sudo systemctl start pappice-backup.service &&
+sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice backup' &&
 sudo systemctl stop pappice.service &&
 sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice &&
 sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice db migrate --dry-run' &&

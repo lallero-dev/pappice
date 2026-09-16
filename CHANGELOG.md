@@ -7,6 +7,8 @@
   and complete deployment documentation in release archives.
 - Make Docker's temporary filesystem writable by the application user and use
   the data volume for migration dry runs.
+- Remove the bundled backup service and daily timer; scheduling is operator-managed.
+  Keep the backup/restore CLI and document direct backups before upgrades.
 
 ## v0.15.0 - 2026-09-14
 
