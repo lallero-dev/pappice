@@ -63,12 +63,9 @@ release; existing installations can require an explicit database migration.
 
 ## Install And Operate
 
-For a persistent server, use the [production deployment guide](./deploy/README.md)
-for nginx and systemd or the [Docker Compose guide](./deploy/docker/README.md).
-They cover configuration, backups, restore, migrations, and upgrades. Release
-archives include the `pappice` binary and the referenced deployment templates.
-
-The complete configuration reference is [.env.example](./.env.example).
+Start with [Install Pappice](./deploy/README.md). **Docker Compose is recommended**;
+binary + systemd is also supported. The guide covers HTTPS, backups, restore,
+and upgrades. See [configuration](./docs/configuration.md) for optional settings.
 
 For automation, see [API replies and webhook retries](./docs/integrations.md).
 For account types and product roles, see [access permissions](./docs/access.md).

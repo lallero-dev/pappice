@@ -17,7 +17,7 @@ services:
     ports:
       - "127.0.0.1:8388:8388"
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     volumes:
       - pappice-data:/data
       - pappice-backups:/backups

@@ -1,103 +1,88 @@
-# Production Deploy
+# Install Pappice
 
-This is the reference deployment for Debian or Ubuntu using nginx for public
-HTTPS and systemd for the Pappice process. Pappice listens on local HTTP at
-`127.0.0.1:8388`; nginx terminates public HTTPS and forwards
-`X-Forwarded-Proto: https`. `PAPPICE_TRUST_PROXY_HEADERS=true` is enabled in the
-production environment template, so do not expose the Pappice listener directly
-to the public internet.
+Choose **[Docker Compose](#docker-compose) (recommended)** or
+[binary + systemd](#binary-and-systemd). Both require HTTPS for browser login.
+Published binaries target **linux/amd64** and **linux/arm64**, with checksums.
 
-Before starting, point the chosen hostname at the server and obtain a TLS
-certificate. The nginx template expects the certificate and key at
-`/etc/letsencrypt/live/<hostname>/fullchain.pem` and `privkey.pem`; edit the
-template if your ACME client stores them elsewhere.
+[HTTPS](#https) · [Operations](#operations) · [Upgrade](#upgrade) · [Restore](#restore) · [Configuration](../docs/configuration.md)
 
-## Files
+## Docker Compose
 
-- `deploy/env/pappice.env.example`: production environment template.
-- `deploy/nginx/pappice.conf.example`: nginx site template.
-- `deploy/systemd/pappice.service`: application service.
-- `deploy/systemd/pappice-backup.service`: one-shot `pappice backup` service.
-- `deploy/systemd/pappice-backup.timer`: daily backup timer.
-
-## First Install
-
-Choose the hostname and resolve the latest release tag:
+Requires Linux, Docker Engine, Compose, Git, and curl. Verify `docker compose version`
+and `docker info` work. Docker builds locally; no host Go or Node.js needed.
+Clone release source; the binary archive cannot build the image:
 
 ```sh
-DOMAIN=support.example.com
-LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
-VERSION="${LATEST_URL##*/}"
-case "$(uname -m)" in
-  x86_64|amd64) PAPPICE_ARCH=amd64 ;;
-  aarch64|arm64) PAPPICE_ARCH=arm64 ;;
-  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
-esac
-ARCHIVE=pappice-${VERSION}-linux-${PAPPICE_ARCH}.tar.gz
-BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
+PAPPICE_LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
+PAPPICE_VERSION="${PAPPICE_LATEST_URL##*/}"
+git clone --depth 1 --branch "$PAPPICE_VERSION" https://github.com/lallero-dev/pappice.git pappice
+cd pappice
+cp deploy/docker/pappice.env.example deploy/docker/pappice.env
+chmod 600 deploy/docker/pappice.env
 ```
 
-Install OS packages:
+Set `PAPPICE_PUBLIC_URL` in the env file. Complete [HTTPS](#https), then start
+from the repository root:
+
+```sh
+docker compose -f deploy/docker/compose.yaml up --build -d
+```
+
+Open your public HTTPS URL and create the first admin account.
+Compose runs as UID/GID `10001` and writes only to `/data`, `/backups`, and `/tmp`.
+Rename `pappice-data` and `pappice-backups` volumes for additional instances.
+
+## Binary and systemd
+
+Requires Debian/Ubuntu and sudo; no Go, Node.js, or Docker needed.
+
+### Download a release
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl nginx
+sudo apt-get install -y ca-certificates curl
 ```
 
-Download and unpack the release archive:
+Download the latest release, or set `PAPPICE_VERSION` to a specific tag:
 
 ```sh
-curl -fLO "${BASE_URL}/${ARCHIVE}"
-curl -fLO "${BASE_URL}/${ARCHIVE}.sha256"
-sha256sum -c "${ARCHIVE}.sha256"
-rm -rf pappice-release
-mkdir pappice-release
-tar -xzf "$ARCHIVE" -C pappice-release --strip-components=1
-cd pappice-release
+PAPPICE_LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
+PAPPICE_VERSION="${PAPPICE_LATEST_URL##*/}"
+case "$(uname -m)" in
+  x86_64|amd64) PAPPICE_ARCH=amd64 ;;
+  aarch64|arm64) PAPPICE_ARCH=arm64 ;;
+  *) echo "No release binary for this architecture" >&2; exit 1 ;;
+esac
+PAPPICE_ARCHIVE=pappice-${PAPPICE_VERSION}-linux-${PAPPICE_ARCH}.tar.gz
+PAPPICE_BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${PAPPICE_VERSION}
+PAPPICE_RELEASE_DIR="$(mktemp -d)"
+cd "$PAPPICE_RELEASE_DIR"
+curl -fLO "${PAPPICE_BASE_URL}/${PAPPICE_ARCHIVE}" &&
+curl -fLO "${PAPPICE_BASE_URL}/${PAPPICE_ARCHIVE}.sha256" &&
+sha256sum -c "${PAPPICE_ARCHIVE}.sha256" &&
+tar -xzf "$PAPPICE_ARCHIVE" --strip-components=1
 ```
 
-Create the service account and directories:
+Continue from this directory after checksum `OK`.
+
+### Install the service
+
+Set your hostname and install:
 
 ```sh
+PAPPICE_DOMAIN=support.example.com
 sudo useradd --system --home /var/lib/pappice --shell /usr/sbin/nologin pappice
 sudo install -d -o pappice -g pappice -m 0750 /var/lib/pappice /var/lib/pappice/uploads /var/backups/pappice
 sudo install -d -o root -g pappice -m 0750 /etc/pappice
-```
-
-Install the binary:
-
-```sh
 sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice
-```
-
-Install deploy assets:
-
-```sh
-sudo install -o root -g pappice -m 0640 deploy/env/pappice.env.example /etc/pappice/pappice.env
-sudo sed -i "s/support.example.com/$DOMAIN/g" /etc/pappice/pappice.env
+sudo install -o root -g pappice -m 0640 deploy/systemd/pappice.env.example /etc/pappice/pappice.env
+sudo sed -i "s/support.example.com/$PAPPICE_DOMAIN/g" /etc/pappice/pappice.env
 sudo install -o root -g root -m 0644 deploy/systemd/pappice.service /etc/systemd/system/pappice.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.service /etc/systemd/system/pappice-backup.service
 sudo install -o root -g root -m 0644 deploy/systemd/pappice-backup.timer /etc/systemd/system/pappice-backup.timer
 ```
 
-Edit `/etc/pappice/pappice.env` before starting. Set branding and SMTP values
-now if you have them; otherwise leave `PAPPICE_EMAIL_NOTIFICATIONS=false` and
-enable email later from a known-good SMTP configuration. Keep
-`PAPPICE_TRUST_PROXY_HEADERS=true` only when nginx is the only public entry
-point. Keep `PAPPICE_ALLOW_INSECURE_WEBHOOKS=false` and
-`PAPPICE_ALLOW_PRIVATE_WEBHOOKS=false` in production.
-
-Install the nginx site after the certificate files described above exist:
-
-```sh
-sudo install -o root -g root -m 0644 deploy/nginx/pappice.conf.example /etc/nginx/sites-available/pappice.conf
-sudo sed -i "s/support.example.com/$DOMAIN/g" /etc/nginx/sites-available/pappice.conf
-sudo ln -sf /etc/nginx/sites-available/pappice.conf /etc/nginx/sites-enabled/pappice.conf
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-Start Pappice and backups:
+Complete [HTTPS](#https), then start Pappice and daily backups:
 
 ```sh
 sudo systemctl daemon-reload
@@ -105,99 +90,152 @@ sudo systemctl enable --now pappice.service
 sudo systemctl enable --now pappice-backup.timer
 ```
 
-Open `https://$DOMAIN` and create the first admin account.
+Open `https://$PAPPICE_DOMAIN` and create the first admin account.
 
-## Configuration
+## HTTPS
 
-`deploy/env/pappice.env.example` is the complete production template. Every
-runtime setting is also available as a command-line flag; process environment
-variables override values loaded from an environment file. Run `pappice doctor`
-after changing configuration.
+Point DNS at your server, allow ports 80/443, and match `PAPPICE_PUBLIC_URL`.
+Both methods expose host `127.0.0.1:8388`.
 
-Branding is configured with the `PAPPICE_BRAND_*` values. Attachments are stored
-under `PAPPICE_UPLOAD_DIR`; SQLite stores their metadata, so the database and
-upload directory must be backed up and restored together.
+### nginx on Debian or Ubuntu
 
-Pappice sends no-reply email and never processes inbound replies. SMTP delivery
-is optional and uses the durable SQLite outbox. Email and webhook updates wait
-for `PAPPICE_NOTIFICATION_DELAY`, and pending updates for one ticket are
-coalesced.
-
-API automation uses bearer tokens. Webhook deliveries are signed with
-`X-Pappice-Signature`; secrets are shown once after creation or rotation.
-Webhook URLs must be public HTTPS unless the development-only escape hatches are
-explicitly enabled.
-
-## Checks
+From the extracted release (binary) or repository root (Docker):
 
 ```sh
-sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice doctor'
-systemctl status pappice.service
-journalctl -u pappice.service -f
+PAPPICE_DOMAIN=support.example.com
+sudo apt-get update
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+sudo systemctl enable --now nginx
+sudo certbot certonly --nginx -d "$PAPPICE_DOMAIN" --deploy-hook "systemctl reload nginx"
 ```
 
-From the admin UI:
-
-- Send a test email if SMTP is enabled.
-- Create a product.
-- Create a test customer.
-- Create and reply to a test ticket.
-- Run one manual backup:
+Follow Certbot's prompts, then install the site:
 
 ```sh
+sudo install -o root -g root -m 0644 deploy/nginx/pappice.conf.example /etc/nginx/sites-available/pappice.conf
+sudo sed -i "s/support.example.com/$PAPPICE_DOMAIN/g" /etc/nginx/sites-available/pappice.conf
+sudo ln -sf /etc/nginx/sites-available/pappice.conf /etc/nginx/sites-enabled/pappice.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+For existing certificates, change the template's paths.
+Ensure Certbot renewal is scheduled; test with `sudo certbot renew --dry-run`.
+The [deploy hook](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates) reloads nginx after renewal.
+Optional HTTP/2 requires [nginx 1.25.1+](https://nginx.org/en/docs/http/ngx_http_v2_module.html#http2).
+Return to your method's startup commands; until Pappice starts, expect 502.
+
+### Existing reverse proxy
+
+Configure your proxy to:
+
+- Terminate HTTPS and forward to `http://127.0.0.1:8388`.
+- Set `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto: https`.
+- Replace client-supplied `X-Real-IP` with the actual client address.
+- Allow attachment requests up to 64 MiB, as in the nginx template.
+
+For a proxy in Docker, connect it to Pappice's private Docker network and use
+the service address. Keep Pappice's port private when trusting proxy headers.
+
+## Operations
+
+Back up SQLite and uploads together; copy backups off-host.
+After env changes, run `doctor`, then restart/recreate as shown below.
+
+### Docker operations
+
+From the repository root:
+
+```sh
+docker compose -f deploy/docker/compose.yaml ps
+docker compose -f deploy/docker/compose.yaml logs -f pappice
+docker compose -f deploy/docker/compose.yaml run --rm pappice doctor
+docker compose -f deploy/docker/compose.yaml exec pappice /pappice healthcheck
+docker compose -f deploy/docker/compose.yaml run --rm pappice db status
+docker compose -f deploy/docker/compose.yaml run --rm pappice backup
+```
+
+Schedule the backup command; Compose does not schedule it. Backups are in
+`pappice-backups`; host snapshots must include both volumes.
+Apply env changes with `docker compose -f deploy/docker/compose.yaml up -d`.
+
+### systemd operations
+
+Load the service's env file and working directory for manual commands:
+
+```sh
+sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice doctor'
+sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice healthcheck'
+systemctl status pappice.service
+journalctl -u pappice.service -f
 sudo systemctl start pappice-backup.service
 sudo journalctl -u pappice-backup.service -n 50
 ```
 
+The timer backs up to `/var/backups/pappice` around 03:15 daily.
+Apply env changes by restarting `pappice.service`.
+
 ## Upgrade
 
+Read release notes, back up with the current version, and keep your env file and data.
+If migration fails, keep Pappice stopped and inspect the error.
+The systemd template moved to `deploy/systemd/`; the installed path remains
+`/etc/pappice/pappice.env`. Docker volume names are unchanged.
+
+### Docker upgrade
+
+Fetch the latest release and rebuild, or set `PAPPICE_VERSION` to a specific tag:
+
 ```sh
-LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
-VERSION="${LATEST_URL##*/}"
-case "$(uname -m)" in
-  x86_64|amd64) PAPPICE_ARCH=amd64 ;;
-  aarch64|arm64) PAPPICE_ARCH=arm64 ;;
-  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
-esac
-ARCHIVE=pappice-${VERSION}-linux-${PAPPICE_ARCH}.tar.gz
-BASE_URL=https://github.com/lallero-dev/pappice/releases/download/${VERSION}
-curl -fLO "${BASE_URL}/${ARCHIVE}"
-curl -fLO "${BASE_URL}/${ARCHIVE}.sha256"
-sha256sum -c "${ARCHIVE}.sha256"
-rm -rf pappice-release
-mkdir pappice-release
-tar -xzf "$ARCHIVE" -C pappice-release --strip-components=1
-cd pappice-release
-sudo systemctl start pappice-backup.service
-sudo systemctl stop pappice.service
-sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice
-sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice db status'
-sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice db migrate --dry-run'
-sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice db migrate'
+PAPPICE_LATEST_URL="$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/lallero-dev/pappice/releases/latest)"
+PAPPICE_VERSION="${PAPPICE_LATEST_URL##*/}"
+git fetch --depth 1 origin "refs/tags/$PAPPICE_VERSION:refs/tags/$PAPPICE_VERSION" &&
+git switch --detach "$PAPPICE_VERSION" &&
+docker compose -f deploy/docker/compose.yaml build --pull
+```
+
+Stop, migrate, and restart:
+
+```sh
+docker compose -f deploy/docker/compose.yaml stop pappice &&
+docker compose -f deploy/docker/compose.yaml run --rm -e TMPDIR=/data pappice db migrate --dry-run &&
+docker compose -f deploy/docker/compose.yaml run --rm -e TMPDIR=/data pappice db migrate &&
+docker compose -f deploy/docker/compose.yaml up -d
+```
+
+`TMPDIR=/data` lets dry-run database copies exceed the 64 MiB `/tmp` limit;
+allow enough free disk space.
+
+### systemd upgrade
+
+Repeat [Download a release](#download-a-release). From the newly extracted directory:
+
+```sh
+sudo systemctl start pappice-backup.service &&
+sudo systemctl stop pappice.service &&
+sudo install -o root -g root -m 0755 pappice /usr/local/bin/pappice &&
+sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice db migrate --dry-run' &&
+sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice db migrate' &&
 sudo systemctl start pappice.service
 ```
 
-Restore prints the recovery directories containing the previous database files
-and uploads. These directories sit beside their respective destinations, so
-restoring also works when the backup directory is on another filesystem.
-
-## Build From Source
-
-Maintainers can create a release archive from a source checkout with:
-
-```sh
-scripts/build-release.sh
-```
-
-Set `GOOS` and `GOARCH` to build another target, for example
-`GOOS=linux GOARCH=arm64 scripts/build-release.sh`.
-
 ## Restore
 
-Stop Pappice before restoring:
+Restore prints recovery directories containing the previous database and uploads,
+saved beside their destinations (`pappice-data` for Docker). Older backups may
+need a compatible version or migration before startup.
+
+### Docker restore
 
 ```sh
-sudo systemctl stop pappice.service
-sudo -u pappice bash -lc 'set -a; source /etc/pappice/pappice.env; set +a; /usr/local/bin/pappice restore -yes latest'
+docker compose -f deploy/docker/compose.yaml stop pappice &&
+docker compose -f deploy/docker/compose.yaml run --rm pappice restore -yes latest &&
+docker compose -f deploy/docker/compose.yaml up -d
+```
+
+### systemd restore
+
+```sh
+sudo systemctl stop pappice.service &&
+sudo -u pappice bash -ec 'set -a; source /etc/pappice/pappice.env; set +a; cd /var/lib/pappice; /usr/local/bin/pappice restore -yes latest' &&
 sudo systemctl start pappice.service
 ```

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Consolidate Docker Compose (recommended) and binary/systemd deployment into
+  one guide and a configuration reference, with small environment templates
+  and complete deployment documentation in release archives.
+- Make Docker's temporary filesystem writable by the application user and use
+  the data volume for migration dry runs.
+
 ## v0.15.0 - 2026-09-14
 
 - Add the Internal contributor product role for staff who can read and add
