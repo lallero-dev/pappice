@@ -2,12 +2,12 @@
 
 ## Unreleased
 
-- Move the native demo out of the production binary. Run `npm run demo:native`
-  or `go run ./demo/native` from a source checkout instead of `pappice demo`.
+## v0.16.0 - 2026-09-17
 
 - Add an experimental static browser demo running the Go backend and SQLite in
   WebAssembly, with private per-tab data and reset on reload.
-
+- Move the native demo out of the production binary. Run `go run ./demo/native`
+  or `npm run demo:native` from a source checkout instead of `pappice demo`.
 - Consolidate Docker Compose and binary/systemd deployment into
   one guide and a configuration reference, with small environment templates
   and complete deployment documentation in release archives.
@@ -15,6 +15,9 @@
   the data volume for migration dry runs.
 - Remove the bundled backup service and daily timer; scheduling is operator-managed.
   Keep the backup/restore CLI and document direct backups before upgrades.
+- Update the logo and simplify the README and reference documentation.
+
+No database migration is required when upgrading from v0.15.0.
 
 Existing systemd installations: disable the retired backup timer with
 `sudo systemctl disable --now pappice-backup.timer` and manage scheduling externally.
