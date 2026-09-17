@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"pappice/internal/app"
 	backupops "pappice/internal/backup"
 )
 
@@ -66,8 +67,8 @@ func runRestore(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func parseStorageConfig(name string, args []string, output io.Writer) (appConfig, int, bool) {
-	cfg := defaultAppConfig()
+func parseStorageConfig(name string, args []string, output io.Writer) (app.Config, int, bool) {
+	cfg := app.DefaultConfig()
 	fs := storageFlagSet(name, &cfg, output)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -87,8 +88,8 @@ func parseStorageConfig(name string, args []string, output io.Writer) (appConfig
 	return cfg, 0, true
 }
 
-func parseRestoreConfig(args []string, output io.Writer) (appConfig, string, bool, int, bool) {
-	cfg := defaultAppConfig()
+func parseRestoreConfig(args []string, output io.Writer) (app.Config, string, bool, int, bool) {
+	cfg := app.DefaultConfig()
 	var assumeYes bool
 	fs := storageFlagSet("pappice restore", &cfg, output)
 	fs.Usage = func() {
@@ -120,7 +121,7 @@ func parseRestoreConfig(args []string, output io.Writer) (appConfig, string, boo
 	return cfg, target, assumeYes, 0, true
 }
 
-func storageFlagSet(name string, cfg *appConfig, output io.Writer) *flag.FlagSet {
+func storageFlagSet(name string, cfg *app.Config, output io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(output)
 	fs.Usage = func() {
@@ -133,7 +134,7 @@ func storageFlagSet(name string, cfg *appConfig, output io.Writer) *flag.FlagSet
 	return fs
 }
 
-func applyStorageEnv(cfg *appConfig, fs *flag.FlagSet) {
+func applyStorageEnv(cfg *app.Config, fs *flag.FlagSet) {
 	if !flagWasVisited(fs, "db") {
 		cfg.DBPath = envOr("PAPPICE_DB", cfg.DBPath)
 	}
@@ -145,7 +146,7 @@ func applyStorageEnv(cfg *appConfig, fs *flag.FlagSet) {
 	}
 }
 
-func confirmRestore(stdout io.Writer, backupPath string, cfg appConfig) bool {
+func confirmRestore(stdout io.Writer, backupPath string, cfg app.Config) bool {
 	fmt.Fprintln(stdout, "Stop Pappice before restoring. This will replace:")
 	fmt.Fprintf(stdout, "  DB:      %s\n", cfg.DBPath)
 	fmt.Fprintf(stdout, "  Uploads: %s\n", cfg.UploadDir)

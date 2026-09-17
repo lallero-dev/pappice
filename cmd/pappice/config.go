@@ -5,49 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"time"
 
-	"pappice/internal/notify"
-	"pappice/internal/server"
+	"pappice/internal/app"
 )
 
-type appConfig struct {
-	Addr                  string
-	DebugAddr             string
-	DBPath                string
-	TLSCert               string
-	TLSKey                string
-	TrustProxyHeaders     bool
-	AllowInsecureWebhooks bool
-	AllowPrivateWebhooks  bool
-	PublicURL             string
-	BrandName             string
-	BrandSubtitle         string
-	BrandMark             string
-	BrandColor            string
-	DomainEventRetention  time.Duration
-	EmailNotifications    bool
-	SMTPHost              string
-	SMTPPort              int
-	SMTPUser              string
-	SMTPPassword          string
-	SMTPFrom              string
-	SMTPTLSMode           string
-	NotificationDelay     time.Duration
-	SessionTTL            time.Duration
-	UploadDir             string
-	BackupDir             string
-	MaxUploadSize         int64
-	MaxUploadFiles        int
-	AllowedUploadTypes    string
-	LoginRateLimit        int
-	LoginRateWindow       time.Duration
-	AccountLinkRateLimit  int
-	AccountLinkRateWindow time.Duration
-}
-
-func parseRuntimeConfig(name string, args []string, output io.Writer) (appConfig, int, bool) {
-	cfg := defaultAppConfig()
+func parseRuntimeConfig(name string, args []string, output io.Writer) (app.Config, int, bool) {
+	cfg := app.DefaultConfig()
+	cfg.Version = version
 	fs := newConfigFlagSet(name, &cfg, output)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -67,26 +31,7 @@ func parseRuntimeConfig(name string, args []string, output io.Writer) (appConfig
 	return cfg, 0, true
 }
 
-func defaultAppConfig() appConfig {
-	return appConfig{
-		Addr:                  "127.0.0.1:8388",
-		DBPath:                "pappice.db",
-		SMTPTLSMode:           "starttls",
-		DomainEventRetention:  30 * 24 * time.Hour,
-		NotificationDelay:     30 * time.Second,
-		SessionTTL:            14 * 24 * time.Hour,
-		UploadDir:             "pappice-uploads",
-		BackupDir:             "pappice-backups",
-		MaxUploadSize:         10 << 20,
-		MaxUploadFiles:        5,
-		LoginRateLimit:        10,
-		LoginRateWindow:       time.Minute,
-		AccountLinkRateLimit:  10,
-		AccountLinkRateWindow: time.Minute,
-	}
-}
-
-func newConfigFlagSet(name string, cfg *appConfig, output io.Writer) *flag.FlagSet {
+func newConfigFlagSet(name string, cfg *app.Config, output io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(output)
 	fs.Usage = func() {
@@ -136,7 +81,7 @@ func visitedFlags(fs *flag.FlagSet) map[string]bool {
 	return visited
 }
 
-func applyEnv(cfg *appConfig, flags map[string]bool) {
+func applyEnv(cfg *app.Config, flags map[string]bool) {
 	if !flags["addr"] {
 		cfg.Addr = envOr("PAPPICE_ADDR", cfg.Addr)
 	}
@@ -232,58 +177,5 @@ func applyEnv(cfg *appConfig, flags map[string]bool) {
 	}
 	if !flags["account-link-rate-window"] {
 		cfg.AccountLinkRateWindow = envDuration("PAPPICE_ACCOUNT_LINK_RATE_WINDOW", cfg.AccountLinkRateWindow)
-	}
-}
-
-func (cfg appConfig) smtpConfig() notify.SMTPConfig {
-	return notify.SMTPConfig{
-		Host:     cfg.SMTPHost,
-		Port:     cfg.SMTPPort,
-		Username: cfg.SMTPUser,
-		Password: cfg.SMTPPassword,
-		From:     cfg.SMTPFrom,
-		TLSMode:  cfg.SMTPTLSMode,
-	}
-}
-
-func (cfg appConfig) emailEnabled() bool {
-	return cfg.EmailNotifications || cfg.smtpConfig().Enabled()
-}
-
-func (cfg appConfig) tlsEnabled() (bool, error) {
-	switch {
-	case cfg.TLSCert == "" && cfg.TLSKey == "":
-		return false, nil
-	case cfg.TLSCert == "" || cfg.TLSKey == "":
-		return false, errors.New("both -tls-cert and -tls-key are required for HTTPS")
-	default:
-		return true, nil
-	}
-}
-
-func (cfg appConfig) serverOptions(emailEnabled bool) server.Options {
-	return server.Options{
-		AllowInsecureWebhooks: cfg.AllowInsecureWebhooks,
-		AllowPrivateWebhooks:  cfg.AllowPrivateWebhooks,
-		TrustProxyHeaders:     cfg.TrustProxyHeaders,
-		Branding: server.Branding{
-			Name:     cfg.BrandName,
-			Subtitle: cfg.BrandSubtitle,
-			Mark:     cfg.BrandMark,
-			Color:    cfg.BrandColor,
-		},
-		DomainEventRetention: cfg.DomainEventRetention,
-		EmailNotifications:   emailEnabled,
-		NotificationDelay:    cfg.NotificationDelay,
-		PublicURL:            cfg.PublicURL,
-		SessionTTL:           cfg.SessionTTL,
-		Version:              version,
-		UploadDir:            cfg.UploadDir,
-		BackupDir:            cfg.BackupDir,
-		MaxUploadSize:        cfg.MaxUploadSize,
-		MaxUploadFiles:       cfg.MaxUploadFiles,
-		AllowedUploadTypes:   splitCSV(cfg.AllowedUploadTypes),
-		LoginRateLimit:       server.RateLimit{Limit: cfg.LoginRateLimit, Window: cfg.LoginRateWindow},
-		AccountLinkRateLimit: server.RateLimit{Limit: cfg.AccountLinkRateLimit, Window: cfg.AccountLinkRateWindow},
 	}
 }

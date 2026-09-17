@@ -1,4 +1,5 @@
 import { state } from "./state.js";
+import { platform } from "./platform.js";
 
 export async function request(path, options = {}) {
   return requestWithCSRFRefresh(path, options, true);
@@ -14,7 +15,7 @@ async function requestWithCSRFRefresh(path, options, retryCSRF) {
   if (state.csrf && isUnsafeMethod(method)) {
     headers["X-Pappice-CSRF"] = state.csrf;
   }
-  const response = await fetch(path, {
+  const response = await platform.fetch(path, {
     credentials: "same-origin",
     ...options,
     headers
@@ -51,7 +52,7 @@ function isCSRFTokenError(payload) {
 
 async function refreshCSRFToken() {
   try {
-    const response = await fetch("/api/session", {
+    const response = await platform.fetch("/api/session", {
       credentials: "same-origin",
       headers: { Accept: "application/json" }
     });

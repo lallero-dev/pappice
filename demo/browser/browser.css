@@ -1,0 +1,39 @@
+body.app-mode {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.browser-demo {
+  align-items: center;
+  background: #e5f3e9;
+  border-bottom: 1px solid #c0d9c8;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 7px 18px;
+}
+
+.browser-demo p {
+  margin: 0;
+}
+
+.browser-demo details {
+  margin-left: auto;
+  position: relative;
+}
+
+.browser-demo summary {
+  cursor: pointer;
+}
+
+.browser-demo details p {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  padding: 12px;
+  position: absolute;
+  right: 0;
+  top: 28px;
+  width: min(320px, 85vw);
+  z-index: 100;
+}

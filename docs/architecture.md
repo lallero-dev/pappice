@@ -7,12 +7,19 @@ and a filesystem directory for uploads. It has no external queue or worker servi
 
 | Package | Responsibility |
 |---|---|
-| `cmd/pappice` | CLI, configuration, startup, shutdown, and worker orchestration |
+| `cmd/pappice` | CLI commands, flags, and environment loading |
+| `internal/app` | Native server configuration, startup, shutdown, and worker orchestration |
 | `internal/server` | HTTP routing, authentication, CSRF, uploads, event projection, webhooks, and embedded assets |
 | `internal/store` | SQLite, migrations, transactional mutations, access rules, and durable outboxes |
 | `internal/notify` | SMTP validation, message rendering, and email delivery |
 | `internal/backup` | Database and upload snapshots, restore, and recovery |
 | `internal/security` | Password hashing, tokens, and HMAC helpers |
+| `demo/native` | Standalone native demo, temporary storage, TLS certificate, and cleanup |
+| `demo/browser` | Separate Go module, WebAssembly entry point, and browser host adapters |
+| `demo/internal/data` | Sample accounts and tickets shared by both demos |
+
+The native demo uses `internal/app` to start the regular server. Both demos
+reuse the application handlers and store; the production binary has no demo code.
 
 ## Request Flow
 
@@ -82,6 +89,18 @@ in one transaction.
 
 `internal/server/web` contains plain JavaScript modules and CSS embedded in the
 binary. `app.js` handles orchestration; feature modules own rendering and behavior.
+
+The [browser demo](../README.md#try-quickly) runs the same handlers and store in a
+dedicated Web Worker. Native builds use `modernc.org/sqlite`; `js/wasm` builds use
+`ncruces/go-sqlite3` with an in-memory database. A local cookie jar retains browser
+sessions inside the worker. API calls never go to the static host.
+
+The frontend's `platform.js` boundary supplies HTTP transport and navigation.
+The demo's import map selects its worker transport and hash routing adapter;
+application modules are copied unchanged. Each tab owns its database; reload
+discards it. Account setup/reset links work only within that tab. All sections
+remain visible, including webhook configuration, delivery history, and maintenance.
+File transfers and outgoing email/webhook deliveries are unsupported.
 
 ## Testing
 

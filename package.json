@@ -4,9 +4,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "bench:small": "node benchmark/small-env.mjs",
+    "demo:native": "go run ./demo/native",
+    "demo:browser": "npm run build:browser && node scripts/serve-browser.mjs",
     "demo:gif": "node demo/show.mjs",
+    "build:browser": "node scripts/build-browser.mjs",
+    "bench:small": "node benchmark/small-env.mjs",
     "loc": "bash scripts/loc.sh",
-    "test:e2e": "node test/e2e-smoke.mjs"
+    "test:e2e": "node test/e2e-smoke.mjs",
+    "test:browser": "node test/browser-demo.mjs"
   }
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"pappice/internal/app"
 	"pappice/internal/store"
 )
 
@@ -67,8 +68,8 @@ func runDBMigrate(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func parseDBConfig(name string, args []string, output io.Writer) (appConfig, int, bool) {
-	cfg := defaultAppConfig()
+func parseDBConfig(name string, args []string, output io.Writer) (app.Config, int, bool) {
+	cfg := app.DefaultConfig()
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(output)
 	fs.Usage = func() {
@@ -96,8 +97,8 @@ func parseDBConfig(name string, args []string, output io.Writer) (appConfig, int
 	return cfg, 0, true
 }
 
-func parseDBMigrateConfig(args []string, output io.Writer) (appConfig, bool, int, bool) {
-	cfg := defaultAppConfig()
+func parseDBMigrateConfig(args []string, output io.Writer) (app.Config, bool, int, bool) {
+	cfg := app.DefaultConfig()
 	var dryRun bool
 	fs := flag.NewFlagSet("pappice db migrate", flag.ContinueOnError)
 	fs.SetOutput(output)

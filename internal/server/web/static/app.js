@@ -70,7 +70,7 @@ function applyBranding() {
   els.brandSubtitle.textContent = branding.subtitle;
   if (isDefaultPappiceBranding(branding)) {
     els.brandMark.classList.add("logo");
-    els.brandMark.replaceChildren(el("img", { src: "/static/logo.svg", alt: "" }));
+    els.brandMark.replaceChildren(el("img", { src: new URL("./logo.svg", import.meta.url).href, alt: "" }));
   } else {
     els.brandMark.classList.remove("logo");
     els.brandMark.textContent = branding.mark;
@@ -481,7 +481,14 @@ function bindEvents() {
     if (!els.profileMenu.hidden && !els.profileMenu.contains(event.target)) closeProfileMenu();
   });
   document.addEventListener("keydown", handleGlobalKeydown);
-  router.listen((route) => applyRoute(route).catch(showError));
+  router.listen((route) => {
+    const accountLink = router.accountLinkRoute();
+    let navigation;
+    if (accountLink) navigation = loadAccountLinkRoute(accountLink);
+    else if (!els.authView.hidden) navigation = loadSession();
+    else navigation = applyRoute(route);
+    navigation.catch(showError);
+  });
 
   els.ticketsTab.addEventListener("click", () => switchView("tickets"));
   els.adminTab.addEventListener("click", () => switchView("admin"));

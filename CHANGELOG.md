@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Move the native demo out of the production binary. Run `npm run demo:native`
+  or `go run ./demo/native` from a source checkout instead of `pappice demo`.
+
+- Add an experimental static browser demo running the Go backend and SQLite in
+  WebAssembly, with private per-tab data and reset on reload.
+
 - Consolidate Docker Compose and binary/systemd deployment into
   one guide and a configuration reference, with small environment templates
   and complete deployment documentation in release archives.

@@ -1,6 +1,6 @@
 //go:build debug
 
-package main
+package app
 
 import (
 	"net/http"

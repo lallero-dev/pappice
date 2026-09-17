@@ -3,7 +3,7 @@ export class PappiceModal extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this.shadowRoot.innerHTML = `
-      <link rel="stylesheet" href="/static/components.css">
+      <link rel="stylesheet" href="${new URL("./components.css", import.meta.url).href}">
       <dialog aria-labelledby="pappice-modal-title">
         <form method="dialog">
           <header>

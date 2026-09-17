@@ -123,14 +123,3 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	}
 	return parsed
 }
-
-func splitCSV(value string) []string {
-	result := make([]string, 0, strings.Count(value, ",")+1)
-	for part := range strings.SplitSeq(value, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			result = append(result, part)
-		}
-	}
-	return result
-}

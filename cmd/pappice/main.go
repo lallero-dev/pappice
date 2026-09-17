@@ -1,22 +1,13 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"log"
-	"net/http"
 	"os"
-	"os/signal"
-	"sync"
-	"syscall"
-	"time"
 
-	"pappice/internal/notify"
-	"pappice/internal/server"
-	"pappice/internal/store"
+	"pappice/internal/app"
 )
 
 var version = "dev"
@@ -31,8 +22,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "help":
 		printRootUsage(stdout)
 		return 0
-	case "demo":
-		return runDemo(commandArgs, stdout, stderr)
 	case "serve":
 		return runServe(commandArgs, stderr)
 	case "backup":
@@ -71,7 +60,6 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "Pappice customer support ticketing")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  pappice demo [flags]      Start a temporary seeded demo")
 	fmt.Fprintln(w, "  pappice serve [flags]     Start the web server")
 	fmt.Fprintln(w, "  pappice backup [flags]    Create a database and uploads backup")
 	fmt.Fprintln(w, "  pappice restore [flags]   Restore a backup")
@@ -80,7 +68,7 @@ func printRootUsage(w io.Writer) {
 	fmt.Fprintln(w, "  pappice healthcheck       Check the local HTTP(S) health endpoint")
 	fmt.Fprintln(w, "  pappice version           Print the build version")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run \"pappice demo -h\", \"pappice serve -h\", \"pappice backup -h\", \"pappice restore -h\", \"pappice db -h\", \"pappice doctor -h\", or \"pappice healthcheck -h\" for flags.")
+	fmt.Fprintln(w, "Run \"pappice serve -h\", \"pappice backup -h\", \"pappice restore -h\", \"pappice db -h\", \"pappice doctor -h\", or \"pappice healthcheck -h\" for flags.")
 }
 
 func runServe(args []string, stderr io.Writer) int {
@@ -88,7 +76,7 @@ func runServe(args []string, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
-	if err := serve(cfg, stderr); err != nil {
+	if err := app.Serve(cfg, stderr); err != nil {
 		fmt.Fprintf(stderr, "pappice: %v\n", err)
 		return 1
 	}
@@ -113,100 +101,4 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "pappice %s\n", version)
 	return 0
-}
-
-func serve(cfg appConfig, stderr io.Writer) error {
-	tracker, err := store.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer tracker.Close()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	var workers sync.WaitGroup
-	defer func() {
-		stop()
-		workers.Wait()
-	}()
-
-	logger := log.New(stderr, "", log.LstdFlags)
-	smtpConfig := cfg.smtpConfig()
-	emailEnabled := cfg.emailEnabled()
-	if emailEnabled {
-		mailer, err := notify.NewSMTPMailer(smtpConfig)
-		if err != nil {
-			return fmt.Errorf("configure email notifications: %w", err)
-		}
-		worker := notify.Worker{
-			Store:       tracker,
-			Mailer:      mailer,
-			From:        smtpConfig.From,
-			Interval:    5 * time.Second,
-			LeaseFor:    time.Minute,
-			BatchSize:   10,
-			MaxAttempts: 5,
-			Logger:      logger,
-		}
-		workers.Go(func() { worker.Run(ctx) })
-		logger.Printf("email notifications enabled via SMTP host %s", smtpConfig.Host)
-	}
-
-	serverOptions := cfg.serverOptions(emailEnabled)
-	serverOptions.Logger = logger
-	app := server.NewServer(tracker, serverOptions)
-	workers.Go(func() { app.RunEventDispatcher(ctx, 5*time.Second) })
-	workers.Go(func() { app.RunWebhookDispatcher(ctx, 5*time.Second) })
-	useTLS, err := cfg.tlsEnabled()
-	if err != nil {
-		return err
-	}
-
-	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           app,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	errs := make(chan error, 2)
-	debugSrv, err := startDebugServer(cfg.DebugAddr, logger, errs)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if debugSrv != nil {
-			_ = debugSrv.Close()
-		}
-	}()
-
-	go func() {
-		if useTLS {
-			logger.Printf("pappice listening on https://%s", cfg.Addr)
-			errs <- srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
-			return
-		}
-		logger.Printf("pappice listening on http://%s (browser login requires HTTPS)", cfg.Addr)
-		errs <- srv.ListenAndServe()
-	}()
-
-	select {
-	case <-ctx.Done():
-		logger.Printf("shutdown requested")
-	case err := <-errs:
-		if err != nil && err != http.ErrServerClosed {
-			return fmt.Errorf("serve: %w", err)
-		}
-		return nil
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown: %w", err)
-	}
-	if debugSrv != nil {
-		if err := debugSrv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown debug: %w", err)
-		}
-	}
-	return nil
 }

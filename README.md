@@ -32,15 +32,28 @@ Pappice is intentionally minimal and self-contained:
 
 ## Try Quickly
 
-Run `pappice demo` with a release binary, or from a source checkout with Go 1.26+:
+From a source checkout with Go 1.26+:
 
 ```sh
-go run ./cmd/pappice demo
+go run ./demo/native
 ```
 
-The demo uses local HTTPS with a self-signed certificate and sample data. It
-prints the URL and credentials, and removes its data on shutdown. Add `-keep`
-to retain the temporary directory.
+The native demo uses local HTTPS with a self-signed certificate and sample data.
+It prints the URL and credentials, and removes its data on shutdown. Use
+`go run ./demo/native -keep` to retain the temporary directory.
+
+For the experimental **browser-only demo**, Node 22+ is also required:
+
+```sh
+npm run demo:browser
+```
+
+Open `http://127.0.0.1:8389`. Each tab runs Go and SQLite locally; reloading resets
+its data. All sections are available; file transfers and outgoing email/webhook
+deliveries are unsupported.
+To publish it, run `npm run build:browser` and serve `dist/browser/` on a static
+host over HTTPS. Subdirectories work without route rewrites. Enable gzip or Brotli
+for the WASM download; the build includes a precompressed `.wasm.gz` file.
 
 ## Project Status
 
@@ -75,6 +88,7 @@ Set `PAPPICE_CHECK_STRICT=1` to require all checks; releases use strict mode.
 
 Browser tests require Node 22+, OpenSSL, and Chromium or Chrome. Set
 `PAPPICE_E2E_CHROMIUM=/path/to/chromium` to override discovery.
+`npm run test:browser` checks the WebAssembly demo against a static host.
 
 See [benchmarks](./benchmark/README.md) for reproducible memory measurements.
 

@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	_ "modernc.org/sqlite"
 )
 
 var (

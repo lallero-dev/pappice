@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"pappice/internal/app"
 )
 
 func runHealthcheck(args []string, stdout, stderr io.Writer) int {
@@ -17,7 +19,7 @@ func runHealthcheck(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
-	useTLS, err := cfg.tlsEnabled()
+	useTLS, err := cfg.TLSEnabled()
 	if err != nil {
 		fmt.Fprintf(stderr, "pappice healthcheck: %v\n", err)
 		return 1
@@ -42,8 +44,8 @@ func runHealthcheck(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func parseHealthcheckConfig(args []string, output io.Writer) (appConfig, int, bool) {
-	cfg := defaultAppConfig()
+func parseHealthcheckConfig(args []string, output io.Writer) (app.Config, int, bool) {
+	cfg := app.DefaultConfig()
 	fs := newConfigFlagSet("pappice healthcheck", &cfg, output)
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "Usage: pappice healthcheck [flags]")

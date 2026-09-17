@@ -2,15 +2,12 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
 	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"pappice/internal/store"
 
 	_ "modernc.org/sqlite"
 )
@@ -120,7 +117,6 @@ func TestSplitCommand(t *testing.T) {
 		wantArgs    []string
 	}{
 		{[]string{"pappice"}, "help", nil},
-		{[]string{"pappice", "demo", "-addr", ":18443"}, "demo", []string{"-addr", ":18443"}},
 		{[]string{"pappice", "serve", "-addr", ":8080"}, "serve", []string{"-addr", ":8080"}},
 		{[]string{"pappice", "-addr", ":8080"}, "-addr", []string{":8080"}},
 		{[]string{"pappice", "doctor"}, "doctor", nil},
@@ -147,68 +143,6 @@ func TestRootFlagsAreNotServeAliases(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unknown command "-addr"`) {
 		t.Fatalf("flat flags did not report unknown command: %s", stderr.String())
-	}
-}
-
-func TestDemoHelpers(t *testing.T) {
-	dir := t.TempDir()
-	certPath := filepath.Join(dir, "localhost.pem")
-	keyPath := filepath.Join(dir, "localhost-key.pem")
-	if err := writeDemoCertificate(certPath, keyPath, "127.0.0.1:8388"); err != nil {
-		t.Fatalf("write demo cert: %v", err)
-	}
-	if _, err := tls.LoadX509KeyPair(certPath, keyPath); err != nil {
-		t.Fatalf("load generated cert: %v", err)
-	}
-	if got, err := demoURL(":8388"); err != nil || got != "https://127.0.0.1:8388" {
-		t.Fatalf("demoURL(:8388) = %q, %v", got, err)
-	}
-	if got, err := demoURL("localhost:9443"); err != nil || got != "https://localhost:9443" {
-		t.Fatalf("demoURL(localhost:9443) = %q, %v", got, err)
-	}
-	if _, err := demoURL(":0"); err == nil {
-		t.Fatal("demoURL(:0) should fail")
-	}
-}
-
-func TestSeedDemoStore(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "pappice.db")
-	seed, err := seedDemoStore(dbPath)
-	if err != nil {
-		t.Fatalf("seed demo store: %v", err)
-	}
-	if seed.Admin != "admin@example.test" || seed.Staff != "staff@example.test" ||
-		seed.Customer != "customer@example.test" || seed.Password != demoPassword {
-		t.Fatalf("seed summary = %#v", seed)
-	}
-
-	tracker, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open seeded store: %v", err)
-	}
-	defer tracker.Close()
-
-	admin, err := tracker.Authenticate(seed.Admin, seed.Password)
-	if err != nil {
-		t.Fatalf("authenticate demo admin: %v", err)
-	}
-	customer, err := tracker.Authenticate(seed.Customer, seed.Password)
-	if err != nil {
-		t.Fatalf("authenticate demo customer: %v", err)
-	}
-	products, err := tracker.ListProducts(customer)
-	if err != nil {
-		t.Fatalf("list customer products: %v", err)
-	}
-	if len(products) != 1 || products[0].Key != "WEB" || products[0].Name != "Website Support" {
-		t.Fatalf("customer products = %#v", products)
-	}
-	page, err := tracker.ListTicketSummariesPage(admin, store.TicketSummaryFilter{})
-	if err != nil {
-		t.Fatalf("list seeded tickets: %v", err)
-	}
-	if len(page.Tickets) < 2 {
-		t.Fatalf("seeded tickets = %#v", page.Tickets)
 	}
 }
 
@@ -350,31 +284,6 @@ func TestHealthcheckURL(t *testing.T) {
 	}
 }
 
-func TestConfigTLSEnabled(t *testing.T) {
-	tests := []struct {
-		name    string
-		cfg     appConfig
-		wantTLS bool
-		wantErr bool
-	}{
-		{"plain http", appConfig{}, false, false},
-		{"tls", appConfig{TLSCert: "cert.pem", TLSKey: "key.pem"}, true, false},
-		{"missing key", appConfig{TLSCert: "cert.pem"}, false, true},
-		{"missing cert", appConfig{TLSKey: "key.pem"}, false, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.cfg.tlsEnabled()
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("tlsEnabled error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if got != tt.wantTLS {
-				t.Fatalf("tlsEnabled() = %v, want %v", got, tt.wantTLS)
-			}
-		})
-	}
-}
-
 func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
 	t.Setenv("PAPPICE_SMTP_PASSWORD", "super-secret-password")
 	t.Setenv("PAPPICE_SMTP_USER", "secret-user")
@@ -393,18 +302,6 @@ func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
 	}
 	if !strings.Contains(output, "-smtp-password") {
 		t.Fatalf("help output missing smtp password flag:\n%s", output)
-	}
-}
-
-func TestDemoHelpIncludesDebugAddr(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"pappice", "demo", "-h"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("demo help exit = %d", code)
-	}
-	output := stdout.String() + stderr.String()
-	if !strings.Contains(output, "-debug-addr") {
-		t.Fatalf("demo help output missing debug flag:\n%s", output)
 	}
 }
 

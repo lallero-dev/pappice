@@ -430,7 +430,7 @@ async function cleanup(state, keepTemp) {
     state.smtpServer = null;
   }
   if (state.tempDir && !keepTemp) {
-    await rm(state.tempDir, { force: true, recursive: true });
+    await rm(state.tempDir, { force: true, recursive: true, maxRetries: 3 });
   }
 }
 
@@ -458,4 +458,4 @@ function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-export { repoRoot, runCommand, startLocalPappice };
+export { connectToPage, freePort, repoRoot, runCommand, startChromium, startLocalPappice, stopProcess };

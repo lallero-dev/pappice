@@ -1,3 +1,5 @@
+import { platform } from "./platform.js";
+
 export function createRouter({
   adminSections = [],
   defaultAdminSection = "accounts",
@@ -6,14 +8,14 @@ export function createRouter({
 } = {}) {
   const config = { adminSections, defaultAdminSection, productSections, defaultProductSection };
   let last = locationKey();
-  const current = (location = window.location) => parseLocation(location, config);
+  const current = (location = platform.location()) => parseLocation(location, config);
   return {
-    accountLinkRoute: (location = window.location) => accountLinkRoute(location),
+    accountLinkRoute: (location = platform.location()) => accountLinkRoute(location),
     current,
     navigate(route, { replace = false } = {}) {
       const next = buildLocation(route, config);
       if (next === locationKey()) return;
-      window.history[replace ? "replaceState" : "pushState"](null, "", next);
+      platform.navigate(next, replace);
       last = next;
     },
     listen(handler) {
@@ -23,8 +25,7 @@ export function createRouter({
         last = next;
         handler(current());
       };
-      window.addEventListener("popstate", notify);
-      window.addEventListener("hashchange", notify);
+      platform.listen(notify);
     }
   };
 }
@@ -101,7 +102,8 @@ function section(value, allowed, fallback) {
 }
 
 function locationKey() {
-  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const { pathname, search, hash } = platform.location();
+  return `${pathname}${search}${hash}`;
 }
 
 function decodePart(value) {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"pappice/internal/app"
 	"pappice/internal/notify"
 	"pappice/internal/store"
 )
@@ -31,7 +32,7 @@ type doctorReport struct {
 	warnings int
 }
 
-func (report *doctorReport) run(cfg appConfig) {
+func (report *doctorReport) run(cfg app.Config) {
 	fmt.Fprintln(report.out, "Pappice doctor")
 	report.ok("version", version)
 	report.checkDatabase(cfg.DBPath)
@@ -48,7 +49,7 @@ func (report *doctorReport) run(cfg appConfig) {
 	fmt.Fprintf(report.out, "\nDoctor finished with %d error(s), %d warning(s).\n", report.errors, report.warnings)
 }
 
-func (report *doctorReport) checkProxyTrust(cfg appConfig) {
+func (report *doctorReport) checkProxyTrust(cfg app.Config) {
 	if cfg.TrustProxyHeaders {
 		report.warn("proxy", "trusting X-Forwarded-* headers; expose Pappice only behind a private reverse proxy")
 		return
@@ -150,8 +151,8 @@ func (report *doctorReport) checkWritableDirectory(label, path string) {
 	report.warn(label, path+" does not exist and will be created on first start")
 }
 
-func (report *doctorReport) checkTLS(cfg appConfig) {
-	useTLS, err := cfg.tlsEnabled()
+func (report *doctorReport) checkTLS(cfg app.Config) {
+	useTLS, err := cfg.TLSEnabled()
 	if err != nil {
 		report.err("tls", err.Error())
 		return
@@ -190,10 +191,10 @@ func (report *doctorReport) checkReadableFile(label, path string) bool {
 	return true
 }
 
-func (report *doctorReport) checkPublicURL(cfg appConfig) {
+func (report *doctorReport) checkPublicURL(cfg app.Config) {
 	publicURL := strings.TrimSpace(cfg.PublicURL)
 	if publicURL == "" {
-		if cfg.emailEnabled() {
+		if cfg.EmailEnabled() {
 			report.err("public-url", "required when email notifications are enabled")
 			return
 		}
@@ -212,12 +213,12 @@ func (report *doctorReport) checkPublicURL(cfg appConfig) {
 	report.ok("public-url", publicURL)
 }
 
-func (report *doctorReport) checkEmail(cfg appConfig) {
-	if !cfg.emailEnabled() {
+func (report *doctorReport) checkEmail(cfg app.Config) {
+	if !cfg.EmailEnabled() {
 		report.ok("email", "disabled")
 		return
 	}
-	if _, err := notify.NewSMTPMailer(cfg.smtpConfig()); err != nil {
+	if _, err := notify.NewSMTPMailer(cfg.SMTPConfig()); err != nil {
 		report.err("email", err.Error())
 		return
 	}
@@ -228,7 +229,7 @@ func (report *doctorReport) checkEmail(cfg appConfig) {
 	report.ok("email", "SMTP configuration is valid")
 }
 
-func (report *doctorReport) checkUploads(cfg appConfig) {
+func (report *doctorReport) checkUploads(cfg app.Config) {
 	if cfg.MaxUploadSize <= 0 {
 		report.err("uploads", "max upload size must be greater than zero")
 	}
@@ -240,7 +241,7 @@ func (report *doctorReport) checkUploads(cfg appConfig) {
 	}
 }
 
-func (report *doctorReport) checkRateLimits(cfg appConfig) {
+func (report *doctorReport) checkRateLimits(cfg app.Config) {
 	if cfg.LoginRateLimit <= 0 || cfg.LoginRateWindow <= 0 {
 		report.warn("rate-limits", "login limiter will use built-in defaults")
 	}
@@ -252,7 +253,7 @@ func (report *doctorReport) checkRateLimits(cfg appConfig) {
 	}
 }
 
-func (report *doctorReport) checkWebhookPolicy(cfg appConfig) {
+func (report *doctorReport) checkWebhookPolicy(cfg app.Config) {
 	if cfg.AllowInsecureWebhooks {
 		report.warn("webhooks", "insecure HTTP webhook URLs are enabled")
 	}
