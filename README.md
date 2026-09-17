@@ -19,6 +19,11 @@ Pappice is intentionally minimal and self-contained:
 - Linux release binaries around 12 MiB.
 - Small production instance measured at roughly 20-30 MiB of RAM.
 
+Application source, excluding demos and tests (`npm run loc`; comments included):
+
+| Backend | 12,877 LoCs |
+| Frontend | 9,143 LoCs |
+
 ## Features
 
 - Products contain tickets, with access controlled by [account types and product roles](./docs/access.md).

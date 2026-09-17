@@ -7,6 +7,7 @@ Usage: scripts/loc.sh [--files] [git-ref]
 
 Counts tracked text lines by area. Without a git ref, counts the current
 working tree contents for files tracked by git. With a ref, counts that tree.
+Demos and their dedicated build/test files are excluded.
 
 Options:
   --files   include per-file counts below the category summary
@@ -58,7 +59,7 @@ category_for() {
     benchmark/*.md|docs/*)
       echo "docs"
       ;;
-    benchmark/*|demo/*|scripts/*|test/tools/*)
+    benchmark/*|scripts/*|test/tools/*)
       echo "scripts"
       ;;
     deploy/*|.env.example|.gitignore|go.mod|go.sum|package.json)
@@ -76,6 +77,9 @@ category_for() {
 is_counted_file() {
   local file="$1"
   case "$file" in
+    demo/*|cmd/pappice/demo.go|scripts/build-browser.mjs|scripts/serve-browser.mjs|test/browser-demo.mjs)
+      return 1
+      ;;
     assets/*.gif|assets/*.jpg|assets/*.jpeg|assets/*.png|assets/*.webp)
       return 1
       ;;
@@ -126,7 +130,7 @@ else
   done < <(git ls-tree -r -z --name-only "$ref")
 fi
 
-printf "Pappice LOC (%s)\n\n" "$source_label"
+printf "Pappice LOC (%s; demos excluded)\n\n" "$source_label"
 awk -F '\t' -v show_files="$show_files" '
 BEGIN {
   order_count = split("backend frontend tests scripts ops-config docs other", order, " ")
