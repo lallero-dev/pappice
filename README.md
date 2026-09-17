@@ -27,7 +27,6 @@ Pappice is intentionally minimal and self-contained:
 
 - Products group tickets by service, customer, or team.
 - Customers and staff use the same UI with role-based actions.
-- An Internal contributor product role allows internal notes without public replies or ticket edits.
 - Open/closed ticket workflow; a public reply reopens a closed conversation.
 - Chat-style conversations with public replies, internal notes, unread state,
   assignees, priorities, filtering, and sorting.
@@ -57,9 +56,8 @@ SQLite database and upload directory.
 
 ## Project Status
 
-Pappice is in 0.x. It is used in production by a small team, but it has not been
-externally security audited. The API and schema may change before a stable
-release; existing installations can require an explicit database migration.
+Pappice is in 0.x and has not been externally security audited. API and schema
+changes may require database migrations between releases.
 
 ## Install And Operate
 
@@ -87,6 +85,9 @@ Run the complete local quality gate with:
 ```sh
 scripts/check.sh
 ```
+
+Unavailable race or browser checks are skipped. Set `PAPPICE_CHECK_STRICT=1`
+to require all checks; releases use strict mode.
 
 The E2E test requires Node 22+, OpenSSL, and Chromium or Chrome. The launcher
 searches `PATH` and standard macOS application locations. Set

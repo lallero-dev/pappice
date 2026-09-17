@@ -43,7 +43,7 @@ Test from the admin UI. Notifications are outbound-only, queued with a 30-second
 
 ## Storage and other settings
 
-Back up SQLite and uploads together. Docker paths must match volume mounts.
+Docker paths must match volume mounts.
 See [`.env.example`](../.env.example) for branding, limits, and retention;
-keep development-only webhook overrides off. After changes, run `doctor`, then
-restart/recreate using the [deployment guide](../deploy/README.md#operations).
+keep development-only webhook overrides off. Apply changes using the
+[deployment guide](../deploy/README.md#operations).

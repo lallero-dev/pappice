@@ -174,8 +174,6 @@ Apply env changes by restarting `pappice.service`.
 
 Read release notes, back up with the current version, and keep your env file and data.
 If migration fails, keep Pappice stopped and inspect the error.
-The systemd template moved to `deploy/systemd/`; the installed path remains
-`/etc/pappice/pappice.env`. Docker volume names are unchanged.
 
 ### Docker upgrade
 
@@ -202,9 +200,6 @@ docker compose -f deploy/docker/compose.yaml up -d
 allow enough free disk space.
 
 ### systemd upgrade
-
-If previously installed, retire the bundled schedule with
-`sudo systemctl disable --now pappice-backup.timer`; use your own scheduler.
 
 Repeat [Download a release](#download-a-release). From the newly extracted directory:
 

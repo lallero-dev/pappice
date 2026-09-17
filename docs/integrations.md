@@ -3,16 +3,14 @@
 ## Posting Replies
 
 Authenticate with `Authorization: Bearer <token>`. Tokens inherit their owner's
-permissions, and replies show that user's name. Use a separate account when an
-integration should appear as a bot. For an integration that should only add
-internal notes, use a Staff account with the **Internal contributor** product
-role. See [account types and product roles](./access.md).
+permissions, and replies show that user's name. Use a separate account for a bot
+identity. See [account types and product roles](./access.md).
 
 `POST /api/tickets/{id}/comments` accepts a JSON object with `body` and
-`visibility`. Visibility defaults to `public`; `internal` requires a Staff or
-Admin account with internal-note access to the product. A public reply reopens a
-closed ticket. Internal contributors must explicitly send `"visibility":"internal"`;
-public replies and omitted visibility are rejected with `403 Forbidden`.
+`visibility`. Visibility defaults to `public`; `internal` requires internal-note
+access to the product. Public replies reopen closed tickets. Accounts restricted
+to internal notes must send `"visibility":"internal"`; public replies and omitted
+visibility are rejected with `403 Forbidden`.
 
 Use `Idempotency-Key` when a request might be retried:
 
@@ -20,7 +18,7 @@ Use `Idempotency-Key` when a request might be retried:
 curl 'https://support.example.test/api/tickets/123/comments' \
   -H "Authorization: Bearer $PAPPICE_TOKEN" \
   -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: assistant:delivery-identifier:reply' \
+  -H 'Idempotency-Key: reply:delivery-identifier' \
   --data '{"body":"Suggested response for review.","visibility":"internal"}'
 ```
 
@@ -42,11 +40,10 @@ The same mechanism applies to `PATCH /api/tickets/{id}`, including a nested
   must match; temporary upload paths are excluded from comparison.
 - Failed transactions do not consume the key. Keys survive restarts and have no
   time-based expiry; deleting the ticket or user removes its keys.
-- Permissions are checked on every request, including retries. Omitting the key
-  preserves the existing behavior: each successful request creates a new mutation.
+- Permissions are checked on every request, including retries. Without a key,
+  each successful request creates a new mutation.
 
-Persist the request body before sending it. In particular, an AI worker should
-retry its saved reply rather than generate new text under the same key.
+Persist the request body before sending it so retries reuse identical content.
 
 ## Receiving Webhooks
 
@@ -74,27 +71,11 @@ also receives `2xx`. Return an error if persistence fails. Run slow work after
 acknowledgment: Pappice's HTTP request timeout is eight seconds. Acknowledging
 before saving the work can lose it if the receiver crashes.
 
-Use an action-specific API key such as `assistant:<delivery_id>:reply` when the
-worker posts its result. Durable receiver deduplication prevents duplicate jobs;
-API idempotency prevents duplicate replies when the worker retries a write.
-Pappice provides these identifiers and write guarantees; the external receiver
-owns its queue and job deduplication.
+When posting results, use an action-specific `Idempotency-Key` such as
+`reply:<delivery_id>`. Receiver deduplication prevents duplicate jobs; API
+idempotency prevents duplicate replies.
 
 Pending ticket updates may be coalesced until their first delivery attempt. Once
 attempted, a notification's ID and payload stay fixed, and subsequent updates
 create another notification. Delivery order is not guaranteed; fetch the current
 ticket when acting on an event. Each manual webhook test gets a new ID.
-
-## Upgrading
-
-This change adds schema migration 8. Before starting the updated server against
-an existing database, follow the usual upgrade procedure and run:
-
-```sh
-pappice db migrate --dry-run
-pappice db migrate
-```
-
-Migration assigns IDs to existing queued notifications and creates the ticket
-request table. It preserves existing notification payloads and delivery states.
-It cannot deduplicate deliveries already processed before receivers used IDs.
