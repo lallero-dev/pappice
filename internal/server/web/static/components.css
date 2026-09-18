@@ -367,6 +367,7 @@ button:disabled {
 }
 
 .ticket-description-input {
+  font-weight: 400;
   line-height: 1.55;
   min-height: 150px;
   resize: none;
