@@ -9,11 +9,7 @@ import (
 
 func TestTicketRequestIdempotency(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
-	tracker, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { tracker.Close() })
+	tracker := openTestStore(t, path)
 	admin, err := tracker.CreateFirstAdmin(CreateUser{Email: "admin@example.test", Password: "correct horse"})
 	if err != nil {
 		t.Fatal(err)
@@ -70,10 +66,7 @@ func TestTicketRequestIdempotency(t *testing.T) {
 	if err := tracker.Close(); err != nil {
 		t.Fatal(err)
 	}
-	tracker, err = Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tracker = openTestStore(t, path)
 	replayed, err := tracker.SaveTicket(input)
 	if err != nil || !replayed.Replayed || replayed.Ticket.Status != "closed" || !replayed.Ticket.UpdatedAt.Equal(saved.Ticket.UpdatedAt) {
 		t.Fatalf("replay after restart = %#v, err = %v", replayed, err)

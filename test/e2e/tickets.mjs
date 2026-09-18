@@ -98,9 +98,6 @@ async function createCustomerTicket(cdp) {
     const ownConversationRect = ownConversation.getBoundingClientRect();
     const ownConversationStyle = getComputedStyle(ownConversation);
     const ownContentRight = ownConversationRect.left + ownConversation.clientWidth - parseFloat(ownConversationStyle.paddingRight || "0");
-    if (ownConversationStyle.scrollBehavior !== "smooth") {
-      throw new Error("conversation stream should use smooth programmatic scrolling");
-    }
     await waitFor(() => isScrolledToBottom(ownConversation), "created ticket opens at latest message");
     if (ownAvatarRect.right < ownContentRight - 4) {
       throw new Error("current sender message should be visually aligned to the right");
@@ -281,14 +278,8 @@ async function staffReplyAndReopen(cdp) {
       return [...document.querySelectorAll("#ticketList .ticket-row")]
         .find((candidate) => candidate.textContent.includes(input.title) && candidate.classList.contains("unread"));
     }, "new customer ticket unread for staff");
-    const unreadTitle = row.querySelector(".ticket-row-title");
-    const unreadDot = row.querySelector(".ticket-unread-dot");
-    if (!unreadDot || getComputedStyle(unreadDot).backgroundColor !== "rgb(217, 45, 32)") {
-      throw new Error("unread ticket rows should use a red unread dot");
-    }
-    if (Number.parseInt(getComputedStyle(unreadTitle).fontWeight, 10) < 800 ||
-      getComputedStyle(row).backgroundColor === "rgb(255, 255, 255)") {
-      throw new Error("unread ticket rows should be visually stronger than read rows");
+    if (!row.querySelector(".ticket-unread-dot")?.checkVisibility()) {
+      throw new Error("unread ticket should have a visible marker");
     }
     row.click();
     const detail = await waitFor(() => {

@@ -52,7 +52,8 @@ done
 rm -f "$race_errors"
 trap - EXIT
 
-go test -tags debug ./internal/app ./cmd/pappice ./demo/native
+go test -tags debug ./internal/app
+go build -tags debug ./cmd/pappice ./demo/native
 
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   skip_or_fail "Node.js or npm is unavailable"

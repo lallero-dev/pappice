@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
+func TestPasswords(t *testing.T) {
 	if _, err := HashPassword("short"); err == nil {
 		t.Fatal("short password should be rejected")
 	}
@@ -42,7 +42,9 @@ func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	if !PasswordNeedsRehash("not-a-password-hash") {
 		t.Fatal("malformed hash should need rehash")
 	}
+}
 
+func TestTokens(t *testing.T) {
 	token, err := RandomToken()
 	if err != nil {
 		t.Fatalf("random token: %v", err)
@@ -54,6 +56,9 @@ func TestPasswordTokenAndSignatureHelpers(t *testing.T) {
 	if got, want := HashToken("token"), "3c469e9d6c5875d37a43f353d4f88e61fcf812c66eee3457465a40b0da4153e0"; got != want {
 		t.Fatalf("token hash = %q, want %q", got, want)
 	}
+}
+
+func TestSignatures(t *testing.T) {
 	if !ConstantTimeEqual("same", "same") || ConstantTimeEqual("same", "different") {
 		t.Fatal("constant-time equality returned unexpected result")
 	}

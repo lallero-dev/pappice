@@ -256,3 +256,39 @@ func TestWebhookRedeliveryKeepsSignedIdentity(t *testing.T) {
 		t.Fatalf("recovered delivery changed: %#v", got)
 	}
 }
+
+func TestEventDispatcherDrainsFullBatches(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+	for range eventDispatchBatchSize + 1 {
+		if _, err := tracker.CreateDomainEvent(store.CreateDomainEvent{Type: "user.updated"}); err != nil {
+			t.Fatalf("create domain event: %v", err)
+		}
+	}
+	app := NewServer(tracker)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.RunEventDispatcher(ctx, time.Hour)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	eventually(t, func() bool {
+		events := mustDomainEvents(t, tracker, eventDispatchBatchSize+1)
+		if len(events) != eventDispatchBatchSize+1 {
+			return false
+		}
+		for _, event := range events {
+			if event.Status != "processed" {
+				return false
+			}
+		}
+		return true
+	}, "event dispatcher did not drain a full batch")
+}

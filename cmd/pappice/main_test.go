@@ -199,62 +199,6 @@ func TestDBCommandStatusAndMigrate(t *testing.T) {
 }
 
 func TestBackupAndRestoreCommands(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "pappice.db")
-	uploads := filepath.Join(dir, "uploads")
-	backups := filepath.Join(dir, "backups")
-	createCommandDB(t, dbPath, "before")
-	writeCommandFile(t, filepath.Join(uploads, "tickets", "one.txt"), "attachment before")
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{
-		"pappice",
-		"backup",
-		"-db", dbPath,
-		"-upload-dir", uploads,
-		"-backup-dir", backups,
-	}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("backup exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "Backup created:") ||
-		!strings.Contains(stdout.String(), "Restore with: pappice restore") {
-		t.Fatalf("backup output = %s", stdout.String())
-	}
-
-	createCommandDB(t, dbPath, "after")
-	writeCommandFile(t, filepath.Join(uploads, "stale.txt"), "stale upload")
-	stdout.Reset()
-	stderr.Reset()
-	code = run([]string{
-		"pappice",
-		"restore",
-		"-yes",
-		"-db", dbPath,
-		"-upload-dir", uploads,
-		"-backup-dir", backups,
-		"latest",
-	}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("restore exit = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "Restore complete from:") ||
-		!strings.Contains(stdout.String(), "Previous database files saved in:") ||
-		!strings.Contains(stdout.String(), "Previous uploads saved in:") {
-		t.Fatalf("restore output = %s", stdout.String())
-	}
-	if got := queryCommandDB(t, dbPath); got != "before" {
-		t.Fatalf("restored database value = %q", got)
-	}
-	if got := readCommandFile(t, filepath.Join(uploads, "tickets", "one.txt")); got != "attachment before" {
-		t.Fatalf("restored upload = %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(uploads, "stale.txt")); !os.IsNotExist(err) {
-		t.Fatalf("stale upload remained after restore: %v", err)
-	}
-}
-
-func TestRestoreRefusesOpenDatabase(t *testing.T) {
 	if path := os.Getenv("PAPPICE_TEST_RESTORE_DB"); path != "" {
 		tracker, err := store.Open(path)
 		if err != nil {
@@ -284,6 +228,9 @@ func TestRestoreRefusesOpenDatabase(t *testing.T) {
 	if code := run(append([]string{"pappice", "backup"}, flags...), &stdout, &stderr); code != 0 {
 		t.Fatalf("online backup: %s", stderr.String())
 	}
+	if !strings.Contains(stdout.String(), "Backup created:") || !strings.Contains(stdout.String(), "Restore with: pappice restore") {
+		t.Fatalf("backup output = %s", stdout.String())
+	}
 	after := "after"
 	if _, err := tracker.UpdateProduct(product.ID, store.UpdateProduct{Name: &after}); err != nil {
 		t.Fatal(err)
@@ -295,7 +242,7 @@ func TestRestoreRefusesOpenDatabase(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRestoreRefusesOpenDatabase$")
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBackupAndRestoreCommands$")
 	cmd.Env = append(os.Environ(), "PAPPICE_TEST_RESTORE_DB="+dbPath)
 	cmd.Stderr = os.Stderr
 	input, err := cmd.StdinPipe()
@@ -348,8 +295,13 @@ func TestRestoreRefusesOpenDatabase(t *testing.T) {
 	}
 	_ = cmd.Wait()
 	stderr.Reset()
-	if code := run(args, &stdout, &stderr); code != 0 {
+	if code := run(append(args, "latest"), &stdout, &stderr); code != 0 {
 		t.Fatalf("offline restore: %s", stderr.String())
+	}
+	for _, message := range []string{"Restore complete from:", "Previous database files saved in:", "Previous uploads saved in:"} {
+		if !strings.Contains(stdout.String(), message) {
+			t.Fatalf("restore output missing %q: %s", message, stdout.String())
+		}
 	}
 	restored, err := store.Open(dbPath)
 	if err != nil {
@@ -574,43 +526,6 @@ func TestDoctorCommand(t *testing.T) {
 	if !strings.Contains(stdout.String(), "ERROR schema: database migration required") {
 		t.Fatalf("doctor missing migration error: %s", stdout.String())
 	}
-}
-
-func createCommandDB(t *testing.T, path, value string) {
-	t.Helper()
-	for _, item := range []string{path, path + "-wal", path + "-shm"} {
-		if err := os.Remove(item); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove command db file: %v", err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatalf("create command db dir: %v", err)
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open command db: %v", err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE records (value TEXT NOT NULL)`); err != nil {
-		t.Fatalf("create command records: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO records (value) VALUES (?)`, value); err != nil {
-		t.Fatalf("insert command record: %v", err)
-	}
-}
-
-func queryCommandDB(t *testing.T, path string) string {
-	t.Helper()
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open command query db: %v", err)
-	}
-	defer db.Close()
-	var value string
-	if err := db.QueryRow(`SELECT value FROM records`).Scan(&value); err != nil {
-		t.Fatalf("query command record: %v", err)
-	}
-	return value
 }
 
 func writeCommandFile(t *testing.T, path, content string) {

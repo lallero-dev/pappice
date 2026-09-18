@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,16 +36,17 @@ func TestHelp(t *testing.T) {
 func TestRunDirectoryLifecycle(t *testing.T) {
 	for _, test := range []struct {
 		name     string
+		addr     string
 		keep     bool
 		serveErr error
 	}{
-		{name: "shutdown"},
-		{name: "startup failure", serveErr: errors.New("listener unavailable")},
-		{name: "keep", keep: true},
+		{name: "shutdown", addr: "127.0.0.2:9443"},
+		{name: "startup failure", addr: "localhost:9443", serveErr: errors.New("listener unavailable")},
+		{name: "keep", addr: "localhost:9443", keep: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("TMPDIR", t.TempDir())
-			args := []string{"-addr", "localhost:9443", "-debug-addr", "127.0.0.1:6060"}
+			args := []string{"-addr", test.addr, "-debug-addr", "127.0.0.1:6060"}
 			if test.keep {
 				args = append(args, "-keep")
 			}
@@ -51,10 +54,19 @@ func TestRunDirectoryLifecycle(t *testing.T) {
 			var dir string
 			code := run(args, &stdout, &stderr, func(cfg app.Config, _ io.Writer) error {
 				dir = filepath.Dir(cfg.DBPath)
-				if cfg.Addr != "localhost:9443" || cfg.PublicURL != "https://localhost:9443" || cfg.DebugAddr != "127.0.0.1:6060" {
+				if cfg.Addr != test.addr || cfg.PublicURL != "https://"+test.addr || cfg.DebugAddr != "127.0.0.1:6060" {
 					t.Fatalf("demo listener configuration = %#v", cfg)
 				}
-				if _, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey); err != nil {
+				pair, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cert, err := x509.ParseCertificate(pair.Certificate[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				host, _, _ := net.SplitHostPort(cfg.Addr)
+				if err := cert.VerifyHostname(host); err != nil {
 					t.Fatal(err)
 				}
 				tracker, err := store.Open(cfg.DBPath)
@@ -89,16 +101,7 @@ func TestRunDirectoryLifecycle(t *testing.T) {
 	}
 }
 
-func TestDemoHelpers(t *testing.T) {
-	dir := t.TempDir()
-	certPath := filepath.Join(dir, "localhost.pem")
-	keyPath := filepath.Join(dir, "localhost-key.pem")
-	if err := writeDemoCertificate(certPath, keyPath, "127.0.0.1:8388"); err != nil {
-		t.Fatalf("write demo cert: %v", err)
-	}
-	if _, err := tls.LoadX509KeyPair(certPath, keyPath); err != nil {
-		t.Fatalf("load generated cert: %v", err)
-	}
+func TestDemoURL(t *testing.T) {
 	if got, err := demoURL(":8388"); err != nil || got != "https://127.0.0.1:8388" {
 		t.Fatalf("demoURL(:8388) = %q, %v", got, err)
 	}

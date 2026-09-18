@@ -108,9 +108,15 @@ File transfers and outgoing email/webhook deliveries are unsupported.
 
 ## Testing
 
-Run the [local quality gate](../README.md#development). Test store invariants and
-HTTP contracts directly. Force state transitions or notification timestamps
-instead of waiting on wall-clock sleeps.
+Run the [local quality gate](../README.md#development). Group Go tests by
+responsibility beside the implementation: store invariants and transactions,
+HTTP authentication and contracts, CLI arguments and process behavior.
+Share setup helpers within each package, using `t.Cleanup` to close databases.
+
+Native browser tests cover UI workflows; browser-demo tests cover WebAssembly,
+worker transport, offline use, and tab isolation. Assert behavior and usable
+layout rather than exact colors or fonts. Force state transitions or notification
+timestamps instead of waiting on wall-clock sleeps.
 
 ## Change Guidelines
 
