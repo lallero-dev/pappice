@@ -8,6 +8,10 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
+
+	"pappice/internal/dblock"
+	"pappice/internal/store"
 )
 
 func TestRestoreMovesRollBackEveryFailure(t *testing.T) {
@@ -169,5 +173,80 @@ func TestRestoreAcrossFilesystems(t *testing.T) {
 				t.Fatalf("saved original attachment = %q", got)
 			}
 		})
+	}
+}
+
+func TestRestoreExcludesDatabaseOperations(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pappice.db")
+	tracker, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{DBPath: path, UploadDir: filepath.Join(dir, "uploads"), BackupDir: filepath.Join(dir, "backups")}
+	snapshot, err := Create(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pause restore after it has acquired exclusivity, before installing the DB.
+	restoreCfg := RestoreConfig{
+		DBPath: path, UploadDir: cfg.UploadDir, BackupDir: cfg.BackupDir, BackupPath: snapshot.Path,
+		Now: func() time.Time {
+			checks := map[string]func() error{
+				"open": func() error {
+					opened, err := store.Open(path)
+					if opened != nil {
+						_ = opened.Close()
+					}
+					return err
+				},
+				"status":  func() error { _, err := store.InspectMigration(path); return err },
+				"migrate": func() error { _, err := store.Migrate(path, store.MigrationOptions{}); return err },
+				"backup":  func() error { _, err := Create(cfg); return err },
+				"restore": func() error {
+					_, err := Restore(RestoreConfig{DBPath: path, UploadDir: cfg.UploadDir, BackupDir: cfg.BackupDir, BackupPath: snapshot.Path})
+					return err
+				},
+			}
+			for name, check := range checks {
+				if err := check(); !errors.Is(err, dblock.ErrInUse) {
+					t.Errorf("%s during restore: %v", name, err)
+				}
+			}
+			return time.Now()
+		},
+	}
+	if _, err := Restore(restoreCfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRestoreThroughDatabaseSymlink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pappice.db")
+	alias := filepath.Join(dir, "alias.db")
+	createTestDB(t, path, "before")
+	if err := os.Symlink(path, alias); err != nil {
+		t.Skip(err)
+	}
+	cfg := Config{DBPath: path, UploadDir: filepath.Join(dir, "uploads"), BackupDir: filepath.Join(dir, "backups")}
+	snapshot, err := Create(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createTestDB(t, path, "after")
+	if _, err := Restore(RestoreConfig{
+		DBPath: alias, UploadDir: cfg.UploadDir, BackupDir: cfg.BackupDir, BackupPath: snapshot.Path,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(alias); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("restore replaced the database symlink: %v", err)
+	}
+	if got := queryTestDB(t, path); got != "before" {
+		t.Fatalf("restore did not replace the database target: %q", got)
 	}
 }

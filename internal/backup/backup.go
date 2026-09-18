@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"pappice/internal/dblock"
 )
 
 const timestampFormat = "20060102T150405Z"
@@ -44,6 +46,11 @@ func Create(cfg Config) (Result, error) {
 	if err := validateBackupConfig(cfg); err != nil {
 		return Result{}, err
 	}
+	lock, err := dblock.Acquire(cfg.DBPath, dblock.Shared)
+	if err != nil {
+		return Result{}, err
+	}
+	defer lock.Close()
 	if err := os.MkdirAll(cfg.BackupDir, 0o750); err != nil {
 		return Result{}, err
 	}
@@ -111,11 +118,17 @@ func Restore(cfg RestoreConfig) (RestoreResult, error) {
 	if err := requireRegularFile(backupDBPath); err != nil {
 		return RestoreResult{}, fmt.Errorf("backup database: %w", err)
 	}
-
-	dbParent := filepath.Dir(cfg.DBPath)
-	if err := os.MkdirAll(dbParent, 0o750); err != nil {
+	lock, err := dblock.Acquire(cfg.DBPath, dblock.Exclusive)
+	if err != nil {
+		if errors.Is(err, dblock.ErrInUse) {
+			return RestoreResult{}, fmt.Errorf("stop Pappice before restoring: %w", err)
+		}
 		return RestoreResult{}, err
 	}
+	defer lock.Close()
+	cfg.DBPath = lock.Path
+
+	dbParent := filepath.Dir(cfg.DBPath)
 	tempDBDir, err := os.MkdirTemp(dbParent, "."+filepath.Base(cfg.DBPath)+".restore-tmp-")
 	if err != nil {
 		return RestoreResult{}, err

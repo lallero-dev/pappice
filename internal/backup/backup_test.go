@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"pappice/internal/dblock"
 )
 
 func TestCreateAndRestoreBackup(t *testing.T) {
@@ -160,6 +162,11 @@ func TestRestoreWithInvalidUploadsArchiveDoesNotReplaceCurrentFiles(t *testing.T
 	if got := readFile(t, filepath.Join(uploadDir, "current.txt")); got != "current upload" {
 		t.Fatalf("upload changed after failed restore: %q", got)
 	}
+	lock, err := dblock.Acquire(dbPath, dblock.Exclusive)
+	if err != nil {
+		t.Fatalf("failed restore retained its lock: %v", err)
+	}
+	defer lock.Close()
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		t.Fatalf("read backup dir: %v", err)

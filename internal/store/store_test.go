@@ -4,14 +4,32 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"pappice/internal/dblock"
 	"pappice/internal/security"
 )
+
+func TestFailedOpenReleasesDatabaseLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid.db")
+	if err := os.WriteFile(path, []byte("not a SQLite database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if tracker, err := Open(path); err == nil {
+		_ = tracker.Close()
+		t.Fatal("invalid database opened")
+	}
+	lock, err := dblock.Acquire(path, dblock.Exclusive)
+	if err != nil {
+		t.Fatalf("failed open retained its lock: %v", err)
+	}
+	defer lock.Close()
+}
 
 func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tracker.json")

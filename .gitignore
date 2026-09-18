@@ -2,6 +2,7 @@
 /dist/
 /pappice-data.json
 /pappice.db
+/pappice.db.lock
 /pappice.db-*
 /pappice.env
 /pappice.env.*

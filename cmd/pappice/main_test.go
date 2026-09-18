@@ -1,15 +1,22 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"pappice/internal/store"
 )
 
 func TestEnvHelpers(t *testing.T) {
@@ -244,6 +251,117 @@ func TestBackupAndRestoreCommands(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(uploads, "stale.txt")); !os.IsNotExist(err) {
 		t.Fatalf("stale upload remained after restore: %v", err)
+	}
+}
+
+func TestRestoreRefusesOpenDatabase(t *testing.T) {
+	if path := os.Getenv("PAPPICE_TEST_RESTORE_DB"); path != "" {
+		tracker, err := store.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tracker.Close()
+		fmt.Fprintln(os.Stdout, "ready")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "pappice.db")
+	uploads := filepath.Join(dir, "uploads")
+	tracker, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tracker.Close()
+	product, err := tracker.CreateProduct(store.CreateProduct{Key: "AA", Name: "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment := filepath.Join(uploads, "one.txt")
+	writeCommandFile(t, attachment, "before")
+	flags := []string{"-db", dbPath, "-upload-dir", uploads, "-backup-dir", filepath.Join(dir, "backups")}
+	var stdout, stderr bytes.Buffer
+	if code := run(append([]string{"pappice", "backup"}, flags...), &stdout, &stderr); code != 0 {
+		t.Fatalf("online backup: %s", stderr.String())
+	}
+	after := "after"
+	if _, err := tracker.UpdateProduct(product.ID, store.UpdateProduct{Name: &after}); err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, attachment, after)
+	if err := tracker.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRestoreRefusesOpenDatabase$")
+	cmd.Env = append(os.Environ(), "PAPPICE_TEST_RESTORE_DB="+dbPath)
+	cmd.Stderr = os.Stderr
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("child readiness = %q, %v", line, err)
+	}
+	paths := []string{dbPath, dbPath + "-wal", dbPath + "-shm", attachment}
+	contents := make([][]byte, len(paths))
+	infos := make([]os.FileInfo, len(paths))
+	for i, path := range paths {
+		contents[i], err = os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		infos[i], err = os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := append([]string{"pappice", "restore", "-yes"}, flags...)
+	stdout.Reset()
+	stderr.Reset()
+	if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "stop Pappice before restoring") {
+		t.Fatalf("live restore: exit=%d stderr=%s", code, stderr.String())
+	}
+	for i, path := range paths {
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, contents[i]) {
+			t.Fatalf("refused restore changed %s: %v", path, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil || !os.SameFile(infos[i], info) {
+			t.Fatalf("refused restore replaced %s: %v", path, err)
+		}
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	stderr.Reset()
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("offline restore: %s", stderr.String())
+	}
+	restored, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	got, err := restored.GetProduct(product.ID)
+	if err != nil || got.Name != "before" {
+		t.Fatalf("restored product = %+v, %v", got, err)
+	}
+	if got := readCommandFile(t, attachment); got != "before" {
+		t.Fatalf("restored upload = %q", got)
 	}
 }
 

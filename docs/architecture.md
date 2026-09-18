@@ -46,6 +46,10 @@ Each upload owns a separate file, so failed-request cleanup cannot affect a
 concurrent upload. SHA-256 is content metadata, not a storage key. Deletion
 removes a stored file only when no attachment references it.
 
+Pappice database operations hold shared OS locks on `<database>.lock`; restore holds an
+exclusive lock until completion or rollback. The lock file stays in place and
+locks are released when the process exits.
+
 Restore stages replacements and saves originals beside each destination, using
 `.<name>.restore-pre-<timestamp>` recovery directories. Failed operations roll back
 completed renames; failed rollback preserves originals and reports their paths.

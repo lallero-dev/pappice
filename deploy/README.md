@@ -214,6 +214,9 @@ sudo systemctl start pappice.service
 
 ## Restore
 
+Stop Pappice before restoring. Restore refuses while another Pappice process
+uses the database, including with `-yes`. Keep external SQLite clients closed too.
+
 Restore prints recovery directories containing the previous database and uploads,
 saved beside their destinations (`pappice-data` for Docker). Older backups may
 need a compatible version or migration before startup.

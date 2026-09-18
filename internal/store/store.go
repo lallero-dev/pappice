@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
+
+	"pappice/internal/dblock"
 )
 
 var (
@@ -515,8 +516,11 @@ type CreateEmailNotification struct {
 }
 
 type Store struct {
-	db   *sql.DB
-	path string
+	db        *sql.DB
+	path      string
+	lock      *dblock.Lock
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func normalizePage(limit, offset, defaultLimit, maxLimit int) (int, int) {
@@ -549,14 +553,19 @@ func Open(path string) (*Store, error) {
 	if path == "" {
 		path = "pappice.db"
 	}
-	db, err := openSQLite(path)
+	lock, err := dblock.Acquire(path, dblock.Shared)
 	if err != nil {
 		return nil, err
 	}
+	db, err := openSQLite(path)
+	if err != nil {
+		_ = lock.Close()
+		return nil, err
+	}
 
-	s := &Store{db: db, path: path}
+	s := &Store{db: db, path: path, lock: lock}
 	if err := s.init(); err != nil {
-		_ = db.Close()
+		_ = s.Close()
 		return nil, err
 	}
 	return s, nil
@@ -579,7 +588,10 @@ func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	return s.db.Close()
+	s.closeOnce.Do(func() {
+		s.closeErr = errors.Join(s.db.Close(), s.lock.Close())
+	})
+	return s.closeErr
 }
 
 func (s *Store) init() error {
@@ -603,14 +615,6 @@ func (s *Store) init() error {
 }
 
 func openSQLite(path string) (*sql.DB, error) {
-	if path == "" {
-		path = "pappice.db"
-	}
-	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, err
-		}
-	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err

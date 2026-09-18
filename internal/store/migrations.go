@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"pappice/internal/dblock"
 )
 
 type MigrationInfo struct {
@@ -74,6 +76,11 @@ func InspectMigration(path string) (MigrationStatus, error) {
 		}
 	}
 
+	lock, err := dblock.Acquire(path, dblock.Shared)
+	if err != nil {
+		return status, err
+	}
+	defer lock.Close()
 	db, err := openSQLite(path)
 	if err != nil {
 		return status, err
@@ -87,6 +94,11 @@ func InspectMigration(path string) (MigrationStatus, error) {
 
 func Migrate(path string, opts MigrationOptions) (MigrationResult, error) {
 	path = defaultDBPath(path)
+	lock, err := dblock.Acquire(path, dblock.Shared)
+	if err != nil {
+		return MigrationResult{DryRun: opts.DryRun}, err
+	}
+	defer lock.Close()
 	targetPath := path
 	cleanup := func() {}
 	if opts.DryRun {
