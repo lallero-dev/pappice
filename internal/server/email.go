@@ -9,7 +9,7 @@ import (
 	"pappice/internal/store"
 )
 
-func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, actor store.EventActor, sendAfter time.Time) ([]store.CreateEmailNotification, error) {
+func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, actor store.EventActor, comment *store.Comment, sendAfter time.Time) ([]store.CreateEmailNotification, error) {
 	if !s.options.EmailNotifications {
 		return nil, nil
 	}
@@ -21,7 +21,7 @@ func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, act
 	if len(recipients) == 0 {
 		return nil, nil
 	}
-	subject, textBody, htmlBody := s.ticketEmailContent(event, ticket, actor)
+	subject, textBody, htmlBody := s.ticketEmailContent(event, ticket, actor, comment)
 	inputs := make([]store.CreateEmailNotification, 0, len(recipients))
 	for _, recipient := range recipients {
 		inputs = append(inputs, store.CreateEmailNotification{
@@ -41,12 +41,12 @@ func (s *Server) ticketEmailNotifications(event string, ticket store.Ticket, act
 	return inputs, nil
 }
 
-func (s *Server) requesterEmailNotifications(event string, ticket store.Ticket, actorName string, sendAfter time.Time) []store.CreateEmailNotification {
+func (s *Server) requesterEmailNotifications(event string, ticket store.Ticket, actorName string, comment *store.Comment, sendAfter time.Time) []store.CreateEmailNotification {
 	if !s.options.EmailNotifications || ticket.RequesterUserID == 0 || strings.TrimSpace(ticket.RequesterEmail) == "" {
 		return nil
 	}
 	sendAfter = normalizeNotificationSendAfter(sendAfter)
-	subject, textBody, htmlBody := s.requesterEmailContent(event, ticket, actorName)
+	subject, textBody, htmlBody := s.requesterEmailContent(event, ticket, actorName, comment)
 	return []store.CreateEmailNotification{{
 		ProductID:      ticket.ProductID,
 		TicketID:       ticket.ID,
@@ -111,7 +111,7 @@ func (s *Server) accountLinkEmailContent(event string, user store.User, token st
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
 
-func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorName string) (string, string, string) {
+func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorName string, comment *store.Comment) (string, string, string) {
 	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, requesterEmailSubjectAction(event), ticket.Title)
 	link := s.ticketURL()
 
@@ -130,10 +130,8 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 	}
 
 	blocks := make([]emailBlock, 0, 1)
-	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(ticket); ok {
-			blocks = append(blocks, emailBlock{Title: "Latest public reply", Meta: "from " + comment.Author, Body: comment.Body})
-		}
+	if comment != nil {
+		blocks = append(blocks, emailBlock{Title: "Public reply", Meta: "from " + comment.Author, Body: comment.Body})
 	}
 
 	layout := emailLayout{
@@ -149,7 +147,7 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
 
-func (s *Server) ticketEmailContent(event string, ticket store.Ticket, actor store.EventActor) (string, string, string) {
+func (s *Server) ticketEmailContent(event string, ticket store.Ticket, actor store.EventActor, comment *store.Comment) (string, string, string) {
 	actorName := defaultString(actor.DisplayName, actor.Email)
 	action := ticketEventAction(event)
 	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, ticketEmailSubjectAction(event), ticket.Title)
@@ -171,10 +169,8 @@ func (s *Server) ticketEmailContent(event string, ticket store.Ticket, actor sto
 	if desc := strings.TrimSpace(ticket.Description); desc != "" {
 		blocks = append(blocks, emailBlock{Title: "Description", Body: desc})
 	}
-	if event != "ticket.created" {
-		if comment, ok := latestPublicComment(ticket); ok {
-			blocks = append(blocks, emailBlock{Title: "Latest public reply", Meta: "from " + comment.Author, Body: comment.Body})
-		}
+	if comment != nil {
+		blocks = append(blocks, emailBlock{Title: "Public reply", Meta: "from " + comment.Author, Body: comment.Body})
 	}
 
 	layout := emailLayout{
@@ -352,14 +348,14 @@ func emailHTMLLines(value string) string {
 	return strings.ReplaceAll(html.EscapeString(value), "\n", "<br>")
 }
 
-func latestPublicComment(ticket store.Ticket) (store.Comment, bool) {
-	for i := len(ticket.Comments) - 1; i >= 0; i-- {
-		comment := ticket.Comments[i]
-		if comment.Visibility == "" || comment.Visibility == "public" {
-			return comment, true
+func publicCommentByID(ticket store.Ticket, id int64) *store.Comment {
+	for i := range ticket.Comments {
+		comment := &ticket.Comments[i]
+		if comment.ID == id && (comment.Visibility == "" || comment.Visibility == "public") {
+			return comment
 		}
 	}
-	return store.Comment{}, false
+	return nil
 }
 
 func requesterStatusLabel(status string) string {

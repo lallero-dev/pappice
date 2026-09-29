@@ -262,16 +262,17 @@ func (s *Server) ticketEventEmails(event string, ticket store.Ticket, actor stor
 		notifyStaff = payload.PublicComment && !payload.HasPatch
 		notifyRequester = payload.PublicComment && actor.UserID != ticket.RequesterUserID
 	}
+	comment := publicCommentByID(ticket, payload.CommentID)
 	inputs := make([]store.CreateEmailNotification, 0)
 	if notifyStaff {
-		notifications, err := s.ticketEmailNotifications(event, ticket, actor, sendAfter)
+		notifications, err := s.ticketEmailNotifications(event, ticket, actor, comment, sendAfter)
 		if err != nil {
 			return nil, err
 		}
 		inputs = append(inputs, notifications...)
 	}
 	if notifyRequester {
-		inputs = append(inputs, s.requesterEmailNotifications(event, ticket, requesterActorName, sendAfter)...)
+		inputs = append(inputs, s.requesterEmailNotifications(event, ticket, requesterActorName, comment, sendAfter)...)
 	}
 	return inputs, nil
 }

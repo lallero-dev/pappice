@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,6 +13,89 @@ import (
 
 	"pappice/internal/store"
 )
+
+func TestTicketEmailsUseEventComment(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "pappice.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+	staff, err := tracker.CreateFirstAdmin(store.CreateUser{Email: "staff@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	customer, err := tracker.CreateUser(store.CreateUser{Email: "customer@example.test", Password: "correct horse", Role: "customer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	products, err := tracker.ListProducts(staff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	productID := products[0].ID
+	if _, err := tracker.UpsertProductMember(productID, store.UpsertProductMember{UserID: customer.ID, Role: "customer"}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewServer(tracker, Options{EmailNotifications: true})
+	replies := map[int64]string{staff.ID: "Staff reply", customer.ID: "Customer reply"}
+	for _, test := range []struct {
+		name    string
+		authors []int64
+	}{
+		{"staff replies first", []int64{staff.ID, customer.ID}},
+		{"customer replies first", []int64{customer.ID, staff.ID}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ticket, err := tracker.CreateTicket(store.CreateTicket{ProductID: productID, Title: test.name, ActorUserID: customer.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tracker.SaveTicket(store.SaveTicketInput{
+				TicketID: ticket.ID, ActorUserID: staff.ID, Patch: store.UpdateTicket{AssigneeUserID: &staff.ID},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := app.dispatchPendingEvents(context.Background(), 100); err != nil {
+				t.Fatal(err)
+			}
+			for _, notification := range mustEmailNotifications(t, tracker, 100) {
+				if err := tracker.MarkEmailSent(notification.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Both replies exist before either event is processed.
+			for _, author := range test.authors {
+				if _, err := tracker.SaveTicket(store.SaveTicketInput{
+					TicketID: ticket.ID, ActorUserID: author, Comment: &store.AddComment{Body: replies[author]},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := app.dispatchPendingEvents(context.Background(), 100); err != nil {
+				t.Fatal(err)
+			}
+			want := map[int64]string{staff.ID: replies[customer.ID], customer.ID: replies[staff.ID]}
+			for _, notification := range mustEmailNotifications(t, tracker, 100) {
+				if notification.TicketID != ticket.ID || notification.Status != "pending" {
+					continue
+				}
+				body, ok := want[notification.UserID]
+				if !ok || notification.Event != "ticket.commented" {
+					t.Fatalf("unexpected notification: %+v", notification)
+				}
+				for _, content := range []string{notification.BodyText, notification.BodyHTML} {
+					if !strings.Contains(content, body) || strings.Contains(content, replies[notification.UserID]) {
+						t.Errorf("email to %s should quote %q, got:\n%s", notification.RecipientEmail, body, content)
+					}
+				}
+				delete(want, notification.UserID)
+			}
+			if len(want) != 0 {
+				t.Fatalf("missing reply notifications: %v", want)
+			}
+		})
+	}
+}
 
 func TestAccountLinkProjectionResolvesUserByID(t *testing.T) {
 	tracker, err := store.Open(filepath.Join(t.TempDir(), "pappice.db"))
@@ -76,7 +160,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		}},
 	}
 
-	subject, textBody, htmlBody := server.requesterEmailContent("ticket.commented", ticket, "Alice")
+	subject, textBody, htmlBody := server.requesterEmailContent("ticket.commented", ticket, "Alice", &ticket.Comments[0])
 
 	if subject != "[PME-1] Ticket update: Need <help>" {
 		t.Fatalf("subject = %q", subject)
@@ -85,7 +169,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		"Alice replied to your ticket.",
 		"Ticket: PME-1",
 		"Status: Closed",
-		"Latest public reply from Alice:",
+		"Public reply from Alice:",
 		"Open your ticket:\nhttps://tracker.example.test/",
 		"Replies to this email are not read.",
 	} {
@@ -96,7 +180,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 	for _, want := range []string{
 		"Pappice customer support",
 		"Need &lt;help&gt;",
-		"Latest public reply",
+		"Public reply",
 		"from Alice",
 		`<table role="presentation"`,
 		"Please try the updated setup.<br>It should work now.",
@@ -125,7 +209,7 @@ func TestTicketEmailContentUsesReadableLayout(t *testing.T) {
 	}
 	actor := store.EventActor{DisplayName: "Paolo", Email: "paolo@example.test"}
 
-	subject, textBody, htmlBody := server.ticketEmailContent("ticket.assigned", ticket, actor)
+	subject, textBody, htmlBody := server.ticketEmailContent("ticket.assigned", ticket, actor, nil)
 
 	if subject != "[PME-2] Ticket update: Cannot sign in" {
 		t.Fatalf("subject = %q", subject)
