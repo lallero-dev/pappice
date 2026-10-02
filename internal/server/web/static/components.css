@@ -13,6 +13,14 @@
   display: none !important;
 }
 
+strong,
+b,
+h2,
+h3,
+h4 {
+  font-weight: var(--weight-semibold);
+}
+
 dialog {
   border: 1px solid #cbd5df;
   border-radius: 10px;
@@ -104,7 +112,7 @@ label {
   color: #3b4856;
   display: grid;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--weight-medium);
   gap: 6px;
 }
 
@@ -116,6 +124,7 @@ textarea {
   border-radius: 6px;
   color: #1f2933;
   font: inherit;
+  font-weight: var(--weight-regular);
   min-height: 34px;
   padding: 7px 9px;
   width: 100%;
@@ -151,7 +160,7 @@ button:focus-visible {
 .field-help {
   color: #667085;
   font-size: 12px;
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 .check {
@@ -228,7 +237,7 @@ button:disabled {
   background: transparent;
   color: #667085;
   display: inline-flex;
-  font-weight: 700;
+  font-weight: var(--weight-semibold);
   justify-content: center;
   padding: 0;
   width: 34px;
@@ -268,7 +277,7 @@ button:disabled {
 .confirm-detail-list dt {
   background: #f8fafc;
   color: #667085;
-  font-weight: 750;
+  font-weight: var(--weight-medium);
 }
 
 .confirm-detail-list dd {
@@ -356,18 +365,18 @@ button:disabled {
 .ticket-form-field > span {
   color: #3b4856;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
 }
 
 .ticket-title-input {
   font-size: 22px;
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
   min-height: 44px;
 }
 
 .ticket-description-input {
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   line-height: 1.55;
   min-height: 150px;
   resize: none;
@@ -404,7 +413,7 @@ button:disabled {
   color: #194d7b;
   content: "Drop files to attach";
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   left: 50%;
   letter-spacing: 0;
   padding: 9px 14px;
@@ -474,7 +483,7 @@ button:disabled {
   color: #194d7b;
   display: inline-flex;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--weight-semibold);
   height: 26px;
   justify-content: center;
   width: 26px;
@@ -533,7 +542,7 @@ button:disabled {
 .section-title {
   color: #3b4856;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
   margin: 0;
   text-transform: uppercase;
 }
@@ -586,7 +595,7 @@ button:disabled {
   color: #22313f;
   display: inline-flex;
   flex: 0 0 auto;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   height: 30px;
   justify-content: center;
   min-height: 30px;
@@ -630,7 +639,7 @@ button:disabled {
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   gap: 5px;
   height: 25px;
   max-width: 180px;
@@ -756,12 +765,13 @@ button:disabled {
 .ticket-property-label {
   color: #667085;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   padding-top: 7px;
   text-transform: uppercase;
 }
 
 .ticket-property > strong {
+  font-weight: var(--weight-regular);
   overflow-wrap: anywhere;
   padding-top: 6px;
 }
@@ -825,11 +835,11 @@ button:disabled {
 .fact-label {
   color: #667085;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--weight-medium);
 }
 
 .fact-block strong {
-  font-weight: 600;
+  font-weight: var(--weight-medium);
   overflow-wrap: anywhere;
 }
 
@@ -837,7 +847,7 @@ button:disabled {
   border-radius: 999px;
   display: inline-flex;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   justify-content: center;
   min-width: 72px;
   padding: 4px 8px;

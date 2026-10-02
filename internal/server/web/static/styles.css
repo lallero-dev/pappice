@@ -15,6 +15,10 @@
   --amber: #b7791f;
   --red: #b42318;
   --shadow: 0 12px 28px rgb(15 23 42 / 10%);
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
 }
 
 * {
@@ -54,6 +58,15 @@ textarea {
 
 button {
   cursor: pointer;
+}
+
+strong,
+b,
+h1,
+h2,
+h3,
+h4 {
+  font-weight: var(--weight-semibold);
 }
 
 button:disabled {
@@ -96,7 +109,7 @@ button:disabled {
   border-radius: 6px;
   color: var(--brand-contrast);
   display: inline-flex;
-  font-weight: 800;
+  font-weight: var(--weight-bold);
   height: 34px;
   justify-content: center;
   width: 34px;
@@ -168,7 +181,7 @@ button:disabled {
   color: #253746;
   display: inline-flex;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   justify-content: center;
   min-width: 20px;
   padding: 1px 6px;
@@ -270,7 +283,7 @@ button:disabled {
   color: #253746;
   display: inline-flex;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   height: 28px;
   justify-content: center;
   width: 28px;
@@ -371,7 +384,7 @@ button:disabled {
   border-radius: 5px;
   color: inherit;
   display: inline-flex;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   height: 24px;
   justify-content: center;
   padding: 0;
@@ -450,7 +463,7 @@ label,
 .filter-control label {
   color: #3b4856;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--weight-medium);
 }
 
 input,
@@ -460,6 +473,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text);
+  font-weight: var(--weight-regular);
   min-height: 34px;
   padding: 7px 9px;
   width: 100%;
@@ -514,7 +528,7 @@ button:focus-visible {
   align-items: center;
   display: inline-flex;
   font-size: 17px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   height: 16px;
   justify-content: center;
   line-height: 1;
@@ -578,7 +592,7 @@ button:focus-visible {
 
 .status-folder-label {
   font-size: 13px;
-  font-weight: 750;
+  font-weight: var(--weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -590,7 +604,7 @@ button:focus-visible {
   border-radius: 999px;
   color: var(--blue-dark);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
   min-width: 24px;
   padding: 1px 6px;
   text-align: center;
@@ -702,7 +716,7 @@ button:focus-visible {
   color: #ffffff;
   display: inline-flex;
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   height: 18px;
   justify-content: center;
   min-width: 18px;
@@ -757,7 +771,7 @@ button:focus-visible {
 .popover-section label {
   color: #3b4856;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
   margin: 0;
 }
 
@@ -804,12 +818,12 @@ button:focus-visible {
 .sort-menu-item.active {
   background: #edf6ff;
   color: var(--blue-dark);
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
 }
 
 .sort-menu-item.active::after {
   content: "✓";
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
 }
 
 .native-sort-select {
@@ -889,12 +903,10 @@ button:focus-visible {
   box-shadow: inset 0 0 0 1px var(--blue), inset 4px 0 0 var(--blue), 0 2px 8px rgba(35, 103, 164, 0.18);
 }
 
-.ticket-row.unread .ticket-row-product,
 .ticket-row.unread .ticket-row-time,
-.ticket-row.unread .ticket-row-title,
-.ticket-row.unread .ticket-row-person {
+.ticket-row.unread .ticket-row-title {
   color: #183d5e;
-  font-weight: 850;
+  font-weight: var(--weight-semibold);
 }
 
 .ticket-unread-dot {
@@ -919,7 +931,7 @@ button:focus-visible {
   color: var(--blue-dark);
   display: flex;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -933,7 +945,7 @@ button:focus-visible {
 
 .ticket-row-title {
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--weight-regular);
   grid-column: 1 / -1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -959,7 +971,7 @@ button:focus-visible {
   color: #53657a;
   display: inline-flex;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-regular);
   justify-content: center;
   max-width: 120px;
   min-width: 0;
@@ -973,7 +985,7 @@ button:focus-visible {
   border-radius: 999px;
   display: inline-flex;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   justify-content: center;
   min-width: 72px;
   padding: 4px 8px;
@@ -1114,7 +1126,7 @@ button:focus-visible {
   color: var(--blue-dark);
   content: "Drop files to attach";
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   left: 50%;
   letter-spacing: 0;
   padding: 9px 14px;
@@ -1155,13 +1167,13 @@ button:focus-visible {
 .ticket-form-field > span {
   color: #3b4856;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
 }
 
 .ticket-title-input {
   font-size: 22px;
-  font-weight: 750;
+  font-weight: var(--weight-semibold);
   min-height: 44px;
 }
 
@@ -1199,7 +1211,7 @@ button:focus-visible {
 .section-title {
   color: #3b4856;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0;
   margin: 0;
   text-transform: uppercase;
@@ -1221,12 +1233,13 @@ button:focus-visible {
 .ticket-property-label {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   padding-top: 7px;
   text-transform: uppercase;
 }
 
 .ticket-property > strong {
+  font-weight: var(--weight-regular);
   overflow-wrap: anywhere;
   padding-top: 6px;
 }
@@ -1313,7 +1326,7 @@ button:focus-visible {
   color: #b42318;
   display: grid;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   gap: 10px;
   grid-template-columns: 1fr auto 1fr;
   letter-spacing: 0.04em;
@@ -1373,7 +1386,7 @@ button:focus-visible {
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   height: 30px;
   justify-content: center;
   margin-top: 2px;
@@ -1457,7 +1470,7 @@ button:focus-visible {
   border-radius: 999px;
   display: inline-flex;
   font-size: 11px;
-  font-weight: 750;
+  font-weight: var(--weight-medium);
   line-height: 1;
   padding: 4px 7px;
 }
@@ -1480,7 +1493,7 @@ button:focus-visible {
 
 .message-link {
   color: #1b5f9e;
-  font-weight: 600;
+  font-weight: var(--weight-medium);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -1629,7 +1642,7 @@ button:focus-visible {
   color: #22313f;
   display: inline-flex;
   flex: 0 0 auto;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   height: 30px;
   justify-content: center;
   padding: 0;
@@ -1675,7 +1688,7 @@ button:focus-visible {
   border-radius: 999px;
   color: #22313f;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-medium);
   height: 25px;
   padding: 0 4px 0 9px;
 }
@@ -2032,7 +2045,7 @@ button:focus-visible {
 
 .status-ok {
   color: var(--green);
-  font-weight: 700;
+  font-weight: var(--weight-medium);
 }
 
 .status-error {
@@ -2159,7 +2172,7 @@ button:focus-visible {
 .product-context-kicker {
   color: var(--blue-dark);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0;
   margin: 0;
   text-transform: uppercase;
@@ -2186,7 +2199,7 @@ button:focus-visible {
   color: var(--blue-dark);
   display: inline-flex;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--weight-semibold);
   line-height: 1;
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -2367,7 +2380,7 @@ button:focus-visible {
 .maintenance-item span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--weight-medium);
 }
 
 .email-stat strong,
@@ -2425,7 +2438,7 @@ button:focus-visible {
 .fact-label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--weight-medium);
 }
 
 .ticket-side .fact-label {
