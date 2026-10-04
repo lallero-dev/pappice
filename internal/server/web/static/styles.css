@@ -1078,11 +1078,6 @@ button:focus-visible {
   display: none;
 }
 
-.ticket-info-sheet {
-  display: grid;
-  min-height: 0;
-}
-
 .ticket-main,
 .ticket-side {
   min-width: 0;
@@ -1177,44 +1172,10 @@ button:focus-visible {
   min-height: 44px;
 }
 
-.ticket-description-input {
-  line-height: 1.55;
-  min-height: 150px;
-}
-
-.detail-controls {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.ticket-side .detail-controls {
-  gap: 8px;
-  grid-template-columns: 1fr;
-}
-
-.description {
-  background: var(--panel-strong);
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  min-height: 90px;
-  padding: 10px;
-  white-space: pre-wrap;
-}
-
 .side-section {
   display: grid;
   gap: 6px;
   padding: 8px 10px;
-}
-
-.section-title {
-  color: #3b4856;
-  font-size: 12px;
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0;
-  margin: 0;
-  text-transform: uppercase;
 }
 
 .ticket-properties {
@@ -2404,64 +2365,6 @@ button:focus-visible {
   margin-right: auto;
 }
 
-.email-detail {
-  display: grid;
-  gap: 12px;
-}
-
-.fact-list {
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.fact-block {
-  align-items: start;
-  background: #fff;
-  border-bottom: 1px solid var(--border-soft);
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 96px minmax(0, 1fr);
-  padding: 8px 10px;
-}
-
-.ticket-side .fact-block {
-  gap: 6px;
-  grid-template-columns: 72px minmax(0, 1fr);
-  padding: 6px 9px;
-}
-
-.fact-block:last-child {
-  border-bottom: 0;
-}
-
-.fact-label {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: var(--weight-medium);
-}
-
-.ticket-side .fact-label {
-  font-size: 11px;
-}
-
-.fact-block strong {
-  overflow-wrap: anywhere;
-}
-
-.email-body {
-  background: var(--panel-strong);
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  color: var(--text);
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  margin: 0;
-  max-height: 320px;
-  overflow: auto;
-  padding: 10px;
-  white-space: pre-wrap;
-}
-
 .token-result {
   background: #ecfdf3;
   border: 1px solid #a6d8b7;
@@ -2670,23 +2573,6 @@ button:focus-visible {
     display: none;
   }
 
-  .ticket-info-sheet .ticket-side {
-    background: #ffffff;
-    border: 0;
-    display: flex;
-    flex-direction: column;
-    max-height: none;
-    overflow: visible;
-  }
-
-  .ticket-info-sheet .side-section {
-    padding: 10px 0;
-  }
-
-  .ticket-info-sheet .side-section:first-child {
-    padding-top: 0;
-  }
-
   .detail-header h3,
   .ticket-title-input {
     font-size: 18px;
@@ -2745,7 +2631,6 @@ button:focus-visible {
     padding: 8px 10px;
   }
 
-  .detail-controls,
   .ticket-detail-grid,
   .ticket-list-topbar,
   .admin-list-tools {

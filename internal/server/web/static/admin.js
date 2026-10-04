@@ -3,7 +3,7 @@ import { formatBytes } from "./attachments.js";
 import { badge, debounce, el, labelize, relativeTime } from "./components.js";
 import { ADMIN_SECTIONS, DEFAULT_ADMIN_SECTION, els, fullDateFormatter, shortDateFormatter, state } from "./state.js";
 import { accountLabel, accountName, isAdmin } from "./access.js";
-import { copyText, emptyInline, factBlock, formField, selectOptions, showAppAlert, showError, showInlineConfirm } from "./ui.js";
+import { copyField, emptyInline, factBlock, formField, selectOptions, showAppAlert, showError, showInlineConfirm } from "./ui.js";
 
 let app = {};
 let emailLoadRequestID = 0;
@@ -197,27 +197,14 @@ function renderEmailNotifications() {
   renderEmailOverview();
   els.sendTestEmailButton.disabled = !state.emailEnabled;
   els.emailList.replaceChildren();
-  if (!state.emailEnabled && state.emailNotifications.length === 0) {
-    els.emailList.append(emptyInline({
+  if (state.emailNotifications.length === 0) {
+    els.emailList.append(emptyInline(state.emailEnabled ? {
+      title: "No email notifications",
+      body: "Queued, sent, and failed email notifications will appear here."
+    } : {
       title: "Email is not configured",
       body: "Set SMTP environment variables to send no-reply notifications."
     }));
-    renderPager(els.emailPager, state.emailPage, (offset) => {
-      state.emailPage.offset = offset;
-      loadEmailNotifications().catch(showError);
-    });
-    return;
-  }
-  if (state.emailNotifications.length === 0) {
-    els.emailList.append(emptyInline({
-      title: "No email notifications",
-      body: "Queued, sent, and failed email notifications will appear here."
-    }));
-    renderPager(els.emailPager, state.emailPage, (offset) => {
-      state.emailPage.offset = offset;
-      loadEmailNotifications().catch(showError);
-    });
-    return;
   }
   for (const notification of state.emailNotifications) {
     els.emailList.append(emailNotificationRow(notification));
@@ -355,11 +342,6 @@ function renderAuditEvents() {
       title: "No audit events",
       body: "Security and admin actions will appear here."
     }));
-    renderPager(els.auditPager, state.auditPage, (offset) => {
-      state.auditPage.offset = offset;
-      loadAuditEvents().catch(showError);
-    });
-    return;
   }
   for (const event of state.auditEvents) {
     const row = el("div", { className: "admin-row" });
@@ -555,18 +537,6 @@ function openAccountLinkResult(payload, purpose = "setup") {
   const link = payload.account_link || {};
   const userLabel = accountName(payload) || "Account";
   const title = purpose === "reset" ? `Password Reset for ${userLabel}` : `Setup Link for ${userLabel}`;
-  const linkInput = el("input", {
-    readonly: "readonly",
-    value: link.url || ""
-  });
-  const copy = el("button", { type: "button" }, "Copy");
-  copy.addEventListener("click", async () => {
-    await copyText(link.url || "");
-    copy.textContent = "Copied";
-    window.setTimeout(() => {
-      copy.textContent = "Copy";
-    }, 1200);
-  });
   const hasEmail = Boolean(payload.email);
   const statusText = !hasEmail
     ? "This account has no email address. Share this one-time link manually."
@@ -577,7 +547,7 @@ function openAccountLinkResult(payload, purpose = "setup") {
     : "Email is not configured. Share this one-time link manually.";
   const content = el("div", { className: "link-result" }, [
     el("p", {}, statusText),
-    el("div", { className: "copy-row" }, [linkInput, copy]),
+    copyField(link.url || ""),
     el("div", { className: "link-meta" }, [
       el("span", {}, ["Account: ", el("strong", {}, userLabel)]),
       el("span", {}, ["Email: ", el("strong", {}, payload.email || "")]),

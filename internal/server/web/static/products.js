@@ -2,7 +2,7 @@ import { request } from "./api.js";
 import { badge, el, labelize, relativeTime, splitList } from "./components.js";
 import { DEFAULT_PRODUCT_SECTION, PRODUCT_SECTIONS, els, state } from "./state.js";
 import { accountLabel, accountName, canManageProduct, currentProductDetail, isAdmin, manageableProducts } from "./access.js";
-import { confirmAction, copyText, emptyInline, formField, selectOptions, showAppAlert, showError, showInlineConfirm } from "./ui.js";
+import { confirmAction, copyField, emptyInline, formField, selectOptions, showAppAlert, showError, showInlineConfirm } from "./ui.js";
 
 let app = {};
 let sectionLoadRequestID = 0;
@@ -201,7 +201,6 @@ function renderProductGeneral() {
   if (els.productGeneralDescription) els.productGeneralDescription.value = product.description || "";
   for (const control of controls) control.disabled = !canManageProduct(product.id);
   if (els.productDangerZone) els.productDangerZone.hidden = !isAdmin();
-  if (els.deleteProductButton) els.deleteProductButton.dataset.productId = String(product.id);
 }
 
 function renderMembers() {
@@ -486,12 +485,8 @@ function openWebhookModal(scope) {
     onSubmit: async (data) => {
       const payload = { ...data, events: splitList(data.events), enabled: Boolean(data.enabled) };
       if (!String(payload.secret || "").trim()) delete payload.secret;
-      let result;
-      if (scope === "global") {
-        result = await request("/api/webhooks", { method: "POST", body: JSON.stringify(payload) });
-      } else {
-        result = await request(`/api/products/${state.productDetailId}/webhooks`, { method: "POST", body: JSON.stringify(payload) });
-      }
+      const path = scope === "global" ? "/api/webhooks" : `/api/products/${state.productDetailId}/webhooks`;
+      const result = await request(path, { method: "POST", body: JSON.stringify(payload) });
       await refreshWebhookLists();
       openWebhookSecretResult(result.webhook, result.secret, "created");
       return false;
@@ -560,21 +555,9 @@ function openWebhookEditModal(hook, scope) {
 }
 
 function openWebhookSecretResult(hook, secret, action) {
-  const secretInput = el("input", {
-    readonly: "readonly",
-    value: secret || ""
-  });
-  const copy = el("button", { type: "button" }, "Copy");
-  copy.addEventListener("click", async () => {
-    await copyText(secret || "");
-    copy.textContent = "Copied";
-    window.setTimeout(() => {
-      copy.textContent = "Copy";
-    }, 1200);
-  });
   const content = el("div", { className: "link-result" }, [
     el("p", {}, `Webhook secret ${action}. Store it now; Pappice will not show this value again.`),
-    el("div", { className: "copy-row" }, [secretInput, copy]),
+    copyField(secret || ""),
     el("div", { className: "link-meta" }, [
       el("span", {}, ["Webhook: ", el("strong", {}, hook?.name || "")]),
       el("span", {}, ["Signature header: ", el("strong", {}, "X-Pappice-Signature")]),

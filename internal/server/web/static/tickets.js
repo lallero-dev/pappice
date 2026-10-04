@@ -4,7 +4,7 @@ import { badge, debounce, el, labelize, relativeTime } from "./components.js";
 import { richTextNodes } from "./rich-text.js";
 import { DEFAULT_TICKET_STATUSES, TICKET_AUTOSAVE_DELAY_MS, TICKET_PAGE_SIZE, TICKET_REFRESH_INTERVAL_MS, TICKET_SORT_LABELS, els, fullDateFormatter, state } from "./state.js";
 import { accountLabel, accountName, canAccessProductsView, canAddInternalNote, canCommentTicket, canCreateTicket, canEditTicket, canReplyToTicket, canUseAssigneeFilter, currentProduct, isAdmin, isCustomer, productDisplayName } from "./access.js";
-import { confirmAction, emptyState, selectOptions, showAppAlert, showError, sideSection } from "./ui.js";
+import { confirmAction, emptyState, selectOptions, showAppAlert, showError } from "./ui.js";
 
 let app = {};
 let ticketLoadRequestID = 0;
@@ -738,8 +738,8 @@ function prefersReducedMotion() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
 }
 
-async function createTicketFromForm(data, form, fallbackProductId) {
-  const payload = ticketCreatePayload(data, fallbackProductId);
+async function createTicketFromForm(data, form) {
+  const payload = ticketCreatePayload(data);
   const body = ticketCreateRequestBody(payload, form);
   const created = await request(`/api/products/${payload.product_id}/tickets`, { method: "POST", body });
   state.ticketProductId = payload.product_id;
@@ -796,13 +796,9 @@ function ticketMobileHeader(ticket) {
 }
 
 function ticketSidePanel(ticket, editable) {
-  const side = el("aside", { className: "ticket-side" });
-  for (const section of ticketSideSections(ticket, editable)) side.append(section);
-  return side;
-}
-
-function ticketSideSections(ticket, editable) {
-  return [sideSection("", ticketProperties(ticket, editable))];
+  return el("aside", { className: "ticket-side" }, [
+    el("section", { className: "side-section" }, ticketProperties(ticket, editable))
+  ]);
 }
 
 function openTicketInfoSheet(ticket) {
@@ -892,12 +888,8 @@ function openTicketCreateModal() {
     return;
   }
   const content = el("div", { className: "ticket-create-modal" }, [
-    ticketCreateFlow({
-      productId: null,
-      creatableProducts
-    })
+    ticketCreateFlow(creatableProducts)
   ]);
-  let submitButton = null;
   els.modalHost.open({
     title: "New Ticket",
     content,
@@ -909,7 +901,7 @@ function openTicketCreateModal() {
       await createTicketFromForm(data, form);
     }
   });
-  submitButton = els.modalHost.shadowRoot?.querySelector("footer .primary");
+  const submitButton = els.modalHost.shadowRoot?.querySelector("footer .primary");
   bindTicketCreateState({ root: content, submitButton });
   const attachmentInput = content.querySelector(".attachment-input");
   if (attachmentInput) {
@@ -937,7 +929,7 @@ function confirmTicketCreate(data, form) {
   });
 }
 
-function ticketCreateFlow({ productId, creatableProducts }) {
+function ticketCreateFlow(creatableProducts) {
   const productOptions = [
     { value: "", label: "Choose product" },
     ...ticketProductOptions(creatableProducts)
@@ -946,18 +938,17 @@ function ticketCreateFlow({ productId, creatableProducts }) {
     { value: "", label: "Choose priority" },
     ...selectOptions(state.meta.priorities)
   ];
-  const productValue = productId && creatableProducts.some((product) => product.id === productId) ? String(productId) : "";
   const steps = [];
   const addStep = (title, content) => steps.push(ticketCreateStep(steps.length + 1, title, content));
   addStep("Product", [
-    ticketSelectField("", "product_id", productValue, productOptions, {
+    ticketSelectField("", "product_id", "", productOptions, {
       ariaLabel: "Product",
       required: true
     })
   ]);
   if (!isCustomer()) {
     addStep("Requester", [
-      ticketSelectField("", "requester_user_id", String(state.user?.id || ""), requesterOptions(Number(productValue)), {
+      ticketSelectField("", "requester_user_id", String(state.user?.id || ""), requesterOptions(0), {
         ariaLabel: "Requester",
         required: true
       })
@@ -1131,11 +1122,11 @@ async function confirmTicketComment(ticket, composer) {
   });
 }
 
-function ticketCreatePayload(data, fallbackProductId) {
+function ticketCreatePayload(data) {
   return {
     description: String(data.description || "").trim(),
     priority: String(data.priority || "normal").trim() || "normal",
-    product_id: Number(data.product_id || fallbackProductId),
+    product_id: Number(data.product_id),
     requester_user_id: Number(data.requester_user_id) || undefined,
     title: String(data.title || "").trim()
   };
@@ -1157,10 +1148,6 @@ function ticketUpdatePatch(ticket, data) {
   if (Object.hasOwn(data, "title")) {
     const title = String(data.title || "").trim();
     if (title && title !== (ticket.title || "")) patch.title = title;
-  }
-  if (Object.hasOwn(data, "description")) {
-    const description = String(data.description || "").trim();
-    if (description !== (ticket.description || "")) patch.description = description;
   }
   if (Object.hasOwn(data, "priority")) {
     const priority = String(data.priority || "").trim();
@@ -1220,12 +1207,8 @@ function bindTicketAutosave(form, ticket) {
   });
   const debouncedSave = debounce(save, TICKET_AUTOSAVE_DELAY_MS);
   for (const control of controls) {
-    if (control.tagName === "INPUT" || control.tagName === "TEXTAREA") {
-      control.addEventListener("input", () => debouncedSave(control));
-      control.addEventListener("change", () => save(control));
-    } else {
-      control.addEventListener("change", () => save(control));
-    }
+    if (control.tagName === "INPUT") control.addEventListener("input", debouncedSave);
+    control.addEventListener("change", save);
   }
   const statusControl = form.querySelector("[name='status']");
   statusControl?.addEventListener("change", async () => {

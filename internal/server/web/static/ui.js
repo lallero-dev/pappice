@@ -21,12 +21,6 @@ function emptyMessage(className, { title, body, actionLabel = "", onAction = nul
   return node;
 }
 
-export function sideSection(title, content) {
-  const children = title ? [el("h4", { className: "section-title" }, title)] : [];
-  children.push(content);
-  return el("section", { className: "side-section" }, children);
-}
-
 export function factBlock(label, value) {
   return el("div", { className: "fact-block" }, [
     el("span", { className: "fact-label" }, label),
@@ -89,7 +83,20 @@ export function showInlineConfirm(container, { title, body, confirmLabel, danger
   ]));
 }
 
-export async function copyText(value) {
+export function copyField(value) {
+  const input = el("input", { readonly: "readonly", value });
+  const copy = el("button", { type: "button" }, "Copy");
+  copy.addEventListener("click", async () => {
+    await copyText(value);
+    copy.textContent = "Copied";
+    window.setTimeout(() => {
+      copy.textContent = "Copy";
+    }, 1200);
+  });
+  return el("div", { className: "copy-row" }, [input, copy]);
+}
+
+async function copyText(value) {
   if (!value) return;
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);

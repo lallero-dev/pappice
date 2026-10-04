@@ -547,11 +547,6 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.detail-controls {
-  display: grid;
-  gap: 9px;
-}
-
 .description {
   background: #fff;
   border: 1px solid #dde4ec;
@@ -810,6 +805,24 @@ button:disabled {
 .ticket-delete-icon {
   height: 15px;
   width: 15px;
+}
+
+.email-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.email-body {
+  background: var(--panel-strong);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  color: var(--text);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
 }
 
 .fact-list {
