@@ -170,7 +170,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		"Ticket: PME-1",
 		"Status: Closed",
 		"Public reply from Alice:",
-		"Open your ticket:\nhttps://tracker.example.test/",
+		"Open ticket:\nhttps://tracker.example.test/tickets#PME-1",
 		"Replies to this email are not read.",
 	} {
 		if !strings.Contains(textBody, want) {
@@ -182,6 +182,8 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		"Need &lt;help&gt;",
 		"Public reply",
 		"from Alice",
+		`href="https://tracker.example.test/tickets#PME-1"`,
+		">Open ticket</a>",
 		`<table role="presentation"`,
 		"Please try the updated setup.<br>It should work now.",
 	} {
@@ -195,7 +197,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 }
 
 func TestTicketEmailContentUsesReadableLayout(t *testing.T) {
-	server := &Server{options: Options{PublicURL: "https://tracker.example.test"}}
+	server := &Server{options: Options{PublicURL: "https://tracker.example.test/"}}
 	ticket := store.Ticket{
 		Key:           "PME-2",
 		ProductKey:    "PME",
@@ -219,7 +221,7 @@ func TestTicketEmailContentUsesReadableLayout(t *testing.T) {
 		"Product: Pappice",
 		"Priority: urgent",
 		"Description:\nLogin fails after password reset.",
-		"Open in Pappice:\nhttps://tracker.example.test/",
+		"Open ticket:\nhttps://tracker.example.test/tickets#PME-2",
 	} {
 		if !strings.Contains(textBody, want) {
 			t.Fatalf("text body missing %q:\n%s", want, textBody)
@@ -229,7 +231,8 @@ func TestTicketEmailContentUsesReadableLayout(t *testing.T) {
 		"Pappice staff notification",
 		"Pappice",
 		"Login fails after password reset.",
-		`href="https://tracker.example.test/"`,
+		`href="https://tracker.example.test/tickets#PME-2"`,
+		">Open ticket</a>",
 	} {
 		if !strings.Contains(htmlBody, want) {
 			t.Fatalf("html body missing %q:\n%s", want, htmlBody)

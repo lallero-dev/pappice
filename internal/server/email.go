@@ -113,7 +113,6 @@ func (s *Server) accountLinkEmailContent(event string, user store.User, token st
 
 func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorName string, comment *store.Comment) (string, string, string) {
 	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, requesterEmailSubjectAction(event), ticket.Title)
-	link := s.ticketURL()
 
 	intro := "We received your ticket."
 	actorName = strings.TrimSpace(actorName)
@@ -140,8 +139,8 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 		Intro:       intro,
 		Fields:      fields,
 		Blocks:      blocks,
-		ActionLabel: "Open your ticket",
-		ActionURL:   link,
+		ActionLabel: "Open ticket",
+		ActionURL:   s.ticketURL(ticket.Key),
 		Footer:      "Replies to this email are not read. Please open Pappice to continue the conversation.",
 	}
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
@@ -152,10 +151,6 @@ func (s *Server) ticketEmailContent(event string, ticket store.Ticket, actor sto
 	action := ticketEventAction(event)
 	subject := fmt.Sprintf("[%s] %s: %s", ticket.Key, ticketEmailSubjectAction(event), ticket.Title)
 	productLabel := defaultString(ticket.ProductName, ticket.ProductKey)
-	link := strings.TrimRight(s.options.PublicURL, "/")
-	if link != "" {
-		link += "/"
-	}
 
 	fields := []emailField{
 		{Label: "Ticket", Value: ticket.Key},
@@ -179,8 +174,8 @@ func (s *Server) ticketEmailContent(event string, ticket store.Ticket, actor sto
 		Intro:       fmt.Sprintf("%s %s %s.", actorName, strings.ToLower(action), ticket.Key),
 		Fields:      fields,
 		Blocks:      blocks,
-		ActionLabel: "Open in Pappice",
-		ActionURL:   link,
+		ActionLabel: "Open ticket",
+		ActionURL:   s.ticketURL(ticket.Key),
 	}
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
@@ -279,7 +274,7 @@ func renderEmailHTML(layout emailLayout) string {
 		htmlBody.WriteString(`<tr><td style="padding:20px 28px 24px;border-top:1px solid #e5ebf1;">`)
 		if actionURL != "" {
 			label := defaultString(layout.ActionLabel, "Open")
-			fmt.Fprintf(&htmlBody, `<p style="margin:0 0 14px;"><a href="%s" style="color:#1b5f9e;font-weight:700;text-decoration:none;">%s</a></p>`, html.EscapeString(actionURL), html.EscapeString(label))
+			fmt.Fprintf(&htmlBody, `<p style="margin:0 0 14px;"><a href="%s" style="display:inline-block;padding:12px 24px;background:#1b5f9e;border-radius:6px;color:#ffffff;font-weight:700;text-decoration:none;">%s</a></p>`, html.EscapeString(actionURL), html.EscapeString(label))
 		}
 		if footer != "" {
 			fmt.Fprintf(&htmlBody, `<p style="margin:0;color:#64748b;font-size:13px;">%s</p>`, html.EscapeString(footer))
