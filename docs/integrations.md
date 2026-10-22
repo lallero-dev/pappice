@@ -45,6 +45,10 @@ The same mechanism applies to `PATCH /api/tickets/{id}`, including a nested
 
 Persist the request body before sending it so retries reuse identical content.
 
+Set `notify_requester` to `false` on a ticket patch to skip requester emails for
+that update (default: `true`). For example: `{"status":"closed","notify_requester":false}`.
+Emails to other recipients and webhooks still follow their usual rules.
+
 ## Receiving Webhooks
 
 Webhook delivery can repeat when an HTTP response is lost or the process stops

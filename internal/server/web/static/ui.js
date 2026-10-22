@@ -36,7 +36,7 @@ export function selectOptions(values) {
   return values.map((value) => ({ value, label: labelize(value) }));
 }
 
-export function confirmAction({ title, body, confirmLabel, details = [], danger = false, stacked = false }) {
+export function confirmAction({ title, body, confirmLabel, details = [], content = null, danger = false, stacked = false }) {
   const host = stacked ? document.createElement("pappice-modal") : els.modalHost;
   if (!host) return Promise.resolve(window.confirm(body));
   if (stacked) document.body.append(host);
@@ -51,7 +51,7 @@ export function confirmAction({ title, body, confirmLabel, details = [], danger 
       title,
       submitText: confirmLabel,
       submitClass: danger ? "danger" : "primary",
-      content: el("div", { className: "send-confirm" }, [el("p", {}, body), detailList]),
+      content: el("div", { className: "send-confirm" }, [el("p", {}, body), detailList, content].filter(Boolean)),
       onSubmit: async () => resolve(true)
     });
     host.shadowRoot?.querySelector("dialog")?.addEventListener("close", () => {

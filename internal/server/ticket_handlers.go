@@ -11,12 +11,13 @@ import (
 )
 
 type ticketPatchInput struct {
-	Title          *string           `json:"title"`
-	Description    *string           `json:"description"`
-	Status         *string           `json:"status"`
-	Priority       *string           `json:"priority"`
-	AssigneeUserID *int64            `json:"assignee_user_id"`
-	Comment        *store.AddComment `json:"comment"`
+	Title           *string           `json:"title"`
+	Description     *string           `json:"description"`
+	Status          *string           `json:"status"`
+	Priority        *string           `json:"priority"`
+	AssigneeUserID  *int64            `json:"assignee_user_id"`
+	NotifyRequester *bool             `json:"notify_requester"`
+	Comment         *store.AddComment `json:"comment"`
 }
 
 func (input ticketPatchInput) updateTicket() store.UpdateTicket {
@@ -318,12 +319,13 @@ func (s *Server) applyTicketPatch(w http.ResponseWriter, r *http.Request, auth a
 	}
 
 	result, err := s.store.SaveTicket(store.SaveTicketInput{
-		TicketID:       ticket.ID,
-		Patch:          input.updateTicket(),
-		Comment:        comment,
-		Attachments:    attachments,
-		ActorUserID:    auth.User.ID,
-		IdempotencyKey: r.Header.Get("Idempotency-Key"),
+		TicketID:               ticket.ID,
+		Patch:                  input.updateTicket(),
+		Comment:                comment,
+		Attachments:            attachments,
+		ActorUserID:            auth.User.ID,
+		IdempotencyKey:         r.Header.Get("Idempotency-Key"),
+		SuppressRequesterEmail: input.NotifyRequester != nil && !*input.NotifyRequester,
 	})
 	if err != nil {
 		respondStoreError(w, err)

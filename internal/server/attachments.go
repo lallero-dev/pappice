@@ -437,6 +437,13 @@ func multipartTicketPatchInput(r *http.Request) (ticketPatchInput, error) {
 	if value, ok := multipartOptionalValue(r, "priority"); ok {
 		input.Priority = &value
 	}
+	if value, ok := multipartOptionalValue(r, "notify_requester"); ok {
+		notify, err := strconv.ParseBool(value)
+		if err != nil {
+			return ticketPatchInput{}, fmt.Errorf("%w: notify_requester must be a boolean", store.ErrValidation)
+		}
+		input.NotifyRequester = &notify
+	}
 	if _, ok := multipartOptionalValue(r, "assignee_user_id"); ok {
 		value, err := multipartOptionalID(r, "assignee_user_id")
 		if err != nil {

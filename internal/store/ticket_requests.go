@@ -29,10 +29,11 @@ func recordTicketRequestTx(tx *sql.Tx, input SaveTicketInput) (bool, error) {
 		attachments[i].StorageKey = ""
 	}
 	request, err := json.Marshal(struct {
-		Patch       UpdateTicket
-		Comment     *AddComment
-		Attachments []CreateAttachment
-	}{input.Patch, input.Comment, attachments})
+		Patch                  UpdateTicket
+		Comment                *AddComment
+		Attachments            []CreateAttachment
+		SuppressRequesterEmail bool `json:",omitempty"`
+	}{input.Patch, input.Comment, attachments, input.SuppressRequesterEmail})
 	if err != nil {
 		return false, err
 	}

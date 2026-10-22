@@ -5,7 +5,7 @@ function pageTools() {
     let lastError = null;
     while (Date.now() - started < timeoutMs) {
       try {
-        const value = predicate();
+        const value = await predicate();
         if (value) return value;
       } catch (error) {
         lastError = error;

@@ -144,12 +144,13 @@ type AddComment struct {
 }
 
 type SaveTicketInput struct {
-	TicketID       int64
-	Patch          UpdateTicket
-	Comment        *AddComment
-	Attachments    []CreateAttachment
-	ActorUserID    int64
-	IdempotencyKey string
+	TicketID               int64
+	Patch                  UpdateTicket
+	Comment                *AddComment
+	Attachments            []CreateAttachment
+	ActorUserID            int64
+	IdempotencyKey         string
+	SuppressRequesterEmail bool
 }
 
 type SaveTicketResult struct {

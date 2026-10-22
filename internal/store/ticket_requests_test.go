@@ -81,6 +81,11 @@ func TestTicketRequestIdempotency(t *testing.T) {
 			t.Fatalf("changed comment error = %v, want conflict", err)
 		}
 	}
+	conflicting := input
+	conflicting.SuppressRequesterEmail = true
+	if _, err := tracker.SaveTicket(conflicting); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed notification choice error = %v, want conflict", err)
+	}
 	// Invalid mutations must roll back the key reservation as well as the write.
 	invalid := "invalid"
 	input.IdempotencyKey = "reply-2"

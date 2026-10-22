@@ -337,15 +337,32 @@ async function staffReplyAndReopen(cdp) {
     const status = detail.querySelector("[name='status']");
     setValue(status, "closed");
     const cancelledClose = await waitFor(() => openModalRoot("Close this ticket?"), "close ticket confirmation");
+    const notifyRequester = cancelledClose.querySelector("[name='notify_requester']");
+    if (!notifyRequester?.checked) throw new Error("closing a ticket should notify the requester by default");
+    notifyRequester.click();
     cancelledClose.querySelector("[value='cancel']").click();
     await waitFor(() => !openModalRoot("Close this ticket?"), "close ticket confirmation dismissed");
     await waitFor(() => status.value === "open", "previous status restored after cancellation");
     setValue(status, "closed");
+    const closeConfirmation = await waitFor(() => openModalRoot("Close this ticket?"), "close ticket confirmation reopened");
+    const notifyAgain = closeConfirmation.querySelector("[name='notify_requester']");
+    if (!notifyAgain?.checked) throw new Error("each close confirmation should default to notifying the requester");
+    notifyAgain.click();
     await submitModal("Close this ticket?");
     await waitFor(() => {
       return [...detail.querySelectorAll(".conversation-status-change")]
         .some((change) => change.textContent.includes("closed the ticket"));
     }, "live status change in conversation");
+    await waitFor(async () => {
+      const { events } = await request("/api/audit-events?limit=100");
+      return events.some((event) => event.action === "ticket.updated" && event.target_id === current.id &&
+        JSON.parse(event.details_json).current_status === "closed");
+    }, "closure event processed");
+    const { notifications } = await request("/api/email-notifications?limit=100");
+    if (notifications.some((notification) => notification.ticket_id === current.id &&
+      notification.recipient_email === input.customerEmail && notification.event === "ticket.updated")) {
+      throw new Error("closing without notification should not queue an email to the requester");
+    }
     await waitFor(() => {
       return [...document.querySelectorAll("#ticketList .ticket-row")]
         .some((candidate) => candidate.classList.contains("active") &&
@@ -458,6 +475,7 @@ async function staffReplyAndReopen(cdp) {
     ...ticket,
     adminDisplayName: admin.displayName,
     customerDisplayName: customer.displayName,
+    customerEmail: customer.email,
     liveDraft: "Draft while live refresh runs",
     liveReply: "Live internal refresh reply from the API"
   });

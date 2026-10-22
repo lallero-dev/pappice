@@ -1087,9 +1087,10 @@ function ticketRequester(ticket) {
   ]);
 }
 
-function confirmTicketStatusChange(ticket, status, stacked) {
+async function confirmTicketStatusChange(ticket, status, stacked) {
   const closing = status === "closed";
-  return confirmAction({
+  const notifyRequester = el("input", { type: "checkbox", name: "notify_requester", checked: "checked" });
+  const confirmed = await confirmAction({
     title: closing ? "Close this ticket?" : "Reopen this ticket?",
     body: closing
       ? "The ticket will move to Closed. A new public reply will reopen it."
@@ -1099,8 +1100,11 @@ function confirmTicketStatusChange(ticket, status, stacked) {
       ["Ticket", ticket.title || "Selected ticket"],
       ["New status", closing ? "Closed" : "Open"]
     ],
+    content: closing ? el("label", { className: "check" }, [notifyRequester, "Notify requester by email"]) : null,
     stacked
   });
+  if (!confirmed) return null;
+  return closing ? { status, notify_requester: notifyRequester.checked } : { status };
 }
 
 async function confirmTicketComment(ticket, composer) {
@@ -1217,17 +1221,17 @@ function bindTicketAutosave(form, ticket) {
     const target = statusControl.value;
     if (target === currentTicket.status) return;
     statusControl.disabled = true;
-    const confirmed = await confirmTicketStatusChange(
+    const patch = await confirmTicketStatusChange(
       currentTicket,
       target,
       form.getRootNode() instanceof ShadowRoot
     );
-    if (!confirmed) {
+    if (!patch) {
       statusControl.value = currentTicket.status;
       statusControl.disabled = false;
       return;
     }
-    enqueueSave(() => ({ status: target }), statusControl);
+    enqueueSave(() => patch, statusControl);
   });
 }
 

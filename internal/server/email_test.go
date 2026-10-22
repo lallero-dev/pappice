@@ -453,6 +453,97 @@ func TestTicketSaveGroupsPatchAndCommentEmail(t *testing.T) {
 	}
 }
 
+func TestTicketPatchRequesterEmailChoice(t *testing.T) {
+	tracker, server, client := newTestServer(t, Options{EmailNotifications: true, NotificationDelay: time.Hour})
+	cookie, csrf := setupAdmin(t, client, server.URL)
+	resp, body := doJSON(t, client, http.MethodGet, server.URL+"/api/products", nil, cookie, "", "")
+	requireStatus(t, resp, body, http.StatusOK)
+	productID := decodeFirstProductID(t, body)
+	assigneeID := createUser(t, client, server.URL, cookie, csrf, map[string]any{
+		"email": "assignee@example.test", "password": "correct horse", "role": "staff",
+	})
+	addProductMember(t, client, server.URL, cookie, csrf, productID, assigneeID, "staff")
+	if _, err := tracker.CreateWebhook(store.CreateWebhook{
+		Name: "Updates", URL: "https://example.test/hook", Events: []string{"ticket.updated"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, role := range []string{"customer", "staff"} {
+		requesterID := createUser(t, client, server.URL, cookie, csrf, map[string]any{
+			"email": role + "@example.test", "password": "correct horse", "role": role,
+		})
+		addProductMember(t, client, server.URL, cookie, csrf, productID, requesterID, role)
+		requesterCookie, requesterCSRF := loginUser(t, client, server.URL, role, "correct horse")
+		for _, test := range []struct {
+			name      string
+			notify    any
+			multipart bool
+		}{
+			{"default", nil, false},
+			{"enabled", true, false},
+			{"disabled", false, false},
+			{"multipart disabled", false, true},
+		} {
+			t.Run(role+"/"+test.name, func(t *testing.T) {
+				resp, body := doJSON(t, client, http.MethodPost, server.URL+"/api/tickets", map[string]any{
+					"product_id": productID, "title": "Email choice",
+				}, requesterCookie, requesterCSRF, server.URL)
+				requireStatus(t, resp, body, http.StatusCreated)
+				ticketID := decodeInt64(t, body, "id")
+				waitForDomainEvents(t, tracker)
+				for _, notification := range mustEmailNotifications(t, tracker, 100) {
+					if notification.TicketID == ticketID {
+						if err := tracker.MarkEmailSent(notification.ID); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				url := server.URL + "/api/tickets/" + itoa(ticketID)
+				if test.multipart {
+					resp, body = doMultipart(t, client, http.MethodPatch, url, map[string]string{
+						"status": "closed", "assignee_user_id": itoa(assigneeID), "notify_requester": "false",
+					}, nil, cookie, csrf, server.URL)
+				} else {
+					patch := map[string]any{"status": "closed", "assignee_user_id": assigneeID}
+					if test.notify != nil {
+						patch["notify_requester"] = test.notify
+					}
+					resp, body = doJSON(t, client, http.MethodPatch, url, patch, cookie, csrf, server.URL)
+				}
+				requireStatus(t, resp, body, http.StatusOK)
+				if decodeString(t, body, "status") != "closed" {
+					t.Fatalf("ticket was not closed: %s", body)
+				}
+				waitForDomainEvents(t, tracker)
+				recipients := make(map[int64]int)
+				for _, notification := range mustEmailNotifications(t, tracker, 100) {
+					if notification.TicketID == ticketID && notification.Status == "pending" {
+						recipients[notification.UserID]++
+					}
+				}
+				wantRequester := 1
+				if test.notify == false {
+					wantRequester = 0
+				}
+				if recipients[requesterID] != wantRequester || recipients[assigneeID] != 1 {
+					t.Fatalf("email recipients = %v, want requester %d: %d, assignee %d: 1", recipients, requesterID, wantRequester, assigneeID)
+				}
+				for _, event := range mustDomainEvents(t, tracker, 100) {
+					if event.TicketID == ticketID && event.Type == "ticket.updated" {
+						projection, err := server.Config.Handler.(*Server).domainEventProjection(event)
+						if err != nil || projection.Audit == nil || len(projection.WebhookNotifications) != 1 {
+							t.Fatalf("closure audit/webhook projection = %+v, err = %v", projection, err)
+						}
+						return
+					}
+				}
+				t.Fatal("missing ticket update event")
+			})
+		}
+	}
+}
+
 func TestRequesterNotificationPolicy(t *testing.T) {
 	tracker, server, client := newTestServer(t, Options{
 		EmailNotifications: true,

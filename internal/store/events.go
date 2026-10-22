@@ -52,16 +52,17 @@ type CreateDomainEvent struct {
 }
 
 type TicketEventPayload struct {
-	HasPatch          bool   `json:"has_patch,omitempty"`
-	PublicComment     bool   `json:"public_comment,omitempty"`
-	AssignmentChanged bool   `json:"assignment_changed,omitempty"`
-	OnlyAssigneePatch bool   `json:"only_assignee_patch,omitempty"`
-	PreviousStatus    string `json:"previous_status,omitempty"`
-	CurrentStatus     string `json:"current_status,omitempty"`
-	PreviousAssignee  string `json:"previous_assignee,omitempty"`
-	CurrentAssignee   string `json:"current_assignee,omitempty"`
-	CommentID         int64  `json:"comment_id,omitempty"`
-	CommentVisibility string `json:"comment_visibility,omitempty"`
+	SuppressRequesterEmail bool   `json:"suppress_requester_email,omitempty"`
+	HasPatch               bool   `json:"has_patch,omitempty"`
+	PublicComment          bool   `json:"public_comment,omitempty"`
+	AssignmentChanged      bool   `json:"assignment_changed,omitempty"`
+	OnlyAssigneePatch      bool   `json:"only_assignee_patch,omitempty"`
+	PreviousStatus         string `json:"previous_status,omitempty"`
+	CurrentStatus          string `json:"current_status,omitempty"`
+	PreviousAssignee       string `json:"previous_assignee,omitempty"`
+	CurrentAssignee        string `json:"current_assignee,omitempty"`
+	CommentID              int64  `json:"comment_id,omitempty"`
+	CommentVisibility      string `json:"comment_visibility,omitempty"`
 }
 
 type AppEventPayload struct {

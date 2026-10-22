@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -273,6 +274,11 @@ func (s *Server) ticketEventEmails(event string, ticket store.Ticket, actor stor
 	}
 	if notifyRequester {
 		inputs = append(inputs, s.requesterEmailNotifications(event, ticket, requesterActorName, comment, sendAfter)...)
+	}
+	if payload.SuppressRequesterEmail {
+		inputs = slices.DeleteFunc(inputs, func(notification store.CreateEmailNotification) bool {
+			return notification.UserID == ticket.RequesterUserID
+		})
 	}
 	return inputs, nil
 }

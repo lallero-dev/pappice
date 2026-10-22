@@ -350,15 +350,16 @@ func insertTicketCreatedEventTx(tx *sql.Tx, ticket Ticket, actor EventActor, now
 
 func insertTicketSavedEventsTx(tx *sql.Tx, input SaveTicketInput, result SaveTicketResult, current Ticket, actor EventActor, now time.Time) error {
 	payload := TicketEventPayload{
-		HasPatch:          result.HasPatch,
-		PublicComment:     result.PublicComment,
-		AssignmentChanged: result.AssignmentChanged,
-		OnlyAssigneePatch: ticketPatchOnlyAssignee(input.Patch),
-		PreviousStatus:    result.Previous.Status,
-		CurrentStatus:     current.Status,
-		PreviousAssignee:  result.Previous.AssigneeEmail,
-		CurrentAssignee:   current.AssigneeEmail,
-		CommentID:         result.CommentID,
+		SuppressRequesterEmail: input.SuppressRequesterEmail,
+		HasPatch:               result.HasPatch,
+		PublicComment:          result.PublicComment,
+		AssignmentChanged:      result.AssignmentChanged,
+		OnlyAssigneePatch:      ticketPatchOnlyAssignee(input.Patch),
+		PreviousStatus:         result.Previous.Status,
+		CurrentStatus:          current.Status,
+		PreviousAssignee:       result.Previous.AssigneeEmail,
+		CurrentAssignee:        current.AssigneeEmail,
+		CommentID:              result.CommentID,
 	}
 	if input.Comment != nil {
 		payload.CommentVisibility = defaultString(input.Comment.Visibility, "public")
