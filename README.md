@@ -15,14 +15,15 @@ Pappice is intentionally minimal and self-contained:
 - One Go binary with embedded web assets.
 - SQLite storage plus an upload directory.
 - No external database, queue, or frontend build step at runtime.
-- Standard library first; the only direct Go dependency is the embedded SQLite driver.
+- Standard library first; direct Go dependencies are the SQLite driver and `golang.org/x/sys`.
 - Linux release binaries around 12 MiB.
 - Small production instance measured at roughly 20-30 MiB of RAM.
 
 Application source, excluding demos and tests (`npm run loc`; comments included):
 
-| Backend | 12,877 LoCs |
-| Frontend | 9,143 LoCs |
+| Backend | Frontend |
+| ---: | ---: |
+| 13,075 LoC | 9,012 LoC |
 
 ## Features
 

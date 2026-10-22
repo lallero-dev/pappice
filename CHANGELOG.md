@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v0.17.0 - 2026-10-22
+
+- Add a requester email option to ticket closure confirmations, enabled by default.
+- Add an "Open ticket" button linking directly to the ticket in notification emails.
+- Fix notification emails quoting later replies instead of the comment that triggered them.
+- Refuse restores while Pappice has the target database open; online backups remain supported.
+- Normalize font weights, keep ticket descriptions in regular text, and remove unused frontend code and styles.
+- Reorganize tests by responsibility and remove redundant coverage.
+
+No database migration is required when upgrading from v0.16.0.
+
 ## v0.16.0 - 2026-09-17
 
 - Add an experimental static browser demo running the Go backend and SQLite in
