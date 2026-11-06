@@ -242,7 +242,7 @@ func (s *Server) saveMultipartAttachments(form *multipart.Form) ([]storedUpload,
 			cleanupStoredUploads(uploads)
 			return nil, err
 		}
-		upload, err := s.saveUploadedFile(file, header)
+		upload, err := s.saveUploadedFile(file, header.Filename)
 		_ = file.Close()
 		if err != nil {
 			cleanupStoredUploads(uploads)
@@ -253,8 +253,8 @@ func (s *Server) saveMultipartAttachments(form *multipart.Form) ([]storedUpload,
 	return uploads, nil
 }
 
-func (s *Server) saveUploadedFile(file multipart.File, header *multipart.FileHeader) (storedUpload, error) {
-	filename := sanitizeAttachmentFilename(header.Filename)
+func (s *Server) saveUploadedFile(file io.Reader, name string) (storedUpload, error) {
+	filename := sanitizeAttachmentFilename(name)
 	if filename == "" {
 		return storedUpload{}, fmt.Errorf("%w: attachment filename is required", store.ErrValidation)
 	}

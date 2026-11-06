@@ -59,6 +59,12 @@ func newConfigFlagSet(name string, cfg *app.Config, output io.Writer) *flag.Flag
 	fs.StringVar(&cfg.SMTPPassword, "smtp-password", cfg.SMTPPassword, "SMTP password")
 	fs.StringVar(&cfg.SMTPFrom, "smtp-from", cfg.SMTPFrom, "sender address for email notifications")
 	fs.StringVar(&cfg.SMTPTLSMode, "smtp-tls-mode", cfg.SMTPTLSMode, "SMTP TLS mode: starttls, tls, or none")
+	fs.StringVar(&cfg.IMAP.Address, "imap-addr", cfg.IMAP.Address, "optional IMAP TLS host:port for requester replies")
+	fs.StringVar(&cfg.IMAP.Username, "imap-user", cfg.IMAP.Username, "IMAP username")
+	fs.StringVar(&cfg.IMAP.Password, "imap-password", cfg.IMAP.Password, "IMAP password or app password")
+	fs.StringVar(&cfg.IMAP.Mailbox, "imap-mailbox", cfg.IMAP.Mailbox, "dedicated IMAP mailbox")
+	fs.StringVar(&cfg.IMAP.ReplyAddress, "email-reply-address", cfg.IMAP.ReplyAddress, "receiving address supporting plus addressing")
+	fs.StringVar(&cfg.IMAP.AuthservID, "imap-authserv-id", cfg.IMAP.AuthservID, "trusted receiving server's Authentication-Results identifier")
 	fs.DurationVar(&cfg.NotificationDelay, "notification-delay", cfg.NotificationDelay, "delay before sending ticket notifications through email and webhooks")
 	fs.DurationVar(&cfg.SessionTTL, "session-ttl", cfg.SessionTTL, "browser session lifetime")
 	fs.StringVar(&cfg.UploadDir, "upload-dir", cfg.UploadDir, "directory for ticket attachment files")
@@ -147,6 +153,24 @@ func applyEnv(cfg *app.Config, flags map[string]bool) {
 	}
 	if !flags["notification-delay"] {
 		cfg.NotificationDelay = envDuration("PAPPICE_NOTIFICATION_DELAY", cfg.NotificationDelay)
+	}
+	if !flags["imap-addr"] {
+		cfg.IMAP.Address = envOr("PAPPICE_IMAP_ADDR", cfg.IMAP.Address)
+	}
+	if !flags["imap-user"] {
+		cfg.IMAP.Username = envOr("PAPPICE_IMAP_USER", cfg.IMAP.Username)
+	}
+	if !flags["imap-password"] {
+		cfg.IMAP.Password = envOr("PAPPICE_IMAP_PASSWORD", cfg.IMAP.Password)
+	}
+	if !flags["imap-mailbox"] {
+		cfg.IMAP.Mailbox = envOr("PAPPICE_IMAP_MAILBOX", cfg.IMAP.Mailbox)
+	}
+	if !flags["email-reply-address"] {
+		cfg.IMAP.ReplyAddress = envOr("PAPPICE_EMAIL_REPLY_ADDRESS", cfg.IMAP.ReplyAddress)
+	}
+	if !flags["imap-authserv-id"] {
+		cfg.IMAP.AuthservID = envOr("PAPPICE_IMAP_AUTHSERV_ID", cfg.IMAP.AuthservID)
 	}
 	if !flags["session-ttl"] {
 		cfg.SessionTTL = envDuration("PAPPICE_SESSION_TTL", cfg.SessionTTL)

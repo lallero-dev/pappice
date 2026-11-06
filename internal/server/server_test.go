@@ -998,10 +998,10 @@ func TestRegisteredCustomerTicketFlow(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodGet, server.URL+"/api/email-notifications", nil, adminCookie, "", "")
 	requireStatus(t, resp, body, http.StatusOK)
 	if !bytes.Contains(body, []byte("customer@example.test")) ||
-		!bytes.Contains(body, []byte("Replies to this email are not read")) ||
+		!bytes.Contains(body, []byte("Open Pappice to continue the conversation.")) ||
 		!bytes.Contains(body, []byte("https://tracker.example.test/")) ||
 		bytes.Contains(body, []byte("/support/tickets/")) {
-		t.Fatalf("outbox missing no-reply customer notification: %s", body)
+		t.Fatalf("outbox missing customer notification: %s", body)
 	}
 	if bytes.Contains(body, []byte("Private staff note")) {
 		t.Fatalf("outbox leaked internal note: %s", body)

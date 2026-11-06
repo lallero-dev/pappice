@@ -3,12 +3,78 @@ package notify
 import (
 	"context"
 	"errors"
+	"net/mail"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"pappice/internal/store"
 )
+
+func TestWorkerReplyAddress(t *testing.T) {
+	tracker, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tracker.Close()
+	requester, err := tracker.CreateFirstAdmin(store.CreateUser{Email: "requester@example.test", Password: "correct horse"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staff, err := tracker.CreateUser(store.CreateUser{Email: "staff@example.test", Password: "correct horse", Role: "staff"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	products, err := tracker.ListProducts(requester)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := tracker.CreateTicket(store.CreateTicket{ProductID: products[0].ID, Title: "Email", ActorUserID: requester.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		_, err := tracker.EnqueueEmailNotifications([]store.CreateEmailNotification{
+			{TicketID: ticket.ID, UserID: requester.ID, Event: "ticket.commented", Subject: "Reply", BodyText: "Body"},
+			{TicketID: ticket.ID, UserID: staff.ID, Event: "ticket.commented", Subject: "Reply", BodyText: "Body"},
+			{UserID: requester.ID, Event: "account.reset", Subject: "Reset", BodyText: "Body"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mailer := &fakeMailer{}
+		w := Worker{Store: tracker, Mailer: mailer, BatchSize: 10}
+		if enabled {
+			w.ReplyAddress = testReplyAddress
+		}
+		if err := w.ProcessOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(mailer.messages) != 3 {
+			t.Fatalf("sent %d messages", len(mailer.messages))
+		}
+		for _, message := range mailer.messages {
+			want := enabled && message.To == requester.Email && message.Subject == "Reply"
+			if (message.ReplyTo != "") != want {
+				t.Fatalf("unexpected reply address: %#v", message)
+			}
+			if !want {
+				continue
+			}
+			local, _, _ := strings.Cut(message.ReplyTo, "@")
+			token := strings.TrimPrefix(local, "reply+")
+			if _, err := tracker.SaveEmailReply(token, requester.Email, "reply", "Hello", nil); err != nil {
+				t.Fatal(err)
+			}
+			raw := renderMessage(&mail.Address{Address: "sender@example.test"}, &mail.Address{Address: requester.Email}, message)
+			parsed, err := mail.ReadMessage(strings.NewReader(string(raw)))
+			if err != nil || parsed.Header.Get("Reply-To") != message.ReplyTo || parsed.Header.Get("Auto-Submitted") != "auto-generated" {
+				t.Fatalf("headers: %s, %v", raw, err)
+			}
+		}
+	}
+}
 
 type fakeMailer struct {
 	messages []Message

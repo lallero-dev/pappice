@@ -171,7 +171,7 @@ func TestRequesterEmailContentUsesReadableLayout(t *testing.T) {
 		"Status: Closed",
 		"Public reply from Alice:",
 		"Open ticket:\nhttps://tracker.example.test/tickets#PME-1",
-		"Replies to this email are not read.",
+		"Open Pappice to continue the conversation.",
 	} {
 		if !strings.Contains(textBody, want) {
 			t.Fatalf("text body missing %q:\n%s", want, textBody)

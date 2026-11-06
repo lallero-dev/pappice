@@ -47,6 +47,7 @@ type Options struct {
 	Branding              Branding
 	DomainEventRetention  time.Duration
 	EmailNotifications    bool
+	EmailReplies          bool
 	NotificationDelay     time.Duration
 	PublicURL             string
 	SessionTTL            time.Duration

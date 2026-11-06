@@ -355,6 +355,7 @@ func TestHealthcheckURL(t *testing.T) {
 }
 
 func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
+	t.Setenv("PAPPICE_IMAP_PASSWORD", "imap-secret-password")
 	t.Setenv("PAPPICE_SMTP_PASSWORD", "super-secret-password")
 	t.Setenv("PAPPICE_SMTP_USER", "secret-user")
 	t.Setenv("PAPPICE_SMTP_HOST", "secret-host")
@@ -365,7 +366,7 @@ func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
 		t.Fatalf("help exit = %d", code)
 	}
 	output := stdout.String() + stderr.String()
-	for _, secret := range []string{"super-secret-password", "secret-user", "secret-host"} {
+	for _, secret := range []string{"super-secret-password", "secret-user", "secret-host", "imap-secret-password"} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("help output leaked %q:\n%s", secret, output)
 		}
@@ -376,6 +377,9 @@ func TestHelpDoesNotExposeEnvironmentSecrets(t *testing.T) {
 }
 
 func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
+	t.Setenv("PAPPICE_IMAP_ADDR", "imap.example.test:993")
+	t.Setenv("PAPPICE_IMAP_PASSWORD", "imap-secret")
+	t.Setenv("PAPPICE_EMAIL_REPLY_ADDRESS", "reply@example.test")
 	t.Setenv("PAPPICE_ADDR", "127.0.0.1:9000")
 	t.Setenv("PAPPICE_DB", "env.db")
 	t.Setenv("PAPPICE_SMTP_PASSWORD", "configured-secret")
@@ -397,6 +401,9 @@ func TestParseRuntimeConfigAppliesEnvAfterFlags(t *testing.T) {
 	}
 	if cfg.SMTPPassword != "configured-secret" {
 		t.Fatalf("env smtp password was not applied")
+	}
+	if cfg.IMAP.Address != "imap.example.test:993" || cfg.IMAP.Password != "imap-secret" || cfg.IMAP.ReplyAddress != "reply@example.test" || cfg.IMAP.Mailbox != "INBOX" {
+		t.Fatal("IMAP environment configuration was not applied")
 	}
 	if cfg.DebugAddr != "127.0.0.1:8390" {
 		t.Fatalf("env debug addr was not applied: %q", cfg.DebugAddr)

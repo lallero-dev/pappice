@@ -976,6 +976,20 @@ CREATE TABLE IF NOT EXISTS ticket_requests (
 	PRIMARY KEY (ticket_id, actor_user_id, idempotency_key)
 );
 
+CREATE TABLE IF NOT EXISTS email_reply_tokens (
+	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	email TEXT NOT NULL,
+	token TEXT NOT NULL UNIQUE,
+	PRIMARY KEY (ticket_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS email_mailboxes (
+	account TEXT PRIMARY KEY,
+	uid_validity INTEGER NOT NULL,
+	last_uid INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ticket_status_changes (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,

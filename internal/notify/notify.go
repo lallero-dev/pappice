@@ -19,6 +19,7 @@ import (
 
 type Message struct {
 	From     string
+	ReplyTo  string
 	To       string
 	ToName   string
 	Subject  string
@@ -91,6 +92,11 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) (err error) {
 	if err != nil {
 		return fmt.Errorf("invalid sender address: %w", err)
 	}
+	if message.ReplyTo != "" {
+		if _, err := mail.ParseAddress(message.ReplyTo); err != nil {
+			return fmt.Errorf("invalid reply address: %w", err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, m.config.Timeout)
 	defer cancel()
 	defer func() {
@@ -162,14 +168,15 @@ func (m *SMTPMailer) newClient(conn net.Conn) (*smtp.Client, error) {
 }
 
 type Worker struct {
-	Store       *store.Store
-	Mailer      Mailer
-	From        string
-	Interval    time.Duration
-	LeaseFor    time.Duration
-	BatchSize   int
-	MaxAttempts int
-	Logger      *log.Logger
+	Store        *store.Store
+	Mailer       Mailer
+	From         string
+	ReplyAddress string
+	Interval     time.Duration
+	LeaseFor     time.Duration
+	BatchSize    int
+	MaxAttempts  int
+	Logger       *log.Logger
 }
 
 func (w Worker) Run(ctx context.Context) {
@@ -215,6 +222,16 @@ func (w Worker) ProcessOnce(ctx context.Context) error {
 			BodyText: notification.BodyText,
 			BodyHTML: notification.BodyHTML,
 		}
+		if w.ReplyAddress != "" && notification.TicketID != 0 {
+			token, err := w.Store.EmailReplyToken(notification.TicketID, notification.UserID, notification.RecipientEmail)
+			if err != nil {
+				return fmt.Errorf("prepare email reply address: %w", err)
+			}
+			if token != "" {
+				local, domain, _ := strings.Cut(w.ReplyAddress, "@")
+				message.ReplyTo = local + "+" + token + "@" + domain
+			}
+		}
 		if err := w.Mailer.Send(ctx, message); err != nil {
 			w.logf("send email notification %d: %v", notification.ID, err)
 			if markErr := w.Store.MarkEmailFailed(notification.ID, err, w.MaxAttempts); markErr != nil {
@@ -242,6 +259,11 @@ func renderMessage(from, to *mail.Address, message Message) []byte {
 
 	var out bytes.Buffer
 	writeHeader(&out, "From", from.String())
+	if message.ReplyTo != "" {
+		writeHeader(&out, "Reply-To", message.ReplyTo)
+	}
+	writeHeader(&out, "Auto-Submitted", "auto-generated")
+	writeHeader(&out, "X-Auto-Response-Suppress", "All")
 	writeHeader(&out, "To", (&mail.Address{Name: message.ToName, Address: to.Address}).String())
 	writeHeader(&out, "Subject", strings.ReplaceAll(message.Subject, "\n", " "))
 	writeHeader(&out, "MIME-Version", "1.0")

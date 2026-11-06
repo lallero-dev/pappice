@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ func TestFailedUploadCleanupPreservesCommittedAttachment(t *testing.T) {
 
 	// Pause request A after writing its file, then let request B commit the same content.
 	app := server.Config.Handler.(*Server)
-	upload, err := app.saveUploadedFile(source, &multipart.FileHeader{Filename: "shared.txt"})
+	upload, err := app.saveUploadedFile(source, "shared.txt")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -200,6 +200,19 @@ func (s *Store) GetTicketByKey(key string) (Ticket, error) {
 }
 
 func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return SaveTicketResult{}, err
+	}
+	defer tx.Rollback()
+	result, err := saveTicketTx(tx, input)
+	if err != nil {
+		return SaveTicketResult{}, err
+	}
+	return result, tx.Commit()
+}
+
+func saveTicketTx(tx *sql.Tx, input SaveTicketInput) (SaveTicketResult, error) {
 	if input.ActorUserID < 1 {
 		return SaveTicketResult{}, fmt.Errorf("%w: actor user is required", ErrValidation)
 	}
@@ -214,12 +227,6 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 	if !hasPatch && !hasComment && !hasAttachments {
 		return SaveTicketResult{}, fmt.Errorf("%w: ticket changes or comment are required", ErrValidation)
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return SaveTicketResult{}, err
-	}
-	defer tx.Rollback()
-
 	previous, err := getTicketRecordTx(tx, input.TicketID)
 	if err != nil {
 		return SaveTicketResult{}, err
@@ -251,7 +258,7 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		if err != nil {
 			return SaveTicketResult{}, err
 		}
-		return SaveTicketResult{Ticket: current, Replayed: true}, tx.Commit()
+		return SaveTicketResult{Ticket: current, Replayed: true}, nil
 	}
 	if publicComment && previous.Status == "closed" {
 		status := "open"
@@ -321,9 +328,6 @@ func (s *Store) SaveTicket(input SaveTicketInput) (SaveTicketResult, error) {
 		return SaveTicketResult{}, err
 	}
 	if err := insertTicketSavedEventsTx(tx, input, result, current, EventActorFromUser(actor), now); err != nil {
-		return SaveTicketResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return SaveTicketResult{}, err
 	}
 	result.Ticket = current

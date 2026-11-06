@@ -15,7 +15,7 @@ Pappice is intentionally minimal and self-contained:
 - One Go binary with embedded web assets.
 - SQLite storage plus an upload directory.
 - No external database, queue, or frontend build step at runtime.
-- Standard library first; direct Go dependencies are the SQLite driver and `golang.org/x/sys`.
+- Standard library first, with SQLite and email protocol libraries.
 - Linux release binaries around 12 MiB.
 - Small production instance measured at roughly 20-30 MiB of RAM.
 
@@ -23,7 +23,7 @@ Application source, excluding demos and tests (`npm run loc`; comments included)
 
 | Backend | Frontend |
 | ---: | ---: |
-| 13,075 LoC | 9,012 LoC |
+| 13,771 LoC | 9,020 LoC |
 
 ## Features
 
@@ -33,7 +33,7 @@ Application source, excluding demos and tests (`npm run loc`; comments included)
 - Chat-style conversations with public replies, internal notes, unread state, assignees, priorities, filtering, and sorting.
 - File attachments via upload, drag/drop, or paste, with image previews.
 - Admin-managed accounts with one-time setup/reset links or manually assigned passwords.
-- optional SMTP-backed no-reply notifications with a durable SQLite outbox.
+- Optional SMTP notifications with a durable outbox and [requester replies through IMAP](./docs/configuration.md#replies-through-imap-optional).
 - [API tokens and webhooks](./docs/integrations.md), an admin audit log, and a maintenance view.
 
 ## Try Quickly

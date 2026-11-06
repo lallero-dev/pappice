@@ -50,6 +50,12 @@ var orderedMigrations = []migration{
 	{Version: 6, Name: "schedule_domain_event_retries", Up: migrateDomainEventRetries},
 	{Version: 7, Name: "simplify_ticket_statuses", Up: migrateTicketStatuses},
 	{Version: 8, Name: "deduplicate_integration_requests", Up: migrateWebhookDeliveryIDs},
+	{Version: 9, Name: "email_replies", Up: migrateEmailReplies},
+}
+
+func migrateEmailReplies(tx *sql.Tx) error {
+	// The schema sync creates the new tables; no existing data needs rewriting.
+	return nil
 }
 
 func CurrentSchemaVersion() int {

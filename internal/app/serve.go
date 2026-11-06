@@ -24,6 +24,9 @@ func Serve(cfg Config, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.ValidateEmailReplies(); err != nil {
+		return fmt.Errorf("configure email replies: %w", err)
+	}
 	tracker, err := store.Open(cfg.DBPath)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -55,6 +58,9 @@ func Serve(cfg Config, stderr io.Writer) error {
 			MaxAttempts: 5,
 			Logger:      logger,
 		}
+		if cfg.IMAP.Enabled() {
+			worker.ReplyAddress = cfg.IMAP.ReplyAddress
+		}
 		workers.Go(func() { worker.Run(ctx) })
 		logger.Printf("email notifications enabled via SMTP host %s", smtpConfig.Host)
 	}
@@ -62,6 +68,11 @@ func Serve(cfg Config, stderr io.Writer) error {
 	serverOptions := cfg.serverOptions(emailEnabled)
 	serverOptions.Logger = logger
 	app := server.NewServer(tracker, serverOptions)
+	if cfg.IMAP.Enabled() {
+		worker := notify.IMAPWorker{Config: cfg.IMAP, Store: tracker, Accept: app.AcceptEmailReply, Logger: logger}
+		workers.Go(func() { worker.Run(ctx) })
+		logger.Printf("email replies enabled via IMAP at %s", cfg.IMAP.Address)
+	}
 	workers.Go(func() { app.RunEventDispatcher(ctx, 5*time.Second) })
 	workers.Go(func() { app.RunWebhookDispatcher(ctx, 5*time.Second) })
 

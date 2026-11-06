@@ -32,6 +32,7 @@ type Config struct {
 	SMTPPassword          string
 	SMTPFrom              string
 	SMTPTLSMode           string
+	IMAP                  notify.IMAPConfig
 	NotificationDelay     time.Duration
 	SessionTTL            time.Duration
 	UploadDir             string
@@ -50,6 +51,7 @@ func DefaultConfig() Config {
 		Addr:                  "127.0.0.1:8388",
 		DBPath:                "pappice.db",
 		SMTPTLSMode:           "starttls",
+		IMAP:                  notify.IMAPConfig{Mailbox: "INBOX"},
 		DomainEventRetention:  30 * 24 * time.Hour,
 		NotificationDelay:     30 * time.Second,
 		SessionTTL:            14 * 24 * time.Hour,
@@ -79,6 +81,16 @@ func (cfg Config) EmailEnabled() bool {
 	return cfg.EmailNotifications || cfg.SMTPConfig().Enabled()
 }
 
+func (cfg Config) ValidateEmailReplies() error {
+	if err := cfg.IMAP.Validate(); err != nil {
+		return err
+	}
+	if cfg.IMAP.Enabled() && !cfg.EmailEnabled() {
+		return errors.New("email replies require SMTP notifications")
+	}
+	return nil
+}
+
 func (cfg Config) TLSEnabled() (bool, error) {
 	switch {
 	case cfg.TLSCert == "" && cfg.TLSKey == "":
@@ -103,6 +115,7 @@ func (cfg Config) serverOptions(emailEnabled bool) server.Options {
 		},
 		DomainEventRetention: cfg.DomainEventRetention,
 		EmailNotifications:   emailEnabled,
+		EmailReplies:         cfg.IMAP.Enabled(),
 		NotificationDelay:    cfg.NotificationDelay,
 		PublicURL:            cfg.PublicURL,
 		SessionTTL:           cfg.SessionTTL,

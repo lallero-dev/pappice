@@ -43,6 +43,11 @@ func (report *doctorReport) run(cfg app.Config) {
 	report.checkProxyTrust(cfg)
 	report.checkPublicURL(cfg)
 	report.checkEmail(cfg)
+	if err := cfg.ValidateEmailReplies(); err != nil {
+		report.err("email replies", err.Error())
+	} else if cfg.IMAP.Enabled() {
+		report.ok("email replies", "IMAP configuration is valid; connectivity and mail routing are not checked")
+	}
 	report.checkUploads(cfg)
 	report.checkRateLimits(cfg)
 	report.checkWebhookPolicy(cfg)

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add optional IMAP reception of requester replies, including attachments, with
+  sender checks and durable deduplication.
+
+Database migration required: run `pappice db migrate` before starting the new binary.
+
 ## v0.17.0 - 2026-10-22
 
 - Add a requester email option to ticket closure confirmations, enabled by default.

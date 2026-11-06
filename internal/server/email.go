@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"pappice/internal/notify"
 	"pappice/internal/store"
 )
 
@@ -134,14 +135,15 @@ func (s *Server) requesterEmailContent(event string, ticket store.Ticket, actorN
 	}
 
 	layout := emailLayout{
-		Kicker:      "Pappice customer support",
-		Title:       subject,
-		Intro:       intro,
-		Fields:      fields,
-		Blocks:      blocks,
-		ActionLabel: "Open ticket",
-		ActionURL:   s.ticketURL(ticket.Key),
-		Footer:      "Replies to this email are not read. Please open Pappice to continue the conversation.",
+		ReplyByEmail: s.options.EmailReplies,
+		Kicker:       "Pappice customer support",
+		Title:        subject,
+		Intro:        intro,
+		Fields:       fields,
+		Blocks:       blocks,
+		ActionLabel:  "Open ticket",
+		ActionURL:    s.ticketURL(ticket.Key),
+		Footer:       "Open Pappice to continue the conversation.",
 	}
 	return subject, renderEmailText(layout), renderEmailHTML(layout)
 }
@@ -181,14 +183,15 @@ func (s *Server) ticketEmailContent(event string, ticket store.Ticket, actor sto
 }
 
 type emailLayout struct {
-	Kicker      string
-	Title       string
-	Intro       string
-	Fields      []emailField
-	Blocks      []emailBlock
-	ActionLabel string
-	ActionURL   string
-	Footer      string
+	ReplyByEmail bool
+	Kicker       string
+	Title        string
+	Intro        string
+	Fields       []emailField
+	Blocks       []emailBlock
+	ActionLabel  string
+	ActionURL    string
+	Footer       string
 }
 
 type emailField struct {
@@ -204,6 +207,9 @@ type emailBlock struct {
 
 func renderEmailText(layout emailLayout) string {
 	var text strings.Builder
+	if layout.ReplyByEmail {
+		fmt.Fprintf(&text, "%s\n\n", notify.ReplyMarker)
+	}
 	if title := strings.TrimSpace(layout.Title); title != "" {
 		fmt.Fprintf(&text, "%s\n\n", title)
 	}
@@ -250,6 +256,9 @@ func renderEmailHTML(layout emailLayout) string {
 	var htmlBody strings.Builder
 	htmlBody.WriteString(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>`)
 	htmlBody.WriteString(`<body style="margin:0;background:#f4f6f8;color:#1f2933;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;">`)
+	if layout.ReplyByEmail {
+		fmt.Fprintf(&htmlBody, `<div style="text-align:center;color:#64748b;font-size:13px;">%s</div>`, notify.ReplyMarker)
+	}
 	htmlBody.WriteString(`<div style="display:none;max-height:0;overflow:hidden;color:#f4f6f8;">`)
 	htmlBody.WriteString(html.EscapeString(strings.TrimSpace(layout.Intro)))
 	htmlBody.WriteString(`</div>`)
