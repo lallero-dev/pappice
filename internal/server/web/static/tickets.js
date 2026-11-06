@@ -1267,8 +1267,9 @@ function bindCommentComposer(form, ticket) {
   const body = composer.querySelector("[name='body']");
   const visibility = composer.querySelector("[name='visibility']");
   bindCommentResize(composer, body);
+  let sending = false;
   const update = () => {
-    sendButton.disabled = String(body.value || "").trim() === "" && selectedFiles(composer).length === 0;
+    sendButton.disabled = sending || (String(body.value || "").trim() === "" && selectedFiles(composer).length === 0);
   };
   body.addEventListener("input", () => {
     saveCommentDraft(ticket, composer);
@@ -1282,20 +1283,19 @@ function bindCommentComposer(form, ticket) {
   form.addEventListener("submit", async (event) => {
     if (event.submitter !== sendButton) return;
     event.preventDefault();
-    const confirmed = await confirmTicketComment(ticket, composer);
-    if (!confirmed) {
-      update();
-      return;
-    }
-    sendButton.disabled = true;
-    sendButton.setAttribute("aria-busy", "true");
+    if (sending) return;
+    sending = true;
+    update();
     try {
+      if (!await confirmTicketComment(ticket, composer)) return;
+      sendButton.setAttribute("aria-busy", "true");
       await sendTicketComment(ticket, composer);
     } catch (error) {
       showError(error);
-      update();
     } finally {
+      sending = false;
       sendButton.removeAttribute("aria-busy");
+      update();
     }
   });
   update();
@@ -1364,20 +1364,25 @@ async function sendTicketComment(ticket, composer) {
   const comment = commentInput(composer);
   const files = selectedFiles(composer);
   if (!comment.body && files.length === 0) return;
+  saveCommentDraft(ticket, composer);
+  const draft = commentDraft(ticket);
+  draft.idempotencyKey ||= crypto.getRandomValues(new Uint32Array(4)).join("-");
+  let body = JSON.stringify(comment);
   if (files.length > 0) {
-    const body = new FormData();
+    body = new FormData();
     body.append("body", comment.body);
     body.append("visibility", comment.visibility);
     for (const file of files) body.append("attachments", file);
-    await request(`/api/tickets/${ticket.id}/comments`, { method: "POST", body });
-  } else {
-    await request(`/api/tickets/${ticket.id}/comments`, { method: "POST", body: JSON.stringify(comment) });
   }
-  const updated = await request(`/api/tickets/${ticket.id}`);
-  clearCommentDraft(ticket);
-  setSelectedTicket(updated, { updateRoute: false });
+  const updated = await request(`/api/tickets/${ticket.id}/comments`, {
+    method: "POST",
+    headers: { "Idempotency-Key": draft.idempotencyKey },
+    body
+  });
+  if (commentDraft(ticket) === draft) clearCommentDraft(ticket);
   replaceTicket(updated);
-  await loadTickets();
+  if (state.selectedId === ticket.id) renderTicketsView();
+  await loadTickets({ renderDetail: false }).catch(showError);
 }
 
 function commentDraftKey(ticket) {
@@ -1399,6 +1404,9 @@ function saveCommentDraft(ticket, composer) {
     commentDrafts.delete(key);
     return;
   }
+  const previous = commentDrafts.get(key);
+  if (previous?.body === body && previous.visibility === visibility &&
+      previous.files.length === files.length && previous.files.every((file, i) => file === files[i])) return;
   commentDrafts.set(key, { body, visibility, files });
 }
 
