@@ -21,10 +21,14 @@ func requireRegularFile(path string) error {
 	return nil
 }
 
+// A missing upload directory is optional; a dangling link is an error.
 func uploadDirExists(path string) (bool, error) {
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		path = strings.TrimRight(filepath.ToSlash(path), "/")
+		if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
+			return false, nil
+		}
 	}
 	if err != nil {
 		return false, err

@@ -86,7 +86,7 @@ func Create(cfg Config) (Result, error) {
 	}
 	if hasUploads {
 		tempUploadsPath := filepath.Join(tempPath, "uploads.tar")
-		if err := createUploadsArchive(cfg.UploadDir, tempUploadsPath); err != nil {
+		if err := createUploadsArchive(os.DirFS(cfg.UploadDir), tempUploadsPath); err != nil {
 			return Result{}, err
 		}
 		result.HasUploads = true

@@ -81,6 +81,35 @@ func TestCreateAndRestoreBackup(t *testing.T) {
 	}
 }
 
+func TestBackupThroughUploadDirSymlink(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{DBPath: filepath.Join(dir, "pappice.db"), UploadDir: filepath.Join(dir, "uploads"), BackupDir: filepath.Join(dir, "backups")}
+	createTestDB(t, cfg.DBPath, "ticket")
+	storage := filepath.Join(dir, "storage")
+	writeFile(t, filepath.Join(storage, "reply.txt"), "reply")
+	if err := os.Symlink(storage, cfg.UploadDir); err != nil {
+		t.Skip(err)
+	}
+	snapshot, err := Create(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := filepath.Join(dir, "restored")
+	if _, err := Restore(RestoreConfig{DBPath: cfg.DBPath, UploadDir: restored, BackupDir: cfg.BackupDir, BackupPath: snapshot.Path}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(restored, "reply.txt")); got != "reply" {
+		t.Fatalf("restored attachment = %q", got)
+	}
+	if err := os.Rename(storage, storage+".old"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.UploadDir += string(filepath.Separator)
+	if _, err := Create(cfg); err == nil {
+		t.Fatal("backup accepted a dangling upload directory symlink")
+	}
+}
+
 func TestRestoreBackupWithoutUploadsReplacesStaleUploads(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pappice.db")

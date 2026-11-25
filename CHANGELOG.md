@@ -5,6 +5,8 @@
 - Add optional IMAP reception of requester replies, including attachments, with
   sender checks and durable deduplication.
 - Avoid resending accepted SMTP notifications if the connection fails during logout.
+- Report upload archive finalization errors before publishing a backup.
+- Include attachments when the configured upload directory is a symbolic link.
 
 Database migration required: run `pappice db migrate` before starting the new binary.
 

@@ -12,20 +12,18 @@ import (
 	"strings"
 )
 
-func createUploadsArchive(uploadDir, archivePath string) error {
+func createUploadsArchive(uploads fs.FS, archivePath string) error {
 	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
 	writer := tar.NewWriter(file)
-	defer writer.Close()
 
-	return filepath.WalkDir(uploadDir, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = fs.WalkDir(uploads, ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if path == uploadDir {
+		if path == "." {
 			return nil
 		}
 		info, err := entry.Info()
@@ -38,16 +36,12 @@ func createUploadsArchive(uploadDir, archivePath string) error {
 		if !info.IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("refusing to archive non-regular upload entry: %s", path)
 		}
-		relative, err := filepath.Rel(uploadDir, path)
-		if err != nil {
-			return err
-		}
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
 		}
-		header.Name = filepath.ToSlash(relative)
-		if info.IsDir() && !strings.HasSuffix(header.Name, "/") {
+		header.Name = path
+		if info.IsDir() {
 			header.Name += "/"
 		}
 		if err := writer.WriteHeader(header); err != nil {
@@ -56,17 +50,14 @@ func createUploadsArchive(uploadDir, archivePath string) error {
 		if info.IsDir() {
 			return nil
 		}
-		source, err := os.Open(path)
+		source, err := uploads.Open(path)
 		if err != nil {
 			return err
 		}
 		_, copyErr := io.Copy(writer, source)
-		closeErr := source.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
+		return errors.Join(copyErr, source.Close())
 	})
+	return errors.Join(err, writer.Close(), file.Close())
 }
 
 func extractUploadsArchive(archivePath, destinationDir string) error {
