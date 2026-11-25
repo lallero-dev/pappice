@@ -3,6 +3,7 @@
 import { waitForDocumentReady } from "./tools/browser-page.mjs";
 import { verifyInternalContributor } from "./e2e/internal-contributor.mjs";
 import { verifyReplyRetries } from "./e2e/reply-retries.mjs";
+import { verifyTicketUpdates } from "./e2e/ticket-updates.mjs";
 import { startLocalPappice } from "./tools/local-pappice.mjs";
 import {
   completeCustomerSetup,
@@ -76,6 +77,7 @@ async function main() {
   await verifyEmailOutbox(page);
   await verifyAuditLog(page);
   await verifyReplyRetries(page, selectedProductID);
+  await verifyTicketUpdates(page, selectedProductID);
   await verifyInternalContributor(page, selectedProductID);
 
   await cleanup();

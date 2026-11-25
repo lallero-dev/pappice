@@ -100,13 +100,13 @@ function bindTicketEvents() {
 }
 
 export async function applyTicketRouteSelection(key) {
+  const requestID = ++ticketDetailRequestID;
   if (!key) {
     setSelectedTicket(null, { updateRoute: false });
     renderTicketsView();
     return true;
   }
   const summary = state.tickets.find((item) => item.key === key);
-  const requestID = ++ticketDetailRequestID;
   try {
     const ticket = await request(summary
       ? `/api/tickets/${summary.id}`
@@ -254,11 +254,12 @@ async function refreshTicketsInBackground() {
 }
 
 async function refreshSelectedTicket(ticketId, previousConversationRevision) {
+  const previous = selectedTicket();
   let updated;
   try {
     updated = await request(`/api/tickets/${ticketId}`);
   } catch (error) {
-    if (error?.status === 404 && state.selectedId === ticketId) {
+    if (error?.status === 404 && selectedTicket() === previous && state.selectedId === ticketId) {
       setSelectedTicket(null, { updateRoute: false });
       await loadTickets();
       app.syncRoute({ replace: true });
@@ -266,7 +267,7 @@ async function refreshSelectedTicket(ticketId, previousConversationRevision) {
     }
     throw error;
   }
-  if (state.selectedId !== ticketId || state.view !== "tickets") return;
+  if (selectedTicket() !== previous || state.selectedId !== ticketId || state.view !== "tickets") return;
   applySelectedTicketUpdate(updated, previousConversationRevision);
 }
 
@@ -704,8 +705,7 @@ function renderTicketDetail() {
 async function markTicketRead(ticket) {
   if (!ticket?.id || !ticket.has_unread) return;
   const updated = await request(`/api/tickets/${ticket.id}/read`, { method: "POST" });
-  if (state.selectedId === ticket.id) setSelectedTicket(updated, { updateRoute: false });
-  replaceTicket(updated);
+  if (selectedTicket() === ticket) applySelectedTicketUpdate(updated, ticketConversationRevision(ticket));
   await loadTickets({ renderDetail: false });
 }
 
@@ -1205,13 +1205,9 @@ function bindTicketAutosave(form, ticket) {
     });
     saveQueue = saveQueue.catch(() => {});
   };
-  const save = () => enqueueSave((current) => {
-    const data = Object.fromEntries(new FormData(form).entries());
-    return ticketUpdatePatch(current, data);
-  });
-  const debouncedSave = debounce(save, TICKET_AUTOSAVE_DELAY_MS);
   for (const control of controls) {
-    if (control.tagName === "INPUT") control.addEventListener("input", debouncedSave);
+    const save = () => enqueueSave((current) => ticketUpdatePatch(current, { [control.name]: control.value }));
+    if (control.tagName === "INPUT") control.addEventListener("input", debounce(save, TICKET_AUTOSAVE_DELAY_MS));
     control.addEventListener("change", save);
   }
   const statusControl = form.querySelector("[name='status']");

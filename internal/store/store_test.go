@@ -82,9 +82,11 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if byLowerKey.ID != ticket.ID {
 		t.Fatalf("ticket by lowercase key ID = %d, want %d", byLowerKey.ID, ticket.ID)
 	}
-	readAt := time.Now().UTC()
-	if err := tracker.MarkTicketRead(ticket.ID, admin.ID, readAt); err != nil {
-		t.Fatalf("mark ticket read: %v", err)
+	readAt := time.Now().UTC().Truncate(time.Second).Add(time.Nanosecond)
+	for _, when := range []time.Time{readAt.Add(-time.Nanosecond), readAt, readAt.Add(-time.Nanosecond)} {
+		if err := tracker.MarkTicketRead(ticket.ID, admin.ID, when); err != nil {
+			t.Fatalf("mark ticket read: %v", err)
+		}
 	}
 	summary, err := tracker.TicketSummaryForUser(admin, ticket.ID)
 	if err != nil {
@@ -93,8 +95,8 @@ func TestStoreCreateUpdateCommentAndReload(t *testing.T) {
 	if summary.LastReadAt == nil {
 		t.Fatal("ticket summary is missing read time")
 	}
-	if got := *summary.LastReadAt; got.IsZero() || got.Sub(readAt).Abs() > time.Second {
-		t.Fatalf("read time = %v, want near %v", got, readAt)
+	if got := *summary.LastReadAt; !got.Equal(readAt) {
+		t.Fatalf("read time = %v, want %v despite an older request arriving last", got, readAt)
 	}
 
 	status := "closed"

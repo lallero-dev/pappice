@@ -23,7 +23,7 @@ Application source, excluding demos and tests (`npm run loc`; comments included)
 
 | Backend | Frontend |
 | ---: | ---: |
-| 13,771 LoC | 9,020 LoC |
+| 13,777 LoC | 9,016 LoC |
 
 ## Features
 
