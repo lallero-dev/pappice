@@ -55,7 +55,7 @@ trap - EXIT
 go test -tags debug ./internal/app
 go build -tags debug ./cmd/pappice ./demo/native
 
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+if ! node --version >/dev/null 2>&1 || ! npm --version >/dev/null 2>&1; then
   skip_or_fail "Node.js or npm is unavailable"
 elif chromium="$(node test/tools/chromium.mjs)"; then
   PAPPICE_E2E_CHROMIUM="$chromium" npm run test:e2e
