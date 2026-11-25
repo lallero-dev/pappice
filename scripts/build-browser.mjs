@@ -10,10 +10,11 @@ const browserRoot = path.join(root, "demo/browser");
 
 export async function buildBrowser(destination = path.join(root, "dist/browser")) {
   const output = path.resolve(destination);
+  const wasmEnv = { ...process.env, GOOS: "js", GOARCH: "wasm", CGO_ENABLED: "0" };
   await mkdir(output, { recursive: true });
   execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", path.join(output, "pappice.wasm"), "./cmd"], {
     cwd: browserRoot,
-    env: { ...process.env, GOOS: "js", GOARCH: "wasm", CGO_ENABLED: "0" },
+    env: wasmEnv,
     stdio: "inherit"
   });
   const goroot = execFileSync("go", ["env", "GOROOT"], { cwd: browserRoot, encoding: "utf8" }).trim();
@@ -38,7 +39,11 @@ export async function buildBrowser(destination = path.join(root, "dist/browser")
   await writeFile(path.join(output, "index.html"), html);
   await cp(path.join(root, "LICENSE"), path.join(output, "LICENSE"));
   let licenses = `Go\n${await readFile(path.join(root, "demo/browser/GO-LICENSE.txt"), "utf8")}\n`;
-  for (const module of ["github.com/ncruces/go-sqlite3", "github.com/ncruces/go-sqlite3-wasm/v6", "github.com/ncruces/julianday", "golang.org/x/sys"]) {
+  const modules = execFileSync("go", ["list", "-deps", "-f", "{{with .Module}}{{if .Version}}{{.Path}}{{end}}{{end}}", "./cmd"], {
+    cwd: browserRoot, env: wasmEnv, encoding: "utf8"
+  });
+  for (const module of [...new Set(modules.trim().split(/\s+/))].sort()) {
+    if (module === "pappice") continue; // Its license is copied above.
     const directory = execFileSync("go", ["list", "-m", "-f", "{{.Dir}}", module], { cwd: browserRoot, encoding: "utf8" }).trim();
     licenses += `\n${module}\n${await readFile(path.join(directory, "LICENSE"), "utf8")}\n`;
   }
