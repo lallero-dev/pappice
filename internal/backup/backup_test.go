@@ -2,6 +2,8 @@ package backup
 
 import (
 	"database/sql"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,16 @@ import (
 
 	"pappice/internal/dblock"
 )
+
+func TestUploadsArchiveCloseError(t *testing.T) {
+	reader, writer := io.Pipe()
+	_ = reader.Close()
+	defer writer.Close()
+	// An empty archive writes only on Close, when tar adds its end markers.
+	if err := writeUploadsArchive(writer, os.DirFS(t.TempDir())); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("archive close error = %v, want %v", err, io.ErrClosedPipe)
+	}
+}
 
 func TestCreateAndRestoreBackup(t *testing.T) {
 	dir := t.TempDir()

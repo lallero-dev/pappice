@@ -17,9 +17,13 @@ func createUploadsArchive(uploads fs.FS, archivePath string) error {
 	if err != nil {
 		return err
 	}
-	writer := tar.NewWriter(file)
+	err = writeUploadsArchive(file, uploads)
+	return errors.Join(err, file.Close())
+}
 
-	err = fs.WalkDir(uploads, ".", func(path string, entry fs.DirEntry, walkErr error) error {
+func writeUploadsArchive(destination io.Writer, uploads fs.FS) error {
+	writer := tar.NewWriter(destination)
+	err := fs.WalkDir(uploads, ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -57,7 +61,7 @@ func createUploadsArchive(uploads fs.FS, archivePath string) error {
 		_, copyErr := io.Copy(writer, source)
 		return errors.Join(copyErr, source.Close())
 	})
-	return errors.Join(err, writer.Close(), file.Close())
+	return errors.Join(err, writer.Close())
 }
 
 func extractUploadsArchive(archivePath, destinationDir string) error {
