@@ -141,7 +141,9 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) (err error) {
 	if err := errors.Join(writeErr, writer.Close()); err != nil {
 		return err
 	}
-	return client.Quit()
+	// The server accepted DATA. Retrying on a QUIT error would resend it.
+	_ = client.Quit()
+	return nil
 }
 
 // Send owns conn and bounds all SMTP operations, including the initial greeting

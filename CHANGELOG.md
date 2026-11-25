@@ -4,6 +4,7 @@
 
 - Add optional IMAP reception of requester replies, including attachments, with
   sender checks and durable deduplication.
+- Avoid resending accepted SMTP notifications if the connection fails during logout.
 
 Database migration required: run `pappice db migrate` before starting the new binary.
 

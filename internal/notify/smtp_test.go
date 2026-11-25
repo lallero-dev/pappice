@@ -76,7 +76,11 @@ func TestSMTPMailerStopsBlockedSend(t *testing.T) {
 				}
 				select {
 				case err := <-sendDone:
-					if stopBy == "cancel" {
+					if phase == "quit" {
+						if err != nil {
+							t.Fatalf("server accepted DATA before QUIT: %v", err)
+						}
+					} else if stopBy == "cancel" {
 						if !errors.Is(err, context.Canceled) {
 							t.Fatalf("send error = %v, want cancellation", err)
 						}
