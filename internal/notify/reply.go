@@ -109,15 +109,16 @@ func readReply(raw []byte, address, authservID string) (EmailReply, error) {
 	if h.FieldsByKey("Message-Id").Len() > 1 {
 		return reply, rejected("multiple message IDs")
 	}
-	reply.Key = security.HashToken(string(raw))
 	if h.Get("Message-Id") != "" {
 		id, err := h.MessageID()
 		if err != nil {
 			return reply, rejected("invalid message ID")
 		}
 		reply.Key = security.HashToken("message-id:" + id)
+	} else {
+		reply.Key = security.HashToken(string(raw))
 	}
-	var plain, rich string
+	var plain, rich strings.Builder
 	remaining := int64(MaxReplyBytes)
 	for count := 0; ; count++ {
 		part, err := r.NextPart()
@@ -163,14 +164,16 @@ func readReply(raw []byte, address, authservID string) (EmailReply, error) {
 		}
 		switch mediaType {
 		case "text/plain":
-			plain += string(data) + "\n"
+			plain.Write(data)
+			plain.WriteByte('\n')
 		case "text/html":
-			rich += htmlReplyText(string(data)) + "\n"
+			rich.WriteString(htmlReplyText(string(data)))
+			rich.WriteByte('\n')
 		default:
 			return reply, rejected("unsupported text content type")
 		}
 	}
-	reply.Body = trimReply(firstNonEmpty(plain, rich))
+	reply.Body = trimReply(firstNonEmpty(plain.String(), rich.String()))
 	if len(reply.Body) > 1<<20 || (reply.Body == "" && len(reply.Attachments) == 0) {
 		return reply, rejected("empty reply or text exceeds 1 MiB")
 	}
@@ -199,11 +202,12 @@ func authenticatedSender(h mail.Header, trustedID, domain string) bool {
 
 // Strip only our explicit separator; guessing at signatures can lose real text.
 func trimReply(body string) string {
-	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
-	for i, line := range lines {
-		if strings.TrimLeft(line, " >\t") == ReplyMarker {
-			return strings.TrimSpace(strings.Join(lines[:i], "\n"))
+	start := 0
+	for line := range strings.Lines(body) {
+		if strings.TrimLeft(strings.TrimRight(line, " \t\r\n"), " >\t") == ReplyMarker {
+			return strings.TrimSpace(strings.ReplaceAll(body[:start], "\r\n", "\n"))
 		}
+		start += len(line)
 	}
 	return strings.TrimSpace(body)
 }

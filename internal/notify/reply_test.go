@@ -23,6 +23,7 @@ func TestReadReply(t *testing.T) {
 		attachments     int
 	}{
 		{"plain", replyMail("Ciao!\r\n\r\n> " + ReplyMarker + "\r\n> Old notification"), "Ciao!", 0},
+		{"padded separator", replyMail("One\r\nTwo\r\n>> " + ReplyMarker + " \t\r\nOld notification"), "One\nTwo", 0},
 		{"preserve quotations and signatures", replyMail("Use > to quote\n> an example\n-- \nAlice"), "Use > to quote\n> an example\n-- \nAlice", 0},
 		{"quoted printable", strings.Replace(replyMail("Caff=E8"), "charset=utf-8", "charset=iso-8859-1\r\nContent-Transfer-Encoding: quoted-printable", 1), "Caffè", 0},
 		{"html only", strings.Replace(replyMail("<html><head><style>bad</style></head><body><div>Hello &amp; thanks</div><script>bad</script><blockquote><div>"+ReplyMarker+"</div>Old notification</blockquote></body></html>"), "text/plain", "text/html", 1), "Hello & thanks", 0},
